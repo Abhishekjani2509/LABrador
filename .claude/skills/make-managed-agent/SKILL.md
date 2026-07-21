@@ -1,15 +1,15 @@
 ---
-name: make-managed
-description: Compile the current prototyping session into a deployed Claude Managed Agent. Run as /make-managed <name> from the session where the prototype in managed/<name>/ actually worked — the transcript is the primary compiler input.
+name: make-managed-agent
+description: Compile the current prototyping session into a deployed Claude Managed Agent. Run as /make-managed-agent <name> from the session where the prototype in managed/<name>/ actually worked — the transcript is the primary compiler input.
 ---
 
-# /make-managed <name> — the compiler
+# /make-managed-agent <name> — the compiler
 
 You are about to turn a working prototype into a deployed agent. The founder
 prototyped in `managed/<name>/` in *this* session; the transcript above — what
 was tried, what broke, what fixed it, what finally worked — is your primary
 source. Files are secondary evidence. You are the compiler: the output is a
-complete artifact dir at `agent/tools/<name>/` plus a live Managed Agent.
+complete artifact dir at `agent/compiled/<name>/` plus a live Managed Agent.
 
 Work through the four phases in order. **Do not emit any artifact file while
 open questions remain** — mining and interviewing complete first, always.
@@ -25,7 +25,7 @@ Explore before you ask anything. From the repo root:
 - `managed/<name>/.claude/skills/*/SKILL.md` — authored skills; these upload
   to the Skills API **unchanged**. Copy them into the artifact as-is.
 - `managed/<name>/CLAUDE.md` — if present, treat as instructions material.
-- `agent/tools/<name>/` — if it already exists, this is a **recompile**: read
+- `agent/compiled/<name>/` — if it already exists, this is a **recompile**: read
   `manifest.json` `compiled_hashes` now and follow the merge rules in Phase 4.
 
 ## Phase 2 — Mine the transcript
@@ -90,17 +90,17 @@ wrapper sit exactly where eve expects them):
 
 | File | Content |
 | --- | --- |
-| `agent/tools/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. Hard structural constraints (fixed sections, orderings) go in as a **literal fill-in template** of the output, not prose prohibitions — models follow skeletons more reliably than "don't" rules. |
-| `agent/tools/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
-| `agent/tools/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
-| `agent/tools/<name>/manifest.json` | Schema below. |
-| `agent/lib/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in instructions.md — don't leave the gap for the smoke test to trip on. |
+| `agent/compiled/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. Hard structural constraints (fixed sections, orderings) go in as a **literal fill-in template** of the output, not prose prohibitions — models follow skeletons more reliably than "don't" rules. |
+| `agent/compiled/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
+| `agent/compiled/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
+| `agent/compiled/<name>/manifest.json` | Schema below. |
+| `agent/compiled/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in instructions.md — don't leave the gap for the smoke test to trip on. |
 | `agent/tools/<name>.ts` | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted. |
 
 Then append one dispatch entry to `agent/instructions.md` under
 `## Specialists`: tool name, one line on when to dispatch to it.
 
-**Recompile (Claude-merge).** If `agent/tools/<name>/` existed before this
+**Recompile (Claude-merge).** If `agent/compiled/<name>/` existed before this
 run: for every file, compare its current hash against `compiled_hashes` in
 the old manifest. A mismatch means the file changed since the last compile.
 **Never clobber those changes.** Three-way merge: keep them, integrate your
@@ -128,8 +128,8 @@ Health-verdict criterion verbatim, moved #9 → #4").
 
 **Hashes.** After writing, record in `manifest.json.compiled_hashes` the
 sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
-the repo root (e.g. `agent/tools/<name>/instructions.md`,
-`agent/lib/<name>/tools.ts`). This is the merge base for the next recompile.
+the repo root (e.g. `agent/compiled/<name>/instructions.md`,
+`agent/compiled/<name>/tools.ts`). This is the merge base for the next recompile.
 
 **Deploy + verify.** Run `npm run deploy-agent <name>` and show the founder
 the output (skill IDs, agent ID + version). Then prove it works with the
@@ -205,7 +205,9 @@ reader that the bug class was hit and solved.
 ```ts
 import { defineTool } from "eve/tools";
 import { defineState } from "eve/context";
-import { loadCompiledAgent, runTask } from "../../lib/managed.ts";
+import { loadCompiledAgent, runTask } from "@/lib/claude-managed-agent.ts";
+// Only when the agent has custom tools — static import so eve's bundler sees it:
+// import { tools } from "@/agent/compiled/<name>/tools.ts";
 
 const sessionIdState = defineState<string | undefined>(
   "<name>-session",
@@ -224,8 +226,11 @@ export default defineTool({
     required: ["task"],
   },
   async execute(input) {
-    const { manifest, rubric, tools } = await loadCompiledAgent("<name>");
+    // skipToolImport: tools come from the static import above (or none);
+    // dynamic import() inside eve's bundled runtime is not reliable.
+    const { manifest, rubric } = await loadCompiledAgent("<name>", { skipToolImport: true });
     const previous = manifest.session_policy === "reuse" ? sessionIdState.get() : undefined;
+    // `tools` only for tool-bearing agents (the static import above); omit otherwise.
     const result = await runTask({ manifest, tools, rubric, task: String(input.task), sessionId: previous });
     if (manifest.session_policy === "reuse") sessionIdState.update(() => result.sessionId);
     return result.text;
@@ -233,10 +238,10 @@ export default defineTool({
 });
 ```
 
-### agent/lib/<name>/tools.ts template
+### agent/compiled/<name>/tools.ts template
 
 ```ts
-import type { CustomToolSpec } from "../../../lib/managed.ts";
+import type { CustomToolSpec } from "@/lib/claude-managed-agent.ts";
 
 export const tools: CustomToolSpec[] = [
   {

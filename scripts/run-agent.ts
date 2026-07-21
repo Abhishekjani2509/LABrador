@@ -9,7 +9,7 @@
  * as an outcome description and run it against the compiled rubric.md.
  */
 import { createInterface } from "node:readline/promises";
-import { loadCompiledAgent, runTask, type SessionEvent } from "../lib/managed.ts";
+import { loadCompiledAgent, runTask, type SessionEvent } from "@/lib/claude-managed-agent.ts";
 
 const args = process.argv.slice(2);
 const name = args[0];

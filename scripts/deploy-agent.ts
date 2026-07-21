@@ -22,7 +22,7 @@ import {
   makeClient,
   repoRoot,
   type AgentManifest,
-} from "../lib/managed.ts";
+} from "@/lib/claude-managed-agent.ts";
 
 const name = process.argv[2];
 if (!name) {
@@ -132,10 +132,10 @@ manifest.deployment = deployment;
 const manifestPath = join(dir, "manifest.json");
 const nextManifest = JSON.stringify(manifest, null, 2) + "\n";
 if (nextManifest === (await readFile(manifestPath, "utf8"))) {
-  console.log(`manifest unchanged: agent/tools/${name}/manifest.json`);
+  console.log(`manifest unchanged: agent/compiled/${name}/manifest.json`);
 } else {
   await writeFile(manifestPath, nextManifest);
-  console.log(`manifest updated: agent/tools/${name}/manifest.json`);
+  console.log(`manifest updated: agent/compiled/${name}/manifest.json`);
 }
 
 // --- helpers --------------------------------------------------------------

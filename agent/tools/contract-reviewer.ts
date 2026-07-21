@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 import { defineState } from "eve/context";
-import { loadCompiledAgent, runTask } from "../../lib/managed.ts";
+import { loadCompiledAgent, runTask } from "@/lib/claude-managed-agent.ts";
 
 const sessionIdState = defineState<string | undefined>(
   "contract-reviewer-session",
@@ -22,7 +22,7 @@ export default defineTool({
     required: ["task"],
   },
   async execute(input) {
-    const { manifest, rubric, tools } = await loadCompiledAgent("contract-reviewer");
+    const { manifest, rubric, tools } = await loadCompiledAgent("contract-reviewer", { skipToolImport: true });
     const previous = manifest.session_policy === "reuse" ? sessionIdState.get() : undefined;
     const result = await runTask({ manifest, tools, rubric, task: String(input.task), sessionId: previous });
     if (manifest.session_policy === "reuse") sessionIdState.update(() => result.sessionId);

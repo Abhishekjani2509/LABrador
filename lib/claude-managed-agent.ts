@@ -338,23 +338,32 @@ export interface CompiledAgent {
 }
 
 /**
- * Load a compiled artifact: data files from `agent/tools/<name>/`, custom-tool
- * handlers from `agent/lib/<name>/tools.ts`. (Handlers live under `agent/lib/`
- * because eve requires every module under `agent/tools/**` to *be* a tool.)
+ * Load a compiled artifact from `agent/compiled/<name>/` (manifest,
+ * instructions, rubric, skills, tools.ts — one dir per agent). The dir lives
+ * outside eve's authored slots on purpose: eve requires modules under
+ * `agent/tools/**` to BE tools and rejects data files under `agent/lib/**`.
+ *
+ * `skipToolImport`: the eve tool wrappers import their `tools.ts` statically
+ * (so the bundler sees it) and pass handlers via `runTask`; they set this to
+ * avoid a runtime dynamic import inside the bundled app. CLIs (tsx) leave it
+ * unset and get handlers loaded dynamically.
  */
-export async function loadCompiledAgent(name: string): Promise<CompiledAgent> {
-  const dir = join(repoRoot, "agent", "tools", name);
+export async function loadCompiledAgent(
+  name: string,
+  opts?: { skipToolImport?: boolean },
+): Promise<CompiledAgent> {
+  const dir = join(repoRoot, "agent", "compiled", name);
   const manifestPath = join(dir, "manifest.json");
   if (!existsSync(manifestPath)) {
-    throw new Error(`no compiled agent at agent/tools/${name}/ (missing manifest.json)`);
+    throw new Error(`no compiled agent at agent/compiled/${name}/ (missing manifest.json)`);
   }
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as AgentManifest;
   const instructions = await readFile(join(dir, "instructions.md"), "utf8");
   const rubricPath = join(dir, "rubric.md");
   const rubric = existsSync(rubricPath) ? await readFile(rubricPath, "utf8") : undefined;
   let tools: CustomToolSpec[] = [];
-  const toolsPath = join(repoRoot, "agent", "lib", name, "tools.ts");
-  if (existsSync(toolsPath)) {
+  const toolsPath = join(dir, "tools.ts");
+  if (!opts?.skipToolImport && existsSync(toolsPath)) {
     const mod = (await import(toolsPath)) as { tools?: CustomToolSpec[] };
     tools = mod.tools ?? [];
   }

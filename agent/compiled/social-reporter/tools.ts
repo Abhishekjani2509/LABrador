@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { repoRoot, type CustomToolSpec } from "../../../lib/managed.ts";
+import { repoRoot, type CustomToolSpec } from "@/lib/claude-managed-agent.ts";
 
 /**
  * These handlers shell out to the founder's real prototype scripts under

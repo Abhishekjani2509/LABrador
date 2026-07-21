@@ -1,6 +1,7 @@
 import { defineTool } from "eve/tools";
 import { defineState } from "eve/context";
-import { loadCompiledAgent, runTask } from "../../lib/managed.ts";
+import { loadCompiledAgent, runTask } from "@/lib/claude-managed-agent.ts";
+import { tools } from "@/agent/compiled/social-reporter/tools.ts";
 
 const sessionIdState = defineState<string | undefined>(
   "social-reporter-session",
@@ -23,7 +24,7 @@ export default defineTool({
     required: ["task"],
   },
   async execute(input) {
-    const { manifest, rubric, tools } = await loadCompiledAgent("social-reporter");
+    const { manifest, rubric } = await loadCompiledAgent("social-reporter", { skipToolImport: true });
     const previous = manifest.session_policy === "reuse" ? sessionIdState.get() : undefined;
     const result = await runTask({ manifest, tools, rubric, task: String(input.task), sessionId: previous });
     if (manifest.session_policy === "reuse") sessionIdState.update(() => result.sessionId);

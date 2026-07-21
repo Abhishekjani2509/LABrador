@@ -4,7 +4,7 @@ The transcript where your agent finally worked *is* the spec. This starter
 turns it into a deployed agent.
 
 You prototype the way you already do: open Claude Code, iterate until the
-thing works. Then run one skill — `/make-managed` — and Claude compiles that
+thing works. Then run one skill — `/make-managed-agent` — and Claude compiles that
 session into a **Claude Managed Agent**: a server-side agent on Anthropic's
 infrastructure with its own sandbox, versioned config, sessions that survive
 restarts, and an event API you can call from anywhere. The skills you wrote
@@ -16,7 +16,7 @@ The story, end to end:
 
 1. **Prototype** — `claude` in this repo, work in `managed/<your-agent>/`.
    Drop in fixtures, write skills, hit snags, fix them.
-2. **Compile** — `/make-managed <your-agent>`. Claude mines the transcript
+2. **Compile** — `/make-managed-agent <your-agent>`. Claude mines the transcript
    (including the debugging lessons), asks you a few questions — each with a
    recommended answer — and emits a complete artifact: instructions, skills,
    a quality rubric, custom-tool handlers.
@@ -36,11 +36,11 @@ The story, end to end:
 git clone <this repo> && cd mvp
 npm install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
-claude                 # prototype in managed/<name>/ … then: /make-managed <name>
+claude                 # prototype in managed/<name>/ … then: /make-managed-agent <name>
 ```
 
 Three worked examples ship in `managed/` — each was prototyped in a real
-Claude Code session and compiled with `/make-managed`:
+Claude Code session and compiled with `/make-managed-agent`:
 
 | Example | What it shows |
 | --- | --- |
@@ -54,7 +54,7 @@ Claude Code session and compiled with `/make-managed`:
 you / eve router / your backend
         │  task
         ▼
-lib/managed.ts ── create session ──► Managed Agents API
+lib/claude-managed-agent.ts ── create session ──► Managed Agents API
         │                                │ agent runs in its cloud sandbox
         │◄─── SSE event stream ──────────┤
         │                                │
@@ -74,16 +74,17 @@ no extra infrastructure.
 ```
 managed/<name>/        # SOURCE — your prototypes (fixtures, .claude/skills, .mcp.json)
 .claude/skills/
-  make-managed/        # the compiler skill
+  make-managed-agent/        # the compiler skill
 agent/                 # the eve router app
   tools/<name>.ts      # COMPILED — eve tool wrapper (file name = tool name)
-  tools/<name>/        # COMPILED — instructions.md, rubric.md, skills/, manifest.json
-  lib/<name>/tools.ts  # COMPILED — custom-tool handlers (run in your process)
-lib/managed.ts         # session runtime: SSE loop + custom-tool answering
+  compiled/<name>/     # COMPILED — instructions.md, rubric.md, skills/,
+                       #   manifest.json, tools.ts (custom-tool handlers,
+                       #   run in your process)
+lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
 scripts/               # deploy-agent.ts, run-agent.ts
 ```
 
-`managed/` is source, `agent/tools/` is build output — but build output you
+`managed/` is source, `agent/tools/*.ts` + `agent/compiled/` are build output — but build output you
 can edit. Recompiling three-way-merges your hand-edits with the new
 derivation; it never clobbers them.
 
