@@ -1,0 +1,25 @@
+{
+  "name": "mvp",
+  "version": "0.1.0",
+  "description": "Prototype agents in Claude Code, ship them on the Claude Developer Platform.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "deploy-agent": "tsx scripts/deploy-agent.ts",
+    "run-agent": "tsx scripts/run-agent.ts",
+    "dev": "eve dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "author": "Cyrus Nouroozi",
+  "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.16",
+    "@anthropic-ai/sdk": "^0.112.4",
+    "eve": "^0.26.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  }
+}
