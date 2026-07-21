@@ -296,7 +296,23 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+/**
+ * The source-tree location works when running from tsx CLIs; when eve bundles
+ * this module, import.meta.url points into the build output, so fall back to
+ * walking up from cwd to the repo root (the dir holding managed/ + package.json).
+ */
+function findRepoRoot(): string {
+  const fromSource = join(dirname(fileURLToPath(import.meta.url)), "..");
+  if (existsSync(join(fromSource, "managed"))) return fromSource;
+  let dir = process.cwd();
+  for (;;) {
+    if (existsSync(join(dir, "managed")) && existsSync(join(dir, "package.json"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return fromSource;
+    dir = parent;
+  }
+}
+export const repoRoot = findRepoRoot();
 
 export interface CompiledAgent {
   dir: string;
