@@ -49,7 +49,9 @@ than the task statement*:
 5. **Quality bar** — what "good output" meant in this session (the founder's
    corrections are the best evidence) → `rubric.md` as concrete, gradeable
    criteria ("the summary lists every payment deadline with its date", not
-   "the output is thorough").
+   "the output is thorough"). Include the founder's *interpretive* bar too —
+   if they wanted a "should I panic?" verdict, an output that only quantifies
+   without concluding fails their real standard; encode that as a criterion.
 
 Draft all five privately. Where the transcript is ambiguous, note the open
 question for Phase 3 instead of guessing.
@@ -76,7 +78,7 @@ Always resolve (asking only where the evidence is genuinely ambiguous):
 | --- | --- |
 | Agent name + one-line description | dir name; description from the task |
 | Model | `claude-sonnet-5` (upgrade only if the session needed deep reasoning). Confirm it as its own one-line question — never bundled into the keep/drop list |
-| Invocation mode | `message`; recommend `outcome` only when the founder wants a *machine* to grade iterations. Careful: a session where the founder personally caught and corrected output slips turn over turn is evidence **for** `message` (they want to eyeball raw output), not for `outcome` — manual grading ≠ wants automated grading |
+| Invocation mode | `message`; recommend `outcome` only when the founder wants a *machine* to grade iterations. The discriminator is **"do they want to stop hand-checking?"**, not "did they hand-check this session?" — corrections the founder wants codified into a rubric so it's enforced automatically every future run point to `outcome` (recurring, gradeable deliverable); corrections made because they want to keep eyeballing raw output each run point to `message` |
 | Session policy | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks |
 | Keep/drop | your mined list of skills + custom tools, shown as a short list for confirmation |
 
@@ -126,6 +128,23 @@ When the agent has custom tools, the smoke test must show the round-trip at
 the event level — the `· custom tool: <name> {…}` trace lines from
 `run-agent`, plus the tool's observable side effect (e.g. the queued row in
 the outbox file) — not a prose claim that tools "were used".
+
+**Outcome mode (design contract — violating either invariant wastes a full
+debugging cycle at runtime):**
+
+- The grader inspects **only sandbox files, never the reply text**. Every
+  `rubric.md` criterion must be verifiable from the deliverable file (plus
+  anything the grader can recompute in the sandbox, e.g. by re-running a
+  bundled skill script). A criterion like "the full report appears in the
+  reply" is unfalsifiable and dooms every run to `max_iterations_reached`.
+- `instructions.md` must pin **one canonical sandbox output path** (e.g.
+  `/mnt/session/outputs/<name>.md`) that the agent writes and the rubric
+  references — and must also tell the agent to paste the full deliverable
+  into its final reply: sandbox-written files are not retrievable through
+  the Files API afterward, so the reply is the only channel back.
+- The outcome-mode smoke test needs event-level proof, same as custom tools:
+  the trace must show `grader: satisfied` AND the final reply carrying the
+  real deliverable (not a short wrap-up) — those are independent facts.
 
 **Runtime fixes.** If this session fixed shared runtime code (`lib/`,
 `scripts/`) along the way, record each fix as a one-line entry in

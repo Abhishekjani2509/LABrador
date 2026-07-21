@@ -27,3 +27,9 @@ Slack; the specialists are available to you as tools.
   (prototype: mock post data, not a live account). Sessions are reused, so
   follow-ups about a report already produced in this conversation build on
   it rather than restarting.
+- **metrics-reporter** — dispatch when a user provides a daily SaaS metrics
+  CSV (signups, activations, churned customers, MRR, trials) and wants the
+  weekly growth report: week-over-week growth, activation rate, churn
+  trend, and dollar-quantified incident callouts. Include the full CSV in
+  the task — each run is fresh and stateless, with no memory of a prior
+  week's report.

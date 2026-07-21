@@ -198,6 +198,14 @@ async function consumeUntilEndTurn(args: {
   const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60 * 1000);
 
   let lastMessage = "";
+  // Outcome mode: the grader inspects sandbox files, not the reply — so
+  // agents commonly emit the real deliverable as one agent.message, then a
+  // short wrap-up ("all criteria met...") as the true last message once the
+  // grader reports satisfied. Taking strictly the last message clobbers the
+  // deliverable with that wrap-up. Track the longest message seen instead;
+  // in practice the deliverable is far longer than any status remark.
+  // Message mode has no such wrap-up phase, so it keeps last-message semantics.
+  let longestMessage = "";
   let outcome: RunTaskResult["outcome"];
   // agent.custom_tool_use events by event ID, so requires_action can find
   // the tool name + input for each blocking event_id.
@@ -219,7 +227,10 @@ async function consumeUntilEndTurn(args: {
           .filter((block) => block.type === "text" && block.text)
           .map((block) => block.text)
           .join("\n");
-        if (text) lastMessage = text;
+        if (text) {
+          lastMessage = text;
+          if (text.length > longestMessage.length) longestMessage = text;
+        }
         break;
       }
       case "agent.custom_tool_use": {
@@ -260,7 +271,7 @@ async function consumeUntilEndTurn(args: {
           break; // session resumes; keep streaming
         }
         // end_turn (or anything else terminal-ish): we're done.
-        return { text: lastMessage, sessionId, outcome };
+        return { text: finalText(opts, lastMessage, longestMessage), sessionId, outcome };
       }
       case "session.status_terminated":
         throw new Error(`session ${sessionId} terminated: ${JSON.stringify(event.error ?? "")}`);
@@ -269,7 +280,11 @@ async function consumeUntilEndTurn(args: {
     }
   }
 
-  return { text: lastMessage, sessionId, outcome };
+  return { text: finalText(opts, lastMessage, longestMessage), sessionId, outcome };
+}
+
+function finalText(opts: RunTaskOptions, lastMessage: string, longestMessage: string): string {
+  return opts.manifest.invocation === "outcome" ? longestMessage || lastMessage : lastMessage;
 }
 
 async function executeCustomTool(
