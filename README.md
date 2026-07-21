@@ -20,21 +20,21 @@ The story, end to end:
    (including the debugging lessons), asks you a few questions — each with a
    recommended answer — and emits a complete artifact: instructions, skills,
    a quality rubric, custom-tool handlers.
-3. **Deploy** — `npm run deploy-agent <your-agent>` uploads the skills and
+3. **Deploy** — `bun run deploy-agent <your-agent>` uploads the skills and
    creates (or versions) the agent on the Managed Agents API.
-4. **Call it** — `npm run run-agent <your-agent>` chats with the deployed
+4. **Call it** — `bun run run-agent <your-agent>` chats with the deployed
    agent over its session event stream. This is the endpoint: any backend
    can drive it with three HTTP calls.
 5. **Put it in front of users** — the included [eve](https://eve.dev) router
    (Vercel's agent framework, running Claude) exposes HTTP and Slack
-   channels and treats your deployed agents as tools. `npm run dev` and
+   channels and treats your deployed agents as tools. `bun run dev` and
    you have a streaming endpoint.
 
 ## Quickstart
 
 ```bash
 git clone <this repo> && cd mvp
-npm install
+bun install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
 claude                 # prototype in managed/<name>/ … then: /make-managed-agent <name>
 ```

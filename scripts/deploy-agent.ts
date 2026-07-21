@@ -1,7 +1,7 @@
 /**
  * Deploy a compiled agent to the Claude Managed Agents API.
  *
- *   npm run deploy-agent <name>
+ *   bun run deploy-agent <name>
  *
  * Thin Anthropic SDK wrapper, idempotent by content hash:
  *   1. zip + upload each skills/<dir>/ bundle that changed  → Skills API
@@ -26,7 +26,7 @@ import {
 
 const name = process.argv[2];
 if (!name) {
-  console.error("usage: npm run deploy-agent <name>");
+  console.error("usage: bun run deploy-agent <name>");
   process.exit(1);
 }
 

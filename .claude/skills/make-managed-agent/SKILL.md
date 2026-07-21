@@ -6,7 +6,7 @@ description: Compile the current prototyping session into a deployed Claude Mana
 # /make-managed-agent <name> — the compiler
 
 You are about to turn a working prototype into a deployed agent. The founder
-prototyped in `managed/<name>/` in *this* session; the transcript above — what
+prototyped in `managed/<name>/` in _this_ session; the transcript above — what
 was tried, what broke, what fixed it, what finally worked — is your primary
 source. Files are secondary evidence. You are the compiler: the output is a
 complete artifact dir at `agent/compiled/<name>/` plus a live Managed Agent.
@@ -30,8 +30,8 @@ Explore before you ask anything. From the repo root:
 
 ## Phase 2 — Mine the transcript
 
-Reread the session and extract, with the discipline that *lessons matter more
-than the task statement*:
+Reread the session and extract, with the discipline that _lessons matter more
+than the task statement_:
 
 1. **The task** — what the agent is actually for, in the founder's words.
 2. **Lessons** — every snag hit and how it was resolved (wrong format, edge
@@ -47,11 +47,13 @@ than the task statement*:
    their services) → custom tool specs for `tools.ts`: name, description,
    JSON schema input, and a handler faithful to what the session actually ran.
 5. **Quality bar** — what "good output" meant in this session (the founder's
-   corrections are the best evidence) → `rubric.md` as concrete, gradeable
-   criteria ("the summary lists every payment deadline with its date", not
-   "the output is thorough"). Include the founder's *interpretive* bar too —
-   if they wanted a "should I panic?" verdict, an output that only quantifies
-   without concluding fails their real standard; encode that as a criterion.
+   corrections are the best evidence), as concrete, gradeable criteria ("the
+   summary lists every payment deadline with its date", not "the output is
+   thorough"). Include the founder's _interpretive_ bar too — if they wanted
+   a "should I panic?" verdict, an output that only quantifies without
+   concluding fails their real standard. Where it lands depends on Phase 3:
+   founders who define an outcome get it as `rubric.md`; otherwise it becomes
+   operating rules in `instructions.md` and no rubric file is emitted.
 
 Draft all five privately. Where the transcript is ambiguous, note the open
 question for Phase 3 instead of guessing.
@@ -63,9 +65,9 @@ remains, building is not allowed. Rules:
 
 - **One question at a time.** Never a batch, never a form.
 - **Every question ships with a recommendation** and a one-line reason, so
-  the founder can just say "yes". Example: *"Invocation mode: I recommend
+  the founder can just say "yes". Example: _"Invocation mode: I recommend
   `message` — your session was conversational Q&A, not a graded deliverable.
-  OK?"*
+  OK?"_
 - **Never ask what you can find out yourself.** If the transcript or files
   answer it, don't ask it. Interview questions are for genuine judgment
   calls only. Expect roughly 2–4 questions, not 10.
@@ -74,28 +76,28 @@ remains, building is not allowed. Rules:
 
 Always resolve (asking only where the evidence is genuinely ambiguous):
 
-| Decision | Default recommendation |
-| --- | --- |
-| Agent name + one-line description | dir name; description from the task |
-| Model | `claude-sonnet-5` (upgrade only if the session needed deep reasoning). Confirm it as its own one-line question — never bundled into the keep/drop list |
-| Invocation mode | `message`; recommend `outcome` only when the founder wants a *machine* to grade iterations. The discriminator is **"do they want to stop hand-checking?"**, not "did they hand-check this session?" — corrections the founder wants codified into a rubric so it's enforced automatically every future run point to `outcome` (recurring, gradeable deliverable); corrections made because they want to keep eyeballing raw output each run point to `message` |
-| Session policy | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks |
-| Keep/drop | your mined list of skills + custom tools, shown as a short list for confirmation |
+| Decision                          | Default recommendation                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent name + one-line description | dir name; description from the task                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Model                             | `claude-sonnet-5` (upgrade only if the session needed deep reasoning). Confirm it as its own one-line question — never bundled into the keep/drop list                                                                                                                                                                                                                                                                                                         |
+| Invocation mode                   | **Always ask this one directly: "do you want to define an outcome — a rubric a machine grades every run against — or keep it conversational?"** Recommend `message` by default; recommend `outcome` only when the founder wants a _machine_ to grade iterations. The discriminator is **"do they want to stop hand-checking?"**, not "did they hand-check this session?" — corrections the founder wants codified into a rubric so it's enforced automatically every future run point to `outcome` (recurring, gradeable deliverable); corrections made because they want to keep eyeballing raw output each run point to `message`. The answer decides whether `rubric.md` exists at all |
+| Session policy                    | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks                                                                                                                                                                                                                                                                                                                                                                                      |
+| Keep/drop                         | your mined list of skills + custom tools, shown as a short list for confirmation                                                                                                                                                                                                                                                                                                                                                                               |
 
 ## Phase 4 — Emit, deploy, verify
 
 Only now touch files. The compiled artifact spans three paths (eve requires
-every module under `agent/tools/**` to *be* a tool, so handlers and the
+every module under `agent/tools/**` to _be_ a tool, so handlers and the
 wrapper sit exactly where eve expects them):
 
-| File | Content |
-| --- | --- |
-| `agent/compiled/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. Hard structural constraints (fixed sections, orderings) go in as a **literal fill-in template** of the output, not prose prohibitions — models follow skeletons more reliably than "don't" rules. |
-| `agent/compiled/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
-| `agent/compiled/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
-| `agent/compiled/<name>/manifest.json` | Schema below. |
-| `agent/compiled/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in instructions.md — don't leave the gap for the smoke test to trip on. |
-| `agent/tools/<name>.ts` | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted. |
+| File                                    | Content                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `agent/compiled/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. Hard structural constraints (fixed sections, orderings) go in as a **literal fill-in template** of the output, not prose prohibitions — models follow skeletons more reliably than "don't" rules.                                                                                                                                                                                                                                                       |
+| `agent/compiled/<name>/rubric.md`       | **`outcome` mode only** — emitted if and only if the founder said yes to defining an outcome in Phase 3; it is sent with `user.define_outcome` at runtime. In `message` mode do NOT emit this file: the Phase 2 quality bar goes into `instructions.md` as operating rules instead (a rubric nothing grades against is dead documentation).                                                                                                                                                                                                                                                                                                                                               |
+| `agent/compiled/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter).                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `agent/compiled/<name>/manifest.json`   | Schema below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `agent/compiled/<name>/tools.ts`        | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in instructions.md — don't leave the gap for the smoke test to trip on. |
+| `agent/tools/<name>.ts`                 | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Then append one dispatch entry to `agent/instructions.md` under
 `## Specialists`: tool name, one line on when to dispatch to it.
@@ -115,9 +117,10 @@ session did not direct — a founder hand-edit**. Surface bucket (c)
 explicitly ("I found a `## House style` section I didn't generate —
 preserving it") instead of folding it into "your edits from this session".
 Every preserved hand-edit that encodes a checkable behavior **must** get a
-matching `rubric.md` criterion in the same compile — a silently preserved
-guard with nothing verifying it is a rule the deployed agent can drop
-unnoticed. And any rubric criterion asserting a concrete format or precision
+matching enforcement home in the same compile — a `rubric.md` criterion in
+`outcome` mode, an explicit operating rule in `instructions.md` in `message`
+mode. A silently preserved guard with nothing restating it is a rule the
+deployed agent can drop unnoticed. And any rubric criterion asserting a concrete format or precision
 (decimal places, string shape, rounding) must be **checked against the
 bundled script's actual fixture output before deploy** — if they diverge,
 fix one side; never ship a rubric whose letter the deployed script can't
@@ -131,7 +134,7 @@ sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
 the repo root (e.g. `agent/compiled/<name>/instructions.md`,
 `agent/compiled/<name>/tools.ts`). This is the merge base for the next recompile.
 
-**Deploy + verify.** Run `npm run deploy-agent <name>` and show the founder
+**Deploy + verify.** Run `bun run deploy-agent <name>` and show the founder
 the output (skill IDs, agent ID + version). Then prove it works with the
 **largest realistic input the session actually used** — e.g. the full fixture
 file from `managed/<name>/`, not a hand-typed one-liner. Run the smoke test
@@ -139,9 +142,9 @@ in the **foreground (blocking)** — never as a backgrounded job. Do not end
 your turn until you have read a terminal verdict from its output
 (`grader: satisfied` / final reply, or a failure); a turn that ends while
 the smoke test is still running has verified nothing:
-`npm run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
+`bun run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
 A smoke test that can't reproduce the founder's real input shape has not
-proven anything. Prefer the *same* fixture and parameters as the session's
+proven anything. Prefer the _same_ fixture and parameters as the session's
 best output, so the founder can A/B the deployed reply against what they
 already approved. Confirm the reply meets the rubric, and re-run the smoke
 test after any post-verify change to config or runtime code. When the
@@ -151,7 +154,7 @@ enough) — don't rely on noticing violations by eye.
 
 On a **recompile**, design the smoke test to cover both sides in one run:
 exercise the new capability AND re-confirm the pre-existing best-output path
-still holds (e.g. one request that triggers the new tool *and* produces the
+still holds (e.g. one request that triggers the new tool _and_ produces the
 full report the founder already approved). An update that only tests the new
 thing can regress the old thing silently.
 
@@ -209,10 +212,7 @@ import { loadCompiledAgent, runTask } from "@/lib/claude-managed-agent.ts";
 // Only when the agent has custom tools — static import so eve's bundler sees it:
 // import { tools } from "@/agent/compiled/<name>/tools.ts";
 
-const sessionIdState = defineState<string | undefined>(
-  "<name>-session",
-  () => undefined,
-);
+const sessionIdState = defineState<string | undefined>("<name>-session", () => undefined);
 
 export default defineTool({
   description:
@@ -249,12 +249,18 @@ export const tools: CustomToolSpec[] = [
     description: "<3–4 sentences: what it does, when to use it, caveats>",
     input_schema: {
       type: "object",
-      properties: { /* … */ },
-      required: [/* … */],
+      properties: {
+        /* … */
+      },
+      required: [
+        /* … */
+      ],
     },
     async handler(input) {
       // Runs in *this* process when the deployed agent calls the tool.
-      return JSON.stringify({ /* … */ });
+      return JSON.stringify({
+        /* … */
+      });
     },
   },
 ];

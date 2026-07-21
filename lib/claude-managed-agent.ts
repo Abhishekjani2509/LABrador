@@ -151,7 +151,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
   const deployment = opts.manifest.deployment;
   if (!deployment?.agent_id) {
     throw new Error(
-      `"${opts.manifest.name}" has no deployment.agent_id — run: npm run deploy-agent ${opts.manifest.name}`,
+      `"${opts.manifest.name}" has no deployment.agent_id — run: bun run deploy-agent ${opts.manifest.name}`,
     );
   }
 

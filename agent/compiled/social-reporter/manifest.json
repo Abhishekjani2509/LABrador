@@ -10,11 +10,11 @@
     "Added managed/social-reporter/scripts/cancel-post.mjs (mock cancel, same conventions as publish-post.mjs/read-posts.mjs) and wired it up as the new cancel_post custom tool.",
     "Found agent/lib/social-reporter/tools.ts already carried an uncommitted hand-edit from outside this session (a 280-char cap on X drafts in queue_post) — preserved as-is, not authored by this compile, and mirrored into rubric.md as criterion 12 so it's actually enforced/checked.",
     "First deploy smoke test surfaced that the skill's Step 5/6 instruction to 'read data/outbox.json' assumes filesystem access the deployed sandbox doesn't have — read_posts/queue_post/cancel_post only ever return single entries, none list the outbox. Added a list_queue custom tool (reads the outbox file directly, no founder script existed to shell out to) and bridged the skill's file-read language to it in instructions.md.",
-    "Repo-wide rename (Cyrus-directed, post-loop): lib/managed.ts → lib/claude-managed-agent.ts, imports moved to @/ alias, skill renamed make-managed → make-managed-agent; compiled_hashes refreshed; artifact data dir moved agent/tools/<name>/ + agent/lib/<name>/ → agent/compiled/<name>/ (eve rejects data files in lib/ and non-tool modules in tools/)"
+    "Repo-wide rename (Cyrus-directed, post-loop): lib/managed.ts → lib/claude-managed-agent.ts, imports moved to @/ alias, skill renamed make-managed → make-managed-agent; compiled_hashes refreshed; artifact data dir moved agent/tools/<name>/ + agent/lib/<name>/ → agent/compiled/<name>/ (eve rejects data files in lib/ and non-tool modules in tools/)",
+    "Policy change (Cyrus-directed): rubric.md is emitted only for outcome-mode agents; this message-mode agent's quality bar lives in instructions.md, so its rubric.md was removed."
   ],
   "compiled_hashes": {
     "agent/compiled/social-reporter/instructions.md": "c00862b20f695661aac4f5ec226470184c23d0f96c08dd16e804f715714bc27d",
-    "agent/compiled/social-reporter/rubric.md": "f7086dfd0b3267176b46e8aac365ca0ffdab32e8fd5fb3c26861beaaf3b34997",
     "agent/compiled/social-reporter/skills/weekly-social-report/SKILL.md": "58806152f90ca34eec743d95549e299cbd08ca86a137a82973979b812df425af",
     "agent/tools/social-reporter.ts": "8d78df71538d100a24eb7f94cb13f72bcdb327177b4d480833c6208eb38f3468",
     "agent/compiled/social-reporter/tools.ts": "5526fe954623e754b3f2fa1cd9f1388b9a3da9ece484166adcd1d8566a78972f"

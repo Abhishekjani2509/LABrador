@@ -2,8 +2,8 @@
  * Chat with a deployed managed agent from your terminal — the callable
  * endpoint, before any router exists.
  *
- *   npm run run-agent <name>                 # interactive chat (session reused)
- *   npm run run-agent <name> -- --once "…"   # single task, print reply, exit
+ *   bun run run-agent <name>                 # interactive chat (session reused)
+ *   bun run run-agent <name> -- --once "…"   # single task, print reply, exit
  *
  * Outcome-mode agents (manifest.invocation === "outcome") treat each input
  * as an outcome description and run it against the compiled rubric.md.
@@ -14,7 +14,7 @@ import { loadCompiledAgent, runTask, type SessionEvent } from "@/lib/claude-mana
 const args = process.argv.slice(2);
 const name = args[0];
 if (!name) {
-  console.error('usage: npm run run-agent <name> [-- --once "task"] [--quiet]');
+  console.error('usage: bun run run-agent <name> [-- --once "task"] [--quiet]');
   process.exit(1);
 }
 const onceIndex = args.indexOf("--once");
