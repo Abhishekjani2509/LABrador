@@ -1,0 +1,29 @@
+{
+  "name": "social-reporter",
+  "description": "Produces the weekly X/LinkedIn engagement report from mock post data: per-platform top posts by engagement rate, one data-backed recommendation, and two drafted posts queued for review.",
+  "model": "claude-sonnet-5",
+  "invocation": "message",
+  "session_policy": "reuse",
+  "mcp_servers": [],
+  "runtime_notes": [],
+  "compiled_hashes": {
+    "agent/tools/social-reporter/instructions.md": "60f2fa8a122edf4ca1512564639687c0e6afbc32545b04b32b53aee1df121a22",
+    "agent/tools/social-reporter/rubric.md": "54c07c94f13d1263812a9d7947795fbe8d9949b1bb9c1aab00f27e9d69a4fdb4",
+    "agent/tools/social-reporter/skills/weekly-social-report/SKILL.md": "2728140300d1128de5a7fabe9967be1b4aa947dd9f54f02399c7b99c1424cb80",
+    "agent/tools/social-reporter.ts": "d7bbeae512b9e9887169592172fa9277eeff816e75850ce211b5c7bbaeb65a95",
+    "agent/lib/social-reporter/tools.ts": "099bee975aa363eee45504d0efdec2b7edd2cb7d9518f4597b6aa9894ca9fd70"
+  },
+  "deployment": {
+    "agent_id": "agent_019fWZcYbhBQk7we7Wcv1MXx",
+    "agent_version": 1,
+    "skills": {
+      "weekly-social-report": {
+        "skill_id": "skill_01Rz6if3i4QzhX72TcqpNLHD",
+        "version": "1784626454508710",
+        "hash": "5e3d67a4ebbba98709bb96f494a0530676cf5e1a9d6ab44b52feefc09e2d2059"
+      }
+    },
+    "system_hash": "60f2fa8a122edf4ca1512564639687c0e6afbc32545b04b32b53aee1df121a22",
+    "tools_hash": "af54b975769b000b8b19ee4a300c7e563a97af8347585f7e1ede87c582ce48ce"
+  }
+}

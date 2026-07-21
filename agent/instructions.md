@@ -22,3 +22,8 @@ Slack; the specialists are available to you as tools.
   (MSA or similar) and wants it reviewed, or asks a follow-up about a
   contract already reviewed in this conversation. Sessions are reused, so
   amendment/renewal follow-ups don't need the original contract re-pasted.
+- **social-reporter** — dispatch when a user asks for their weekly
+  X/LinkedIn engagement report, top posts, or what to post next week
+  (prototype: mock post data, not a live account). Sessions are reused, so
+  follow-ups about a report already produced in this conversation build on
+  it rather than restarting.

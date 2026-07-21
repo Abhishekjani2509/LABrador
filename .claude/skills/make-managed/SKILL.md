@@ -75,7 +75,7 @@ Always resolve (asking only where the evidence is genuinely ambiguous):
 | Decision | Default recommendation |
 | --- | --- |
 | Agent name + one-line description | dir name; description from the task |
-| Model | `claude-sonnet-5` (upgrade only if the session needed deep reasoning) |
+| Model | `claude-sonnet-5` (upgrade only if the session needed deep reasoning). Confirm it as its own one-line question — never bundled into the keep/drop list |
 | Invocation mode | `message`; recommend `outcome` only when the founder wants a *machine* to grade iterations. Careful: a session where the founder personally caught and corrected output slips turn over turn is evidence **for** `message` (they want to eyeball raw output), not for `outcome` — manual grading ≠ wants automated grading |
 | Session policy | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks |
 | Keep/drop | your mined list of skills + custom tools, shown as a short list for confirmation |
@@ -92,7 +92,7 @@ wrapper sit exactly where eve expects them):
 | `agent/tools/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
 | `agent/tools/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
 | `agent/tools/<name>/manifest.json` | Schema below. |
-| `agent/lib/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below — mocks and fixtures faithful to what the session used. |
+| `agent/lib/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. |
 | `agent/tools/<name>.ts` | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted. |
 
 Then append one dispatch entry to `agent/instructions.md` under
@@ -117,8 +117,15 @@ the output (skill IDs, agent ID + version). Then prove it works with the
 file from `managed/<name>/`, not a hand-typed one-liner:
 `npm run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
 A smoke test that can't reproduce the founder's real input shape has not
-proven anything. Confirm the reply meets the rubric, and re-run the smoke
+proven anything. Prefer the *same* fixture and parameters as the session's
+best output, so the founder can A/B the deployed reply against what they
+already approved. Confirm the reply meets the rubric, and re-run the smoke
 test after any post-verify change to config or runtime code.
+
+When the agent has custom tools, the smoke test must show the round-trip at
+the event level — the `· custom tool: <name> {…}` trace lines from
+`run-agent`, plus the tool's observable side effect (e.g. the queued row in
+the outbox file) — not a prose claim that tools "were used".
 
 **Runtime fixes.** If this session fixed shared runtime code (`lib/`,
 `scripts/`) along the way, record each fix as a one-line entry in

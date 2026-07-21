@@ -129,8 +129,14 @@ deployment.tools_hash = toolsHash;
 // --- 3. write back --------------------------------------------------------
 
 manifest.deployment = deployment;
-await writeFile(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
-console.log(`manifest updated: agent/tools/${name}/manifest.json`);
+const manifestPath = join(dir, "manifest.json");
+const nextManifest = JSON.stringify(manifest, null, 2) + "\n";
+if (nextManifest === (await readFile(manifestPath, "utf8"))) {
+  console.log(`manifest unchanged: agent/tools/${name}/manifest.json`);
+} else {
+  await writeFile(manifestPath, nextManifest);
+  console.log(`manifest updated: agent/tools/${name}/manifest.json`);
+}
 
 // --- helpers --------------------------------------------------------------
 

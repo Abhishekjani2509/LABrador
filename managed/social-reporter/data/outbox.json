@@ -1,0 +1,37 @@
+[
+  {
+    "id": "mock-1",
+    "platform": "x",
+    "text": "hot take: 'it's just a config change' has caused more outages this year than every actual code change combined. we should treat YAML like it's production code, because it is",
+    "status": "queued",
+    "queued_at": "2026-07-21T09:25:29.447Z"
+  },
+  {
+    "id": "mock-2",
+    "platform": "x",
+    "text": "signs your CI pipeline needs an intervention:\n1) the retry count is higher than the test count\n2) someone wrote a script called fix_ci_pls.sh\n3) the flaky test has its own Slack channel\n4) you've stopped reading the red X and just rerun",
+    "status": "queued",
+    "queued_at": "2026-07-21T09:25:29.492Z"
+  },
+  {
+    "id": "mock-3",
+    "platform": "x",
+    "text": "CI red for the 4th time today. Standard incident response:\n1) rerun the job\n2) rerun the job again\n3) add `continue-on-error: true` and never think about it again\n4) postmortem? what postmortem",
+    "status": "queued",
+    "queued_at": "2026-07-21T09:35:01.381Z"
+  },
+  {
+    "id": "mock-4",
+    "platform": "x",
+    "text": "Every platform eng roadmap has the same three slides: \"improve developer experience,\" \"reduce build times,\" \"standardize tooling.\" The team that actually ships is the one that admits slide two is 90% of the job.",
+    "status": "queued",
+    "queued_at": "2026-07-21T09:35:01.812Z"
+  },
+  {
+    "id": "mock-5",
+    "platform": "x",
+    "text": "the \"it works on my machine\" escalation path:\n1) it works on my machine\n2) it works in CI\n3) it works in staging\n4) congrats, it's now everyone's machine's problem",
+    "status": "queued",
+    "queued_at": "2026-07-21T10:23:55.005Z"
+  }
+]

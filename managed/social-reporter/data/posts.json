@@ -1,0 +1,122 @@
+[
+  {
+    "id": "p1",
+    "platform": "x",
+    "text": "Spent the weekend benchmarking Tempo's new incremental cache against Turborepo and Nx on a 340-file monorepo. 42% faster cold builds, 61% faster warm. Numbers + methodology in the next post 🧵",
+    "timestamp": "2026-07-07T14:32:00Z",
+    "impressions": 4100,
+    "likes": 96,
+    "comments": 19,
+    "reposts": 31
+  },
+  {
+    "id": "p2",
+    "platform": "linkedin",
+    "text": "We just hired our first Developer Advocate. Small milestone but it means something different for a devtools startup: it's the first hire whose job is to make sure the docs, the onboarding, and the 'why does this exist' story are as good as the product. If you've ever fixed a build system out of spite, we should talk.",
+    "timestamp": "2026-07-08T16:05:00Z",
+    "impressions": 2600,
+    "likes": 74,
+    "comments": 21,
+    "reposts": 9
+  },
+  {
+    "id": "p3",
+    "platform": "x",
+    "text": "Tempo CLI v0.9 is out: remote cache is now on by default for every CI provider we support. No more pasting the same cache config into 4 different YAML files. `npm i -g @tempo/cli@latest`",
+    "timestamp": "2026-07-09T18:47:00Z",
+    "impressions": 3300,
+    "likes": 61,
+    "comments": 11,
+    "reposts": 18
+  },
+  {
+    "id": "p4",
+    "platform": "x",
+    "text": "Every 'AI-powered' devtool pitch deck I've seen this month has the exact same slide 6, just with different logos. Someone's gonna get funded for finally admitting caching is still the hard part.",
+    "timestamp": "2026-07-10T20:12:00Z",
+    "impressions": 5400,
+    "likes": 142,
+    "comments": 38,
+    "reposts": 27
+  },
+  {
+    "id": "p5",
+    "platform": "linkedin",
+    "text": "Tempo just crossed 12,000 weekly CLI installs. Eight months ago it was three of us running builds on a laptop in a coworking space. Grateful to every team that filed a bug report instead of just churning — that's most of this roadmap.",
+    "timestamp": "2026-07-11T13:20:00Z",
+    "impressions": 3100,
+    "likes": 89,
+    "comments": 16,
+    "reposts": 12
+  },
+  {
+    "id": "p6",
+    "platform": "x",
+    "text": "Yesterday's self-hosted runner outage was on us. A bad cache invalidation rule took down builds for ~40 minutes for a subset of self-hosted users. Full writeup + what we're changing: tempo.dev/blog/incident-0713",
+    "timestamp": "2026-07-13T09:05:00Z",
+    "impressions": 3900,
+    "likes": 54,
+    "comments": 22,
+    "reposts": 9
+  },
+  {
+    "id": "p7",
+    "platform": "x",
+    "text": "The short version: we shipped a config migration that silently changed a hash key. We're adding a canary check before any cache-key change ships, no exceptions.",
+    "timestamp": "2026-07-13T09:07:00Z",
+    "impressions": 2100,
+    "likes": 33,
+    "comments": 6,
+    "reposts": 4
+  },
+  {
+    "id": "p8",
+    "platform": "linkedin",
+    "text": "Why we made cache invalidation content-addressed instead of timestamp-based (and why it took us three tries to get right): a technical breakdown of Tempo's cache layer, including the bug that caused Monday's incident and the fix that's shipping this week.",
+    "timestamp": "2026-07-15T11:40:00Z",
+    "impressions": 2900,
+    "likes": 67,
+    "comments": 13,
+    "reposts": 7
+  },
+  {
+    "id": "p9",
+    "platform": "x",
+    "text": "'Switched from Bazel to Tempo and our onboarding docs went from 40 pages to 4' — one of our favorite messages this week.",
+    "timestamp": "2026-07-16T15:22:00Z",
+    "impressions": 2700,
+    "likes": 71,
+    "comments": 9,
+    "reposts": 14
+  },
+  {
+    "id": "p10",
+    "platform": "x",
+    "text": "flaky test suite meeting agenda:\n1) blame CI\n2) blame the intern's PR from 3 months ago\n3) add a retry\n4) never speak of it again",
+    "timestamp": "2026-07-17T19:03:00Z",
+    "impressions": 6200,
+    "likes": 210,
+    "comments": 41,
+    "reposts": 53
+  },
+  {
+    "id": "p11",
+    "platform": "linkedin",
+    "text": "We're hiring a backend engineer to work on Tempo's distributed cache layer (Rust, some Go). You'll own the thing that has to be correct even when three CI providers disagree about what 'correct' means. Remote-friendly, link in comments.",
+    "timestamp": "2026-07-18T10:15:00Z",
+    "impressions": 2400,
+    "likes": 58,
+    "comments": 24,
+    "reposts": 11
+  },
+  {
+    "id": "p12",
+    "platform": "x",
+    "text": "Tempo changelog, week of July 14:\n- remote cache retries with backoff\n- `tempo doctor` command for diagnosing cache misses\n- 15% smaller CLI binary\nFull notes: tempo.dev/changelog",
+    "timestamp": "2026-07-20T21:30:00Z",
+    "impressions": 2800,
+    "likes": 47,
+    "comments": 8,
+    "reposts": 10
+  }
+]
