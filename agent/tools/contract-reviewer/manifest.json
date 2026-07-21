@@ -1,27 +1,27 @@
 {
   "name": "contract-reviewer",
-  "description": "Reviews client contracts (MSAs and similar) and returns a structured extraction of parties, key dates, obligations, and severity-ranked red flags.",
+  "description": "Reviews client contracts (MSAs, NDAs, and similar) and returns an upfront sign/don't-sign verdict plus a structured extraction of parties, key dates, obligations, and severity-ranked red flags. Weighs NDA- vs. MSA-specific risk categories based on contract type.",
   "model": "claude-sonnet-5",
   "invocation": "message",
   "session_policy": "reuse",
   "mcp_servers": [],
   "compiled_hashes": {
-    "agent/tools/contract-reviewer/instructions.md": "a4c655f8f0c59ccde1118cddafbf03952cae9c282f95485ddfebbfb4f41b01f1",
-    "agent/tools/contract-reviewer/rubric.md": "69720c31d15e3a6ecd6d18be157bbd1761970d26ed18a05b92a7fa2fb000e17b",
-    "agent/tools/contract-reviewer/skills/contract-review/SKILL.md": "3f7928539ad16bf7fa830a160d6c3e471c82e9f714855505e5ddf692e8db36e5",
-    "agent/tools/contract-reviewer.ts": "e5f7e128169ca59ba8531d17c84e3e089404700c8a339eb841c67da6a9f8caec"
+    "agent/tools/contract-reviewer/instructions.md": "aee6ef1710632e21c87cb8d40b63c4cf563316c3247ca311d36f9e584ea777e5",
+    "agent/tools/contract-reviewer/rubric.md": "96002ee4dfa3978fc450df1a899a9cc330961862ecd4c2342ae96bcfa047ebcf",
+    "agent/tools/contract-reviewer/skills/contract-review/SKILL.md": "d537d78d2218281f3bf487925d1afd0c1d0d1e3c7cfdc4938c9b67ecfd2c871a",
+    "agent/tools/contract-reviewer.ts": "0bf8b29dc09e060142394f3a7d63c20a832d75e53473911d2bfcc95c687ddafd"
   },
   "deployment": {
     "agent_id": "agent_01Y8zkjFLuN9dDnHsiSeiKmE",
-    "agent_version": 1,
+    "agent_version": 2,
     "skills": {
       "contract-review": {
         "skill_id": "skill_01Lq1QBUA9MuwFBoyz9XpBcU",
-        "version": "1784624070455408",
-        "hash": "ef7df9e933053b3400fb9aaafc74001f09b5cde5fb08fa4b5a423bd5d7af5035"
+        "version": "1784640318933555",
+        "hash": "0b831c1ef1721fe27c8114488bd78428d0ca5781ac18f3eac632b1638ed92ba5"
       }
     },
-    "system_hash": "a4c655f8f0c59ccde1118cddafbf03952cae9c282f95485ddfebbfb4f41b01f1",
+    "system_hash": "aee6ef1710632e21c87cb8d40b63c4cf563316c3247ca311d36f9e584ea777e5",
     "tools_hash": "55aee47fc5935efcae28851aa63f4b0b5d3e7ab74c57b1e97d2f3b2c11c385cb"
   },
   "runtime_notes": [

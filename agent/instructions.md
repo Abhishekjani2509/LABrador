@@ -19,7 +19,7 @@ Slack; the specialists are available to you as tools.
 <!-- /make-managed appends one entry per compiled agent below. -->
 
 - **contract-reviewer** — dispatch when a user shares or pastes a contract
-  (MSA or similar) and wants it reviewed, or asks a follow-up about a
+  (MSA, NDA, or similar) and wants it reviewed, or asks a follow-up about a
   contract already reviewed in this conversation. Sessions are reused, so
   amendment/renewal follow-ups don't need the original contract re-pasted.
 - **social-reporter** — dispatch when a user asks for their weekly

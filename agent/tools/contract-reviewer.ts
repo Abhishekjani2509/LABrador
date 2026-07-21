@@ -9,10 +9,11 @@ const sessionIdState = defineState<string | undefined>(
 
 export default defineTool({
   description:
-    "Reviews client contracts (MSAs and similar) and returns a structured " +
-    "extraction of parties, key dates, obligations, and severity-ranked " +
-    "red flags. Provide a complete, self-contained task; the specialist " +
-    "runs remotely and returns its final answer.",
+    "Reviews client contracts (MSAs, NDAs, and similar) and returns an " +
+    "upfront sign/don't-sign verdict plus a structured extraction of " +
+    "parties, key dates, obligations, and severity-ranked red flags. " +
+    "Provide a complete, self-contained task; the specialist runs " +
+    "remotely and returns its final answer.",
   inputSchema: {
     type: "object",
     properties: {

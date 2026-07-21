@@ -90,7 +90,7 @@ wrapper sit exactly where eve expects them):
 
 | File | Content |
 | --- | --- |
-| `agent/tools/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. |
+| `agent/tools/<name>/instructions.md` | The agent's system prompt: role, task, and the **lessons** from Phase 2 as operating rules. Written for a fresh agent with none of this session's context. Hard structural constraints (fixed sections, orderings) go in as a **literal fill-in template** of the output, not prose prohibitions — models follow skeletons more reliably than "don't" rules. |
 | `agent/tools/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
 | `agent/tools/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
 | `agent/tools/<name>/manifest.json` | Schema below. |
@@ -102,11 +102,20 @@ Then append one dispatch entry to `agent/instructions.md` under
 
 **Recompile (Claude-merge).** If `agent/tools/<name>/` existed before this
 run: for every file, compare its current hash against `compiled_hashes` in
-the old manifest. A mismatch means the founder hand-edited the file since the
-last compile. **Never clobber a hand-edit.** Three-way merge: keep the
-founder's edits, integrate your new derivation around them, and say in one
-line per merged file what you kept from each side. Files with matching
-hashes are yours to regenerate freely.
+the old manifest. A mismatch means the file changed since the last compile.
+**Never clobber those changes.** Three-way merge: keep them, integrate your
+new derivation around them, and say in one line per merged file what you
+kept from each side. Files with matching hashes are yours to regenerate
+freely.
+
+**Attribute before you claim.** Never assert provenance you can't verify.
+Categorize each changed region as: (a) an edit this session directed, (b)
+unchanged prior baseline, or (c) **content you did not write and this
+session did not direct — a founder hand-edit**. Surface bucket (c)
+explicitly ("I found a `## House style` section I didn't generate —
+preserving it") instead of folding it into "your edits from this session".
+For hand-added rules that are checkable, offer to mirror them into
+`rubric.md` so something actually enforces them.
 
 **Hashes.** After writing, record in `manifest.json.compiled_hashes` the
 sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
@@ -122,7 +131,10 @@ A smoke test that can't reproduce the founder's real input shape has not
 proven anything. Prefer the *same* fixture and parameters as the session's
 best output, so the founder can A/B the deployed reply against what they
 already approved. Confirm the reply meets the rubric, and re-run the smoke
-test after any post-verify change to config or runtime code.
+test after any post-verify change to config or runtime code. When the
+output has hard structural invariants (fixed section count/order, mandated
+first heading), **assert them mechanically** on the smoke output (a grep is
+enough) — don't rely on noticing violations by eye.
 
 When the agent has custom tools, the smoke test must show the round-trip at
 the event level — the `· custom tool: <name> {…}` trace lines from
