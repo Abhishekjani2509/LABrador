@@ -76,7 +76,7 @@ Always resolve (asking only where the evidence is genuinely ambiguous):
 | --- | --- |
 | Agent name + one-line description | dir name; description from the task |
 | Model | `claude-sonnet-5` (upgrade only if the session needed deep reasoning) |
-| Invocation mode | `message`; recommend `outcome` when the session produced a graded deliverable/file |
+| Invocation mode | `message`; recommend `outcome` only when the founder wants a *machine* to grade iterations. Careful: a session where the founder personally caught and corrected output slips turn over turn is evidence **for** `message` (they want to eyeball raw output), not for `outcome` — manual grading ≠ wants automated grading |
 | Session policy | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks |
 | Keep/drop | your mined list of skills + custom tools, shown as a short list for confirmation |
 
@@ -112,9 +112,18 @@ the repo root (e.g. `agent/tools/<name>/instructions.md`,
 `agent/lib/<name>/tools.ts`). This is the merge base for the next recompile.
 
 **Deploy + verify.** Run `npm run deploy-agent <name>` and show the founder
-the output (skill IDs, agent ID + version). Then prove it works:
-`npm run run-agent <name> -- --once "<a representative task from the session>"`
-and confirm the reply meets the rubric. A compile that never ran is a guess.
+the output (skill IDs, agent ID + version). Then prove it works with the
+**largest realistic input the session actually used** — e.g. the full fixture
+file from `managed/<name>/`, not a hand-typed one-liner:
+`npm run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
+A smoke test that can't reproduce the founder's real input shape has not
+proven anything. Confirm the reply meets the rubric, and re-run the smoke
+test after any post-verify change to config or runtime code.
+
+**Runtime fixes.** If this session fixed shared runtime code (`lib/`,
+`scripts/`) along the way, record each fix as a one-line entry in
+`manifest.json.runtime_notes` — the artifact dir alone won't show a future
+reader that the bug class was hit and solved.
 
 ### manifest.json schema
 
@@ -127,6 +136,7 @@ and confirm the reply meets the rubric. A compile that never ran is a guess.
   "session_policy": "reuse | fresh",
   "max_iterations": 3,
   "mcp_servers": [],
+  "runtime_notes": ["<one line per shared-runtime fix made during this session>"],
   "compiled_hashes": { "<relative path>": "<sha256>" }
 }
 ```

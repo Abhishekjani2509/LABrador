@@ -1,0 +1,30 @@
+{
+  "name": "contract-reviewer",
+  "description": "Reviews client contracts (MSAs and similar) and returns a structured extraction of parties, key dates, obligations, and severity-ranked red flags.",
+  "model": "claude-sonnet-5",
+  "invocation": "message",
+  "session_policy": "reuse",
+  "mcp_servers": [],
+  "compiled_hashes": {
+    "agent/tools/contract-reviewer/instructions.md": "a4c655f8f0c59ccde1118cddafbf03952cae9c282f95485ddfebbfb4f41b01f1",
+    "agent/tools/contract-reviewer/rubric.md": "69720c31d15e3a6ecd6d18be157bbd1761970d26ed18a05b92a7fa2fb000e17b",
+    "agent/tools/contract-reviewer/skills/contract-review/SKILL.md": "3f7928539ad16bf7fa830a160d6c3e471c82e9f714855505e5ddf692e8db36e5",
+    "agent/tools/contract-reviewer.ts": "e5f7e128169ca59ba8531d17c84e3e089404700c8a339eb841c67da6a9f8caec"
+  },
+  "deployment": {
+    "agent_id": "agent_01Y8zkjFLuN9dDnHsiSeiKmE",
+    "agent_version": 1,
+    "skills": {
+      "contract-review": {
+        "skill_id": "skill_01Lq1QBUA9MuwFBoyz9XpBcU",
+        "version": "1784624070455408",
+        "hash": "ef7df9e933053b3400fb9aaafc74001f09b5cde5fb08fa4b5a423bd5d7af5035"
+      }
+    },
+    "system_hash": "a4c655f8f0c59ccde1118cddafbf03952cae9c282f95485ddfebbfb4f41b01f1",
+    "tools_hash": "55aee47fc5935efcae28851aa63f4b0b5d3e7ab74c57b1e97d2f3b2c11c385cb"
+  },
+  "runtime_notes": [
+    "lib/managed.ts: session titles must strip Unicode control/format chars (titleSnippet) — raw slice of pasted-document tasks crashed session creation with a 400"
+  ]
+}

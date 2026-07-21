@@ -41,6 +41,8 @@ export interface AgentManifest {
   max_iterations?: number;
   /** Remote streamable-HTTP MCP servers, passed through to the agent config. */
   mcp_servers?: unknown[];
+  /** One line per shared-runtime fix made during the compile session. */
+  runtime_notes?: string[];
   /** Written by `scripts/deploy-agent.ts`. Absent until first deploy. */
   deployment?: {
     agent_id: string;
@@ -126,6 +128,17 @@ export async function getOrCreateEnvironment(client: Anthropic): Promise<string>
   return created.id;
 }
 
+/**
+ * Session titles reject Unicode control/format characters (e.g. newlines).
+ * Task text is often a pasted document, so collapse all whitespace/control
+ * characters before truncating rather than slicing the raw string — a raw
+ * slice can land mid-document and carry a newline straight into the title.
+ */
+function titleSnippet(task: string, maxLen = 60): string {
+  const collapsed = task.replace(/[\p{Cc}\p{Cf}]+/gu, " ").replace(/\s+/g, " ").trim();
+  return collapsed.length > maxLen ? `${collapsed.slice(0, maxLen - 1)}…` : collapsed;
+}
+
 // ---------------------------------------------------------------------------
 // The loop
 // ---------------------------------------------------------------------------
@@ -148,7 +161,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
     const session = await client.beta.sessions.create({
       agent: deployment.agent_id,
       environment_id: environmentId,
-      title: `${opts.manifest.name}: ${opts.task.slice(0, 60)}`,
+      title: `${opts.manifest.name}: ${titleSnippet(opts.task)}`,
     });
     sessionId = session.id;
   }

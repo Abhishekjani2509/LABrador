@@ -1,0 +1,197 @@
+MASTER SERVICES AGREEMENT
+
+This Master Services Agreement ("Agreement") is entered into as of the date
+of last signature below (the "Effective Date") by and between Continuum
+Cloud Systems, Inc., a Delaware corporation with its principal place of
+business at 900 Congress Avenue, Suite 500, Austin, TX 78701 ("Provider"),
+and Solano Bio Analytics, Inc., a Delaware corporation with its principal
+place of business at 4400 Bayshore Parkway, Suite 200, San Mateo, CA 94403
+("Client"). Provider and Client are each a "Party" and collectively the
+"Parties."
+
+RECITALS
+
+WHEREAS, Provider offers a cloud-based data analytics and pipeline
+management platform together with related implementation, configuration,
+and support services; and
+
+WHEREAS, Client desires to procure such services on the terms set forth
+herein and in one or more Order Forms referencing this Agreement;
+
+NOW, THEREFORE, the Parties agree as follows:
+
+1. DEFINITIONS
+1.1 "Order Form" means a document, executed by both Parties or accepted
+electronically, that references this Agreement and specifies the Services,
+fees, and Initial Term.
+1.2 "Services" means the Continuum platform subscription and the
+implementation, configuration, and support services described in an Order
+Form or accompanying Statement of Work ("SOW").
+1.3 "Deliverables" means any reports, dashboards, integrations, data
+models, custom configurations, or other work product created or provided
+by Provider in the course of performing the Services.
+1.4 "Background IP" means any technology, tools, templates, methodologies,
+or code owned or developed by a Party prior to, or independent of, this
+Agreement.
+
+2. SERVICES
+2.1 Provider will perform the Services described in each Order Form in a
+professional and workmanlike manner consistent with generally accepted
+industry standards.
+2.2 Client will provide reasonable cooperation, timely access to data and
+personnel, and any materials reasonably requested by Provider to perform
+the Services.
+
+3. TERM
+3.1 This Agreement commences on the Effective Date and continues, together
+with each Order Form issued hereunder, for the Initial Term set forth in
+the applicable Order Form (the "Initial Term"), unless earlier terminated
+as provided in Section 9.
+3.2 Additional terms governing renewal and termination of this Agreement
+and any Order Form are set forth in Section 9 and Section 11.
+
+4. FEES AND PAYMENT
+4.1 Client will pay the fees set forth in each Order Form (the "Fees").
+Except as otherwise stated in an Order Form, Provider will invoice Client
+monthly in advance for subscription Fees and monthly in arrears for
+time-and-materials professional services.
+4.2 Client shall pay each undisputed invoice within ninety (90) days of
+the invoice date. Any amount not paid when due will accrue interest at the
+lesser of one and one-half percent (1.5%) per month or the maximum rate
+permitted by law, and Provider may, upon ten (10) days' written notice,
+suspend access to the Services until all past-due amounts are paid in
+full. If any invoice remains unpaid more than thirty (30) days past its
+due date, all remaining Fees for the balance of the then-current Term
+shall become immediately due and payable.
+4.3 Client shall be responsible for all sales, use, and similar taxes
+associated with the Services, excluding taxes based on Provider's net
+income.
+4.4 Fee Adjustments. Provider's standard subscription Fees are fixed
+during the Initial Term. Commencing with the first Renewal Term (as
+defined in Section 11.7) and upon each subsequent renewal, Provider may
+increase the Fees by providing written notice at least thirty (30) days
+prior to the start of the applicable Renewal Term. Continued use of the
+Services following the effective date of any Fee increase constitutes
+Client's acceptance of the revised Fees.
+
+5. CONFIDENTIALITY
+5.1 Each Party may disclose confidential information to the other in
+connection with this Agreement ("Confidential Information"). The
+receiving Party will use the disclosing Party's Confidential Information
+solely to perform its obligations hereunder and will protect it using at
+least the same degree of care it uses for its own confidential
+information of similar nature, but no less than reasonable care.
+5.2 Confidential Information does not include information that is or
+becomes publicly available through no fault of the receiving Party, was
+rightfully known prior to disclosure, or is independently developed
+without reference to the disclosing Party's Confidential Information.
+
+6. INTELLECTUAL PROPERTY
+6.1 As between the Parties, Provider retains all right, title, and
+interest in and to the Services, the Continuum platform, and all
+Background IP, including any updates, enhancements, or derivative works
+thereof.
+6.2 Any Deliverables, custom configurations, integrations, data models,
+dashboards, or other work product created by Provider in the course of
+performing the Services — including any Background IP of either Party
+incorporated therein — shall be and remain the sole and exclusive
+property of Provider. Client is granted a non-exclusive, non-transferable,
+revocable license to use the Deliverables solely in connection with its
+authorized use of the Services during the Term.
+6.3 Client hereby assigns to Provider all right, title, and interest in
+any feedback, suggestions, or configuration data Client provides in
+connection with the Services, and Provider may use and incorporate the
+foregoing into its products and services without restriction or
+compensation to Client.
+
+7. WARRANTIES; DISCLAIMER
+7.1 Provider warrants that the Services will materially conform to the
+applicable documentation.
+7.2 EXCEPT AS EXPRESSLY SET FORTH HEREIN, THE SERVICES ARE PROVIDED "AS
+IS" AND PROVIDER DISCLAIMS ALL OTHER WARRANTIES, WHETHER EXPRESS, IMPLIED,
+OR STATUTORY, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+AND NON-INFRINGEMENT.
+
+8. LIMITATION OF LIABILITY
+8.1 EXCEPT FOR BREACHES OF SECTION 5 (CONFIDENTIALITY), CLIENT'S PAYMENT
+OBLIGATIONS, OR EITHER PARTY'S INDEMNIFICATION OBLIGATIONS, NEITHER PARTY
+WILL BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL
+DAMAGES, AND EACH PARTY'S TOTAL LIABILITY ARISING OUT OF THIS AGREEMENT
+WILL NOT EXCEED THE FEES PAID OR PAYABLE BY CLIENT IN THE TWELVE (12)
+MONTHS PRECEDING THE CLAIM.
+
+9. TERMINATION
+9.1 Termination for Cause. Either Party may terminate this Agreement or an
+Order Form if the other Party materially breaches this Agreement and
+fails to cure such breach within thirty (30) days of written notice.
+9.2 Termination for Convenience. Client may terminate an Order Form prior
+to the end of its then-current Term for any reason upon thirty (30) days'
+written notice to Provider. In such event, Client shall pay Provider an
+early termination fee equal to fifty percent (50%) of the Fees that would
+otherwise have been payable for the remainder of the then-current Term,
+which the Parties agree is a reasonable estimate of Provider's
+anticipated losses and not a penalty.
+9.3 Upon any termination, Client shall pay all Fees accrued through the
+effective date of termination, together with any early termination fee
+due under Section 9.2.
+
+10. INDEMNIFICATION
+10.1 Provider will defend Client against third-party claims alleging that
+the Services, as used in accordance with this Agreement, infringe a valid
+U.S. patent or copyright, and will pay resulting damages finally awarded,
+subject to Section 8.
+10.2 Client will defend and indemnify Provider against third-party claims
+arising from Client's data, Client's breach of this Agreement, or
+Client's use of the Services in violation of applicable law.
+
+11. GENERAL PROVISIONS
+11.1 Independent Contractors. The Parties are independent contractors, and
+nothing herein creates a partnership, joint venture, or agency
+relationship.
+11.2 Assignment. Neither Party may assign this Agreement without the
+other Party's prior written consent, except that either Party may assign
+this Agreement in connection with a merger, acquisition, or sale of
+substantially all of its assets.
+11.3 Force Majeure. Neither Party will be liable for delays caused by
+events beyond its reasonable control.
+11.4 Notices. All notices under this Agreement must be in writing and
+delivered by email (with confirmation of receipt), overnight courier, or
+certified mail to the addresses set forth in the applicable Order Form or
+such other address as a Party designates in writing. Notices are deemed
+given upon confirmed receipt.
+11.5 Entire Agreement; Order of Precedence. This Agreement, together with
+all Order Forms and SOWs, constitutes the entire agreement between the
+Parties regarding its subject matter and supersedes all prior agreements.
+In the event of a conflict, the terms of an Order Form control over this
+Agreement solely with respect to the Services described therein.
+11.6 Governing Law. This Agreement is governed by the laws of the State
+of Delaware, without regard to conflict-of-laws principles.
+11.7 Auto-Renewal. Each Order Form's Initial Term will automatically
+renew for successive twelve (12)-month periods (each, a "Renewal Term,"
+and together with the Initial Term, the "Term") unless either Party
+provides written notice of non-renewal at least sixty (60) days prior to
+the end of the then-current Term. Fee Adjustments applicable to any
+Renewal Term are governed by Section 4.4.
+11.8 Severability; Waiver. If any provision of this Agreement is held
+unenforceable, the remaining provisions will remain in full force and
+effect. No waiver of any provision will be effective unless in writing
+and signed by the waiving Party.
+11.9 Counterparts. This Agreement may be executed in counterparts, each
+of which is deemed an original.
+
+IN WITNESS WHEREOF, the Parties have executed this Agreement as of the
+Effective Date.
+
+CONTINUUM CLOUD SYSTEMS, INC.          SOLANO BIO ANALYTICS, INC.
+
+By: _______________________________    By: _______________________________
+Name: Rachel Voss                      Name: ______________________________
+Title: VP, Revenue                     Title: _____________________________
+Date: _____________________________    Date: _____________________________
+
+---
+Order Form No. OF-2044 (referenced herein) specifies: Initial Term of
+twelve (12) months commencing August 1, 2026; Continuum Platform —
+Growth Tier subscription; Implementation & Onboarding SOW. Pricing and
+payment schedule per Order Form OF-2044, subject to Section 4 of this
+Agreement.
