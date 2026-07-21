@@ -195,4 +195,81 @@ function computeIncidentImpact(weeks, anomalies, avgDealSizeUsd) {
 const avgDealSizeUsd = estimateAvgDealSizeUsd(withGrowth, anomalies);
 const incidentImpact = computeIncidentImpact(withGrowth, anomalies, avgDealSizeUsd);
 
-console.log(JSON.stringify({ weeks: withGrowth, anomalies, avgDealSizeUsd: avgDealSizeUsd === null ? null : round(avgDealSizeUsd, 2), incidentImpact }, null, 2));
+// Last-4-full-weeks trajectory per metric, for spotting trends a single
+// week-over-week comparison can't show. Values are oldest-to-newest
+// internally; direction is the majority of the (up to 3) week-over-week
+// transitions among them (ties, including all-flat, report as "flat").
+//
+// "up" isn't uniformly good news — it's good for signups/activations/mrr/
+// trials but bad for churned_customers — so every trend line is tagged with
+// an explicit business-polarity word (growing/declining for up-is-good
+// metrics, worsening/improving for churned_customers) alongside the raw
+// up/down/flat, rather than leaving a bare "up"/"down" for a skimming
+// reader to misjudge.
+const GOOD_DIRECTION = {
+  signups: "up",
+  activations: "up",
+  churned_customers: "down",
+  mrr_usd: "up",
+  trials_started: "up",
+};
+
+const TREND_METRICS = [
+  { key: "signups", label: "Signups" },
+  { key: "activations", label: "Activations" },
+  { key: "churned_customers", label: "Churned customers" },
+  { key: "mrr_usd", label: "MRR (end of week)" },
+  { key: "trials_started", label: "Trials started" },
+];
+
+function trendValue(week, key) {
+  return key === "mrr_usd" ? week.mrr_usd_end : week.totals[key];
+}
+
+function formatTrendValue(key, value) {
+  return key === "mrr_usd" ? `$${value.toLocaleString("en-US")}` : `${value}`;
+}
+
+function polarityWord(key, direction) {
+  if (direction === "flat") return "flat";
+  const isGood = direction === GOOD_DIRECTION[key];
+  return direction === "up" ? (isGood ? "growing" : "worsening") : isGood ? "improving" : "declining";
+}
+
+function computeTrend(weeks, { key, label }) {
+  // Only full (7-day) weeks belong in the trend, same as the growth table —
+  // an in-progress trailing week would otherwise silently skew both the
+  // trajectory and its direction.
+  const fullWeeks = weeks.filter((w) => w.days === 7);
+  const window = fullWeeks.slice(-4);
+  const values = window.map((w) => trendValue(w, key));
+  let up = 0;
+  let down = 0;
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] > values[i - 1]) up++;
+    else if (values[i] < values[i - 1]) down++;
+  }
+  const transitions = values.length - 1;
+  const direction = up > down ? "up" : down > up ? "down" : "flat";
+  const count = direction === "up" ? up : direction === "down" ? down : transitions - up - down;
+  const polarity = polarityWord(key, direction);
+  const trajectory = [...values]
+    .reverse()
+    .map((v) => formatTrendValue(key, v))
+    .join(" <- ");
+  const parenthetical =
+    direction === "flat" ? `flat ${count} of last ${transitions}` : `${polarity}, ${direction} ${count} of last ${transitions}`;
+  return {
+    metric: key,
+    label,
+    weekStarts: window.map((w) => w.weekStart),
+    values,
+    direction,
+    polarity,
+    formatted: `${trajectory} (${parenthetical})`,
+  };
+}
+
+const trends = TREND_METRICS.map((m) => computeTrend(withGrowth, m));
+
+console.log(JSON.stringify({ weeks: withGrowth, anomalies, avgDealSizeUsd: avgDealSizeUsd === null ? null : round(avgDealSizeUsd, 2), incidentImpact, trends }, null, 2));

@@ -10,23 +10,23 @@
     "lib/managed.ts: in outcome mode, the deliverable is often emitted as an intermediate agent.message, followed by a short wrap-up message once the grader reports satisfied — consumeUntilEndTurn returned strictly the last message, which clobbered the deliverable with the wrap-up. Fixed by tracking the longest agent.message seen and preferring it over the last one, gated to invocation === 'outcome' (message mode keeps last-message semantics). Also confirmed client.beta.files.list({scope_id}) 400s on the live API despite the SDK's type declaration, and sandbox files written during a session are not registered in the Files API at all — there is currently no way to retrieve a sandbox-written file after the fact; the reply-message stream is the only channel."
   ],
   "compiled_hashes": {
-    "agent/tools/metrics-reporter/instructions.md": "359255468a150ab3b7968b0131d97467b7d1f7dcf0939c8a86c1dbe9def6f5cc",
-    "agent/tools/metrics-reporter/rubric.md": "57b77072c15102496e8d8ea310ac5e97574969d94415a4722ba6b86dd24f1c7b",
-    "agent/tools/metrics-reporter/skills/weekly-metrics-report/SKILL.md": "9aa3c6ef07a2072a89ca694fdb36f5214ee8a0124de0b7d798af3f7afcce41d7",
-    "agent/tools/metrics-reporter/skills/weekly-metrics-report/scripts/compute-report.mjs": "6e51a07ed3df83c139062837facbb749772fbdf03f20e2e260c7e2902bd4acff",
+    "agent/tools/metrics-reporter/instructions.md": "ec9bd286fddade1a1282a3e113c20b6da83eb1bdc095456efafa3b8cd40150a9",
+    "agent/tools/metrics-reporter/rubric.md": "8a79b97acd32694726819d4202a2999464d19ff29c60f35fe1fc2275ca43b666",
+    "agent/tools/metrics-reporter/skills/weekly-metrics-report/SKILL.md": "ca31538181005203b85f3a024bc44f0c0e4ef8f1e3b30e5e0105879908c8f51a",
+    "agent/tools/metrics-reporter/skills/weekly-metrics-report/scripts/compute-report.mjs": "7ed9a1dca8dd2ebd70116117c64ea3877523d4593f202da8488812f8cc952a05",
     "agent/tools/metrics-reporter.ts": "44b3a11d825971f06b3e1ad20a984cf6e9b8d1b2e2fc1a87eaf879cf6971232e"
   },
   "deployment": {
     "agent_id": "agent_01KsGkpBgTyhQv8D3j55W5oZ",
-    "agent_version": 6,
+    "agent_version": 7,
     "skills": {
       "weekly-metrics-report": {
         "skill_id": "skill_01TqsHG3P1Umzh9TFxPYoxhR",
-        "version": "1784630786246405",
-        "hash": "640c791bcdf5dfe41ccd9df8c44851e659fefdc06bd15c96c6ccc5a592c35fab"
+        "version": "1784646346819762",
+        "hash": "e96679ed107def305e28b175a3f4549738416b23918d84ca3bafd98ea396fdf3"
       }
     },
-    "system_hash": "359255468a150ab3b7968b0131d97467b7d1f7dcf0939c8a86c1dbe9def6f5cc",
+    "system_hash": "ec9bd286fddade1a1282a3e113c20b6da83eb1bdc095456efafa3b8cd40150a9",
     "tools_hash": "efc6b94e6405bdb3bef7bbce1c51b5c4597516ae1d9afd93a588e10b3854360a"
   }
 }

@@ -16,6 +16,16 @@ MRR, "this week's total" is the end-of-week balance (the last day's
 | 2026-07-06 | 140 (-10.8%) | 65 (-27.0%) | 33 (+725.0%) | $213,058 (-3.2%) | 165 (-10.8%) |
 | 2026-07-13 | 184 (+31.4%) | 113 (+73.8%) | 8 (-75.8%) | $230,828 (+8.3%) | 209 (+26.7%) |
 
+## 4-week trend
+
+Last 4 full weeks (06-22 through 07-13), most recent first:
+
+- Signups: 184 <- 140 <- 157 <- 150 (growing, up 2 of last 3)
+- Activations: 113 <- 65 <- 89 <- 96 (declining, down 2 of last 3)
+- Churned customers: 8 <- 33 <- 4 <- 3 (worsening, up 2 of last 3)
+- MRR (end of week): $230,828 <- $213,058 <- $220,038 <- $205,505 (growing, up 2 of last 3)
+- Trials started: 209 <- 165 <- 185 <- 200 (declining, down 2 of last 3)
+
 ## Activation rate
 
 Activation rate = that week's activations ÷ that same week's signups — not
@@ -98,5 +108,5 @@ recovery across every metric is the stronger signal than the dip itself.
 *Generated from `data/weekly-metrics.csv` (mock fixture data) via
 `.claude/skills/weekly-metrics-report/scripts/compute-report.mjs` — every growth percentage, activation rate,
 and dollar figure above is taken directly from the script's JSON output
-(`weeks`, `anomalies`, `avgDealSizeUsd`, `incidentImpact`), not recomputed
-by hand.*
+(`weeks`, `anomalies`, `avgDealSizeUsd`, `incidentImpact`, `trends`), not
+recomputed by hand.*

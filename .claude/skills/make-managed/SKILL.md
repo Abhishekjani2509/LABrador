@@ -117,7 +117,14 @@ preserving it") instead of folding it into "your edits from this session".
 Every preserved hand-edit that encodes a checkable behavior **must** get a
 matching `rubric.md` criterion in the same compile — a silently preserved
 guard with nothing verifying it is a rule the deployed agent can drop
-unnoticed.
+unnoticed. And any rubric criterion asserting a concrete format or precision
+(decimal places, string shape, rounding) must be **checked against the
+bundled script's actual fixture output before deploy** — if they diverge,
+fix one side; never ship a rubric whose letter the deployed script can't
+meet. For a hand-edited item in an ordered list, the item's TEXT is what
+must survive byte-for-byte; repositioning/renumbering for coherence is fine,
+but call the move out in the per-file merge line ("kept the founder's
+Health-verdict criterion verbatim, moved #9 → #4").
 
 **Hashes.** After writing, record in `manifest.json.compiled_hashes` the
 sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
@@ -127,7 +134,11 @@ the repo root (e.g. `agent/tools/<name>/instructions.md`,
 **Deploy + verify.** Run `npm run deploy-agent <name>` and show the founder
 the output (skill IDs, agent ID + version). Then prove it works with the
 **largest realistic input the session actually used** — e.g. the full fixture
-file from `managed/<name>/`, not a hand-typed one-liner:
+file from `managed/<name>/`, not a hand-typed one-liner. Run the smoke test
+in the **foreground (blocking)** — never as a backgrounded job. Do not end
+your turn until you have read a terminal verdict from its output
+(`grader: satisfied` / final reply, or a failure); a turn that ends while
+the smoke test is still running has verified nothing:
 `npm run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
 A smoke test that can't reproduce the founder's real input shape has not
 proven anything. Prefer the *same* fixture and parameters as the session's
