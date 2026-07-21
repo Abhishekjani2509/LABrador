@@ -91,9 +91,19 @@ export type SessionEvent = {
 // ---------------------------------------------------------------------------
 
 export function makeClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.ANTHROPIC_API_KEY ?? readEnvFile("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set (see .env.example)");
   return new Anthropic({ apiKey });
+}
+
+/** Minimal .env reader so the CLIs work right after `cp .env.example .env`. */
+function readEnvFile(key: string): string | undefined {
+  const envPath = join(repoRoot, ".env");
+  if (!existsSync(envPath)) return undefined;
+  const line = readFileSync(envPath, "utf8")
+    .split("\n")
+    .find((l) => l.startsWith(`${key}=`));
+  return line?.slice(key.length + 1).trim().replace(/^["']|["']$/g, "") || undefined;
 }
 
 const SHARED_ENVIRONMENT_NAME = "mvp-shared";
@@ -269,7 +279,7 @@ async function executeCustomTool(
 // ---------------------------------------------------------------------------
 
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
