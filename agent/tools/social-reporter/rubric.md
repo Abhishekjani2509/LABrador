@@ -32,5 +32,22 @@ against. A complete report satisfies all of the following:
 8. **Precision** — engagement rates are reported to 3 decimal places
    everywhere they appear.
 9. **No overclaiming** — the reply never implies a real X/LinkedIn account
-   was read or posted to. Both `read_posts` and `queue_post` are treated as,
-   and described as, mock/prototype tools.
+   was read, posted to, or had a post cancelled on it. `read_posts`,
+   `queue_post`, `cancel_post`, and `list_queue` are treated as, and
+   described as, mock/prototype tools.
+10. **Queue status is present, fresh, and tool-backed** — every weekly
+    report ends with a `## Queue status` section listing every outbox entry
+    with `status: "queued"` (id, platform, first ~60 chars of text), sourced
+    from an actual `list_queue` tool call made in this reply (not inferred
+    from `queue_post`/`cancel_post` return values, which only describe a
+    single entry each) — and that call happens after any queuing/cancelling
+    already done this turn, not before. Any post cancelled earlier in the
+    conversation must not appear in it.
+11. **Cancel requests are real tool calls** — if asked to cancel a queued
+    post, the reply shows an actual `cancel_post` tool call and cites its
+    return value (the removed entry) as confirmation. If the id doesn't
+    exist, the reply states the tool's error plainly rather than claiming
+    something was cancelled.
+12. **X length cap respected** — `queue_post` hard-rejects X drafts over 280
+    characters. A reply that gets this error never reports the draft as
+    queued; it says so and offers a shortened draft instead.

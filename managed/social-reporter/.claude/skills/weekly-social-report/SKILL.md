@@ -1,6 +1,6 @@
 ---
 name: weekly-social-report
-description: Produce the weekly X/LinkedIn engagement report for this account — per-platform top posts by engagement rate (with arithmetic shown), exactly one data-backed content recommendation, and two drafted posts queued via publish-post.mjs. Use whenever asked for the weekly social report, engagement report, or "what should I post next week."
+description: Produce the weekly X/LinkedIn engagement report for this account — per-platform top posts by engagement rate (with arithmetic shown), exactly one data-backed content recommendation, two drafted posts queued via publish-post.mjs, and a queue status section listing everything currently pending in the outbox. Use whenever asked for the weekly social report, engagement report, or "what should I post next week."
 ---
 
 # Weekly social report
@@ -9,7 +9,14 @@ Reports on X and LinkedIn post performance for the last 2 weeks and queues
 next week's posts. All data in this project is mocked — `scripts/read-posts.mjs`
 reads `data/posts.json` instead of calling a real API, and
 `scripts/publish-post.mjs` queues to `data/outbox.json` instead of publishing
-anywhere. Nothing in this skill ever touches a live account.
+anywhere. `scripts/cancel-post.mjs --id <id>` removes a queued entry from
+`data/outbox.json` if a pending post needs to be pulled back before it goes
+out. `publish-post.mjs` assigns ids from the highest id currently in the
+outbox, not from array length, so cancelling from the middle of the queue and
+then queuing a new post can never collide with an id still in use — an id
+freed by a cancellation can be reassigned to a later post, but never while
+the original is still present. Nothing in this skill ever touches a live
+account.
 
 ## Step 1 — Read the posts
 
@@ -90,6 +97,20 @@ node scripts/publish-post.mjs --platform <x|linkedin> --text "<draft>"
 Then read back `data/outbox.json` and confirm both new entries are present
 before reporting them as queued — don't claim they landed without checking.
 
+## Step 6 — List queue status
+
+Read `data/outbox.json` (the same read from Step 5 covers this) and list
+every entry with `status: "queued"` — this includes the two drafts you just
+queued plus anything already pending from before this run. For each, show
+the id, platform, and the first ~60 characters of `text` (truncate with `…`
+if the text is longer; show it in full if it's 60 characters or fewer). This
+is a status listing, not a ranking — keep entries in outbox order, don't
+sort by platform or recency. Read this fresh each time rather than reusing
+an earlier read from this same run — `cancel-post.mjs` removes entries
+outright rather than marking them cancelled, so a fresh read of
+`data/outbox.json` is always the full and correct set of what's actually
+pending, with no separate "excluded" state to filter for.
+
 ## Output format
 
 Produce exactly these sections, in this order:
@@ -124,6 +145,15 @@ Two drafts in this register, queued via `scripts/publish-post.mjs` (see
 
 1. "<draft 1>"
 2. "<draft 2>"
+
+## Queue status
+
+Posts currently sitting in the outbox with status `queued`, oldest to newest
+as they appear in `data/outbox.json` (includes the two just queued above):
+
+| ID | Platform | Text (first ~60 chars) |
+| --- | --- | --- |
+| <id> | <x\|linkedin> | <first ~60 chars of text>… |
 ```
 
 Report engagement rates to 3 decimal places throughout, matching the

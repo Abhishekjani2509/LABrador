@@ -11,9 +11,10 @@ export default defineTool({
   description:
     "Produces the weekly X/LinkedIn engagement report (prototype, mock data): " +
     "per-platform top posts by engagement rate, exactly one data-backed content " +
-    "recommendation, and two drafted posts queued for review. Provide a " +
-    "complete, self-contained task; the specialist runs remotely and returns " +
-    "its final answer.",
+    "recommendation, two drafted posts queued for review, and a queue status " +
+    "listing of everything pending. Can also cancel a queued post on request. " +
+    "Provide a complete, self-contained task; the specialist runs remotely and " +
+    "returns its final answer.",
   inputSchema: {
     type: "object",
     properties: {

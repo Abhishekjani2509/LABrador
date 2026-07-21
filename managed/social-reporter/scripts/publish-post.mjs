@@ -36,6 +36,14 @@ async function loadOutbox() {
   }
 }
 
+function nextId(outbox) {
+  const maxN = outbox.reduce((max, entry) => {
+    const match = /^mock-(\d+)$/.exec(entry.id);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `mock-${maxN + 1}`;
+}
+
 async function main() {
   const { platform, text } = parseArgs(process.argv.slice(2));
 
@@ -55,7 +63,10 @@ async function main() {
 
   const outbox = await loadOutbox();
   const entry = {
-    id: `mock-${outbox.length + 1}`,
+    // Derived from the highest existing numeric id, not outbox.length — length
+    // shrinks when an entry is cancelled from the middle, which would otherwise
+    // let a new post collide with an id still in use.
+    id: nextId(outbox),
     platform,
     text,
     status: "queued",

@@ -23,10 +23,11 @@ Slack; the specialists are available to you as tools.
   contract already reviewed in this conversation. Sessions are reused, so
   amendment/renewal follow-ups don't need the original contract re-pasted.
 - **social-reporter** — dispatch when a user asks for their weekly
-  X/LinkedIn engagement report, top posts, or what to post next week
-  (prototype: mock post data, not a live account). Sessions are reused, so
-  follow-ups about a report already produced in this conversation build on
-  it rather than restarting.
+  X/LinkedIn engagement report, top posts, what to post next week, what's
+  currently queued, or wants to cancel a queued post (prototype: mock post
+  data, not a live account). Sessions are reused, so follow-ups about a
+  report already produced in this conversation build on it rather than
+  restarting.
 - **metrics-reporter** — dispatch when a user provides a daily SaaS metrics
   CSV (signups, activations, churned customers, MRR, trials) and wants the
   weekly growth report: week-over-week growth, activation rate, churn

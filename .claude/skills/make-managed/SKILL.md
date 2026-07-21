@@ -94,7 +94,7 @@ wrapper sit exactly where eve expects them):
 | `agent/tools/<name>/rubric.md` | The Phase 2 quality criteria as gradeable markdown. Emitted in both modes (in `outcome` mode it is sent with `user.define_outcome`; otherwise it documents the bar). |
 | `agent/tools/<name>/skills/<slug>/…` | Authored skills copied **byte-for-byte unchanged**, plus any derived skills. Each dir must contain `SKILL.md` (with `name` + `description` frontmatter). |
 | `agent/tools/<name>/manifest.json` | Schema below. |
-| `agent/lib/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. |
+| `agent/lib/<name>/tools.ts` | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in instructions.md — don't leave the gap for the smoke test to trip on. |
 | `agent/tools/<name>.ts` | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted. |
 
 Then append one dispatch entry to `agent/instructions.md` under
@@ -114,8 +114,10 @@ unchanged prior baseline, or (c) **content you did not write and this
 session did not direct — a founder hand-edit**. Surface bucket (c)
 explicitly ("I found a `## House style` section I didn't generate —
 preserving it") instead of folding it into "your edits from this session".
-For hand-added rules that are checkable, offer to mirror them into
-`rubric.md` so something actually enforces them.
+Every preserved hand-edit that encodes a checkable behavior **must** get a
+matching `rubric.md` criterion in the same compile — a silently preserved
+guard with nothing verifying it is a rule the deployed agent can drop
+unnoticed.
 
 **Hashes.** After writing, record in `manifest.json.compiled_hashes` the
 sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
@@ -135,6 +137,12 @@ test after any post-verify change to config or runtime code. When the
 output has hard structural invariants (fixed section count/order, mandated
 first heading), **assert them mechanically** on the smoke output (a grep is
 enough) — don't rely on noticing violations by eye.
+
+On a **recompile**, design the smoke test to cover both sides in one run:
+exercise the new capability AND re-confirm the pre-existing best-output path
+still holds (e.g. one request that triggers the new tool *and* produces the
+full report the founder already approved). An update that only tests the new
+thing can regress the old thing silently.
 
 When the agent has custom tools, the smoke test must show the round-trip at
 the event level — the `· custom tool: <name> {…}` trace lines from
