@@ -1,7 +1,7 @@
 /**
  * Runtime for calling deployed Claude Managed Agents.
  *
- * One loop, used by both `scripts/run-agent.ts` (CLI) and the compiled eve
+ * One loop, used by both `scripts/console.ts` (CLI) and the compiled eve
  * tool wrappers in `agent/tools/<name>/index.ts`:
  *
  *   get-or-create session → send user event → consume SSE →
@@ -43,7 +43,7 @@ export interface AgentManifest {
   mcp_servers?: unknown[];
   /** One line per shared-runtime fix made during the compile session. */
   runtime_notes?: string[];
-  /** Written by `scripts/deploy-agent.ts`. Absent until first deploy. */
+  /** Written by `scripts/deploy.ts`. Absent until first deploy. */
   deployment?: {
     agent_id: string;
     agent_version: number;
@@ -141,7 +141,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
   const deployment = opts.manifest.deployment;
   if (!deployment?.agent_id) {
     throw new Error(
-      `"${opts.manifest.name}" has no deployment.agent_id — run: bun run deploy-agent ${opts.manifest.name}`,
+      `"${opts.manifest.name}" has no deployment.agent_id — run: bun run deploy ${opts.manifest.name}`,
     );
   }
 
@@ -293,7 +293,7 @@ async function executeCustomTool(
 }
 
 // ---------------------------------------------------------------------------
-// Artifact loading (used by run-agent.ts and the eve wrappers)
+// Artifact loading (used by console.ts and the eve wrappers)
 // ---------------------------------------------------------------------------
 
 import { readFile } from "node:fs/promises";
@@ -305,14 +305,14 @@ import dotenvx from "@dotenvx/dotenvx";
 /**
  * The source-tree location works when running from tsx CLIs; when eve bundles
  * this module, import.meta.url points into the build output, so fall back to
- * walking up from cwd to the repo root (the dir holding managed/ + package.json).
+ * walking up from cwd to the repo root (the dir holding prototypes/ + package.json).
  */
 function findRepoRoot(): string {
   const fromSource = join(dirname(fileURLToPath(import.meta.url)), "..");
-  if (existsSync(join(fromSource, "managed"))) return fromSource;
+  if (existsSync(join(fromSource, "prototypes"))) return fromSource;
   let dir = process.cwd();
   for (;;) {
-    if (existsSync(join(dir, "managed")) && existsSync(join(dir, "package.json"))) return dir;
+    if (existsSync(join(dir, "prototypes")) && existsSync(join(dir, "package.json"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) return fromSource;
     dir = parent;

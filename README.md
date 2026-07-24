@@ -14,17 +14,19 @@ rewrite between "works on my machine" and "deployed".
 
 The story, end to end:
 
-1. **Prototype** — `claude` in this repo, work in `managed/<your-agent>/`.
+1. **Prototype** — `claude` in this repo, work in `prototypes/<your-agent>/`.
    Drop in fixtures, write skills, hit snags, fix them.
 2. **Compile** — `/make-managed-agent <your-agent>`. Claude mines the transcript
    (including the debugging lessons), asks you a few questions — each with a
    recommended answer — and emits a complete artifact: instructions, skills,
    a quality rubric, custom-tool handlers.
-3. **Deploy** — `bun run deploy-agent <your-agent>` uploads the skills and
+3. **Deploy** — `bun run deploy <your-agent>` uploads the skills and
    creates (or versions) the agent on the Managed Agents API.
-4. **Call it** — `bun run run-agent <your-agent>` chats with the deployed
-   agent over its session event stream. This is the endpoint: any backend
-   can drive it with three HTTP calls.
+4. **Call it** — `bun run console <your-agent>` opens the deployed agent in
+   the Claude Console's visual session runner (`-- --once "…"` runs one task
+   headless — that path also answers custom tools, which the web Console
+   can't). This is the endpoint: any backend can drive it with three HTTP
+   calls.
 5. **Put it in front of users** — the included [eve](https://eve.dev) router
    (Vercel's agent framework, running Claude) exposes HTTP and Slack
    channels and treats your deployed agents as tools. `bun run dev` and
@@ -36,10 +38,10 @@ The story, end to end:
 git clone <this repo> && cd mvp
 bun install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
-claude                 # prototype in managed/<name>/ … then: /make-managed-agent <name>
+bun run prototype <name>   # create/enter prototypes/<name> + auto-mode claude there … then: /make-managed-agent <name>
 ```
 
-Three worked examples ship in `managed/` — each was prototyped in a real
+Three worked examples ship in `prototypes/` — each was prototyped in a real
 Claude Code session and compiled with `/make-managed-agent`:
 
 | Example | What it shows |
@@ -72,7 +74,7 @@ no extra infrastructure.
 ## Repo layout
 
 ```
-managed/<name>/        # SOURCE — your prototypes (fixtures, .claude/skills, .mcp.json)
+prototypes/<name>/     # SOURCE — your prototypes (fixtures, .claude/skills, .mcp.json)
 .claude/skills/
   make-managed-agent/        # the compiler skill
 agent/                 # the eve router app
@@ -81,10 +83,10 @@ agent/                 # the eve router app
                        #   manifest.json, tools.ts (custom-tool handlers,
                        #   run in your process)
 lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
-scripts/               # deploy-agent.ts, run-agent.ts
+scripts/               # deploy.ts, console.ts
 ```
 
-`managed/` is source, `agent/tools/*.ts` + `agent/compiled/` are build output — but build output you
+`prototypes/` is source, `agent/tools/*.ts` + `agent/compiled/` are build output — but build output you
 can edit. Recompiling three-way-merges your hand-edits with the new
 derivation; it never clobbers them.
 

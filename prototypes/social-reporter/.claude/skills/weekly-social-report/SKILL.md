@@ -20,7 +20,7 @@ account.
 
 ## Step 1 — Read the posts
 
-Run, from `managed/social-reporter/`:
+Run, from `prototypes/social-reporter/`:
 
 ```
 node scripts/read-posts.mjs --since <14-days-ago, YYYY-MM-DD>

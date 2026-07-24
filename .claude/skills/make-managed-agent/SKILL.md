@@ -1,12 +1,12 @@
 ---
 name: make-managed-agent
-description: Compile the current prototyping session into a deployed Claude Managed Agent. Run as /make-managed-agent <name> from the session where the prototype in managed/<name>/ actually worked — the transcript is the primary compiler input.
+description: Compile the current prototyping session into a deployed Claude Managed Agent. Run as /make-managed-agent <name> from the session where the prototype in prototypes/<name>/ actually worked — the transcript is the primary compiler input.
 ---
 
 # /make-managed-agent <name> — the compiler
 
 You are about to turn a working prototype into a deployed agent. The founder
-prototyped in `managed/<name>/` in _this_ session; the transcript above — what
+prototyped in `prototypes/<name>/` in _this_ session; the transcript above — what
 was tried, what broke, what fixed it, what finally worked — is your primary
 source. Files are secondary evidence. You are the compiler: the output is a
 complete artifact dir at `agent/compiled/<name>/` plus a live Managed Agent.
@@ -18,13 +18,13 @@ open questions remain** — mining and interviewing complete first, always.
 
 Explore before you ask anything. From the repo root:
 
-- `managed/<name>/` — every file: fixtures, scratch outputs, scripts, notes.
-- `managed/<name>/.mcp.json` — if present, each **remote streamable-HTTP**
+- `prototypes/<name>/` — every file: fixtures, scratch outputs, scripts, notes.
+- `prototypes/<name>/.mcp.json` — if present, each **remote streamable-HTTP**
   server becomes an `mcp_servers` entry (stdio servers cannot deploy — flag
   them to the founder as the one thing that won't carry over).
-- `managed/<name>/.claude/skills/*/SKILL.md` — authored skills; these upload
+- `prototypes/<name>/.claude/skills/*/SKILL.md` — authored skills; these upload
   to the Skills API **unchanged**. Copy them into the artifact as-is.
-- `managed/<name>/CLAUDE.md` — if present, treat as instructions material.
+- `prototypes/<name>/CLAUDE.md` — if present, treat as instructions material.
 - `agent/compiled/<name>/` — if it already exists, this is a **recompile**: read
   `manifest.json` `compiled_hashes` now and follow the merge rules in Phase 4.
 
@@ -134,15 +134,15 @@ sha256 of every emitted file (`shasum -a 256`), keyed by path relative to
 the repo root (e.g. `agent/compiled/<name>/instructions.md`,
 `agent/compiled/<name>/tools.ts`). This is the merge base for the next recompile.
 
-**Deploy + verify.** Run `bun run deploy-agent <name>` and show the founder
+**Deploy + verify.** Run `bun run deploy <name>` and show the founder
 the output (skill IDs, agent ID + version). Then prove it works with the
 **largest realistic input the session actually used** — e.g. the full fixture
-file from `managed/<name>/`, not a hand-typed one-liner. Run the smoke test
+file from `prototypes/<name>/`, not a hand-typed one-liner. Run the smoke test
 in the **foreground (blocking)** — never as a backgrounded job. Do not end
 your turn until you have read a terminal verdict from its output
 (`grader: satisfied` / final reply, or a failure); a turn that ends while
 the smoke test is still running has verified nothing:
-`bun run run-agent <name> -- --once "$(cat managed/<name>/fixtures/<file>)"`.
+`bun run console <name> -- --once "$(cat prototypes/<name>/fixtures/<file>)"`.
 A smoke test that can't reproduce the founder's real input shape has not
 proven anything. Prefer the _same_ fixture and parameters as the session's
 best output, so the founder can A/B the deployed reply against what they
@@ -160,7 +160,7 @@ thing can regress the old thing silently.
 
 When the agent has custom tools, the smoke test must show the round-trip at
 the event level — the `· custom tool: <name> {…}` trace lines from
-`run-agent`, plus the tool's observable side effect (e.g. the queued row in
+`console`, plus the tool's observable side effect (e.g. the queued row in
 the outbox file) — not a prose claim that tools "were used".
 
 **Outcome mode (design contract — violating either invariant wastes a full
@@ -201,7 +201,7 @@ reader that the bug class was hit and solved.
 }
 ```
 
-(`deployment` is added by `deploy-agent.ts`; never write it by hand.)
+(`deployment` is added by `deploy.ts`; never write it by hand.)
 
 ### agent/tools/<name>.ts template
 

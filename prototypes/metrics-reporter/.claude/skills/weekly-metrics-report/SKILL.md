@@ -9,7 +9,7 @@ This skill is self-contained: everything it needs — including the
 aggregation script — lives under this skill directory
 (`.claude/skills/weekly-metrics-report/`). It only reads the CSV fixture
 from the project's `data/` directory; it depends on nothing else at the
-top level of `managed/metrics-reporter/`.
+top level of `prototypes/metrics-reporter/`.
 
 **Read this before doing anything else, every time you run this skill:**
 
@@ -44,7 +44,7 @@ reads its JSON.
 
 ## Step 1 — Run the compute script
 
-From `managed/metrics-reporter/` (the skill's `scripts/` directory holds
+From `prototypes/metrics-reporter/` (the skill's `scripts/` directory holds
 the script; the CSV stays in the project's top-level `data/`):
 
 ```

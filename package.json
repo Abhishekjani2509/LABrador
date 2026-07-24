@@ -5,8 +5,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "deploy-agent": "bun scripts/deploy-agent.ts",
-    "run-agent": "bun scripts/run-agent.ts",
+    "prototype": "scripts/prototype.sh",
+    "deploy": "bun scripts/deploy.ts",
+    "console": "bun scripts/console.ts",
     "dev": "eve dev",
     "typecheck": "tsc --noEmit"
   },
