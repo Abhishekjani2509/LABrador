@@ -13,52 +13,81 @@
  * `tools.ts` and posts a `user.custom_tool_result`. The process running
  * this file is the tool executor — no extra infrastructure.
  */
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
+import dotenvx from "@dotenvx/dotenvx";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Types shared with compiled artifacts
+// Schemas + types shared with compiled artifacts
 // ---------------------------------------------------------------------------
 
 /** One custom tool: declaration (sent to the agent) + local handler. */
-export interface CustomToolSpec {
+export type CustomToolSpec = {
   description: string;
   handler: (input: Record<string, unknown>) => Promise<string> | string;
   input_schema: Record<string, unknown>;
   name: string;
-}
+};
 
-/** Shape of `agent/tools/<name>/manifest.json`. */
-export interface AgentManifest {
-  /** Written by `/make-managed` at compile time; basis for Claude-merge. */
-  compiled_hashes?: Record<string, string>;
-  /** Written by `scripts/deploy.ts`. Absent until first deploy. */
-  deployment?: {
-    agent_id: string;
-    agent_version: number;
-    /** skills dir name → uploaded skill. */
-    skills: Record<string, { skill_id: string; version: string; hash: string }>;
-    system_hash: string;
-    tools_hash: string;
-  };
-  description?: string;
-  /** "message" = conversational turns; "outcome" = rubric-graded deliverable. */
-  invocation: "message" | "outcome";
-  /** Outcome mode only. Default 3, max 20. */
-  max_iterations?: number;
-  /** Remote streamable-HTTP MCP servers, passed through to the agent config. */
-  mcp_servers?: unknown[];
-  /** Model for the managed agent, e.g. "claude-sonnet-5". */
-  model: string;
-  name: string;
-  /** One line per shared-runtime fix made during the compile session. */
-  runtime_notes?: string[];
-  /** "reuse" = one MA session per caller session; "fresh" = new session per task. */
-  session_policy: "reuse" | "fresh";
-  /** Vault IDs holding MCP credentials; attached to every session at create. */
-  vault_ids?: string[];
-}
+/**
+ * Shape of `agent/compiled/<name>/manifest.json`, validated on load.
+ * Loose objects throughout: `scripts/deploy.ts` round-trips the manifest back
+ * to disk, so unknown keys must survive a parse.
+ */
+export const AgentManifest = z.looseObject({
+  // Written by `/make-managed-agent` at compile time; basis for Claude-merge.
+  compiled_hashes: z.record(z.string(), z.string()).optional(),
+  // Written by `scripts/deploy.ts`. Absent until first deploy.
+  deployment: z
+    .looseObject({
+      agent_id: z.string(),
+      agent_version: z.number(),
+      // skills dir name → uploaded skill.
+      skills: z.record(
+        z.string(),
+        z.looseObject({
+          hash: z.string(),
+          skill_id: z.string(),
+          version: z.string(),
+        })
+      ),
+      system_hash: z.string(),
+      tools_hash: z.string(),
+    })
+    .optional(),
+  description: z.string().optional(),
+  // "message" = conversational turns; "outcome" = rubric-graded deliverable.
+  invocation: z.enum(["message", "outcome"]),
+  // Outcome mode only. Default 3, max 20.
+  max_iterations: z.number().optional(),
+  // Remote streamable-HTTP MCP servers, passed through to the agent config.
+  // "permission" is compile-time metadata; deploy maps it onto the matching
+  // toolset's permission_policy (default "always_ask").
+  mcp_servers: z
+    .array(
+      z.looseObject({
+        name: z.string(),
+        permission: z.enum(["always_allow", "always_ask"]).optional(),
+      })
+    )
+    .optional(),
+  // Model for the managed agent, e.g. "claude-sonnet-5".
+  model: z.string(),
+  name: z.string(),
+  // One line per shared-runtime fix made during the compile session.
+  runtime_notes: z.array(z.string()).optional(),
+  // "reuse" = one MA session per caller session; "fresh" = new session per task.
+  session_policy: z.enum(["reuse", "fresh"]),
+  // Vault IDs holding MCP credentials; attached to every session at create.
+  vault_ids: z.array(z.string()).optional(),
+});
+export type AgentManifest = z.infer<typeof AgentManifest>;
 
-export interface RunTaskOptions {
+export type RunTaskOptions = {
   client?: Anthropic;
   manifest: AgentManifest;
   /** Observe every stream event (CLI rendering, transcript capture). */
@@ -72,23 +101,72 @@ export interface RunTaskOptions {
   /** Hard cap on one task, in milliseconds. Default 10 minutes. */
   timeoutMs?: number;
   tools?: CustomToolSpec[];
-}
+};
 
-export interface RunTaskResult {
+export type RunTaskResult = {
   /** Outcome mode: the grader's final result, e.g. "satisfied". */
   outcome?: { result: string; explanation?: string };
   /** Session ID — stash it to reuse the session for follow-up tasks. */
   sessionId: string;
   /** Final agent message text (or the last one before end-turn idle). */
   text: string;
-}
+};
+
+// ---------------------------------------------------------------------------
+// Session stream events
+// ---------------------------------------------------------------------------
+
+const SessionEvent = z.looseObject({
+  id: z.string().optional(),
+  type: z.string(),
+});
 
 /** Loosely-typed session stream event (the SDK streams these as unions). */
-export interface SessionEvent {
-  id?: string;
-  type: string;
-  [key: string]: unknown;
-}
+export type SessionEvent = z.infer<typeof SessionEvent>;
+
+/**
+ * The subset of stream events the loop acts on. Everything else (and any
+ * event missing a field required here, e.g. a tool_use without an id) is
+ * observed via `onEvent` but otherwise ignored.
+ */
+const KnownEvent = z.discriminatedUnion("type", [
+  z.looseObject({
+    content: z
+      .array(z.looseObject({ text: z.string().optional(), type: z.string() }))
+      .default([]),
+    type: z.literal("agent.message"),
+  }),
+  z.looseObject({
+    id: z.string(),
+    input: z.record(z.string(), z.unknown()).default({}),
+    name: z.string(),
+    type: z.literal("agent.custom_tool_use"),
+  }),
+  z.looseObject({
+    evaluated_permission: z.string().optional(),
+    id: z.string(),
+    type: z.enum(["agent.tool_use", "agent.mcp_tool_use"]),
+  }),
+  z.looseObject({
+    explanation: z.string().optional(),
+    result: z.string().default(""),
+    type: z.literal("span.outcome_evaluation_end"),
+  }),
+  z.looseObject({
+    stop_reason: z
+      .looseObject({
+        event_ids: z.array(z.string()).default([]),
+        type: z.string(),
+      })
+      .optional(),
+    type: z.literal("session.status_idle"),
+  }),
+  z.looseObject({
+    error: z.unknown().optional(),
+    type: z.literal("session.status_terminated"),
+  }),
+]);
+type KnownEvent = z.infer<typeof KnownEvent>;
 
 // ---------------------------------------------------------------------------
 // Client + environment
@@ -148,6 +226,8 @@ function titleSnippet(task: string, maxLen = 60): string {
 // The loop
 // ---------------------------------------------------------------------------
 
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * Run one task against a deployed managed agent and wait for the result.
  */
@@ -200,7 +280,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
   return consumeUntilEndTurn({ client, opts, sessionId });
 }
 
-interface StreamState {
+type PendingToolUse = { name: string; input: Record<string, unknown> };
+
+type StreamState = {
   lastMessage: string;
   // Outcome mode: the grader inspects sandbox files, not the reply — so
   // agents commonly emit the real deliverable as one agent.message, then a
@@ -220,11 +302,8 @@ interface StreamState {
   pendingPermissionAsks: Set<string>;
   // agent.custom_tool_use events by event ID, so requires_action can find
   // the tool name + input for each blocking event_id.
-  pendingToolUses: Map<
-    string,
-    { name: string; input: Record<string, unknown> }
-  >;
-}
+  pendingToolUses: Map<string, PendingToolUse>;
+};
 
 async function consumeUntilEndTurn(args: {
   client: Anthropic;
@@ -233,7 +312,8 @@ async function consumeUntilEndTurn(args: {
 }): Promise<RunTaskResult> {
   const { client, sessionId, opts } = args;
   const toolsByName = new Map((opts.tools ?? []).map((t) => [t.name, t]));
-  const deadline = Date.now() + (opts.timeoutMs ?? 10 * 60 * 1000);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   const state: StreamState = {
     lastMessage: "",
     longestMessage: "",
@@ -246,11 +326,16 @@ async function consumeUntilEndTurn(args: {
   for await (const raw of stream) {
     if (Date.now() > deadline) {
       throw new Error(
-        `runTask timed out after ${opts.timeoutMs ?? 600_000}ms (session ${sessionId})`
+        `runTask timed out after ${timeoutMs}ms (session ${sessionId})`
       );
     }
-    const event = raw as unknown as SessionEvent;
-    opts.onEvent?.(event);
+    opts.onEvent?.(SessionEvent.parse(raw));
+
+    const parsed = KnownEvent.safeParse(raw);
+    if (!parsed.success) {
+      continue;
+    }
+    const event = parsed.data;
 
     if (event.type === "session.status_terminated") {
       throw new Error(
@@ -261,10 +346,7 @@ async function consumeUntilEndTurn(args: {
       trackEvent(event, state);
       continue;
     }
-    const stopReason = event.stop_reason as
-      | { type: string; event_ids?: string[] }
-      | undefined;
-    if (stopReason?.type !== "requires_action") {
+    if (event.stop_reason?.type !== "requires_action") {
       // end_turn (or anything else terminal-ish): we're done.
       return {
         outcome: state.outcome,
@@ -274,7 +356,7 @@ async function consumeUntilEndTurn(args: {
     }
     await answerBlockingEvents({
       client,
-      eventIds: stopReason.event_ids ?? [],
+      eventIds: event.stop_reason.event_ids,
       sessionId,
       state,
       toolsByName,
@@ -285,15 +367,13 @@ async function consumeUntilEndTurn(args: {
   return { outcome: state.outcome, sessionId, text: finalText(opts, state) };
 }
 
-function trackEvent(event: SessionEvent, state: StreamState): void {
+function trackEvent(event: KnownEvent, state: StreamState): void {
   switch (event.type) {
     case "agent.message": {
-      const content = event.content as
-        | Array<{ type: string; text?: string }>
-        | undefined;
-      const text = (content ?? [])
-        .filter((block) => block.type === "text" && block.text)
-        .map((block) => block.text)
+      const text = event.content
+        .flatMap((block) =>
+          block.type === "text" && block.text ? [block.text] : []
+        )
         .join("\n");
       if (text) {
         state.lastMessage = text;
@@ -303,29 +383,21 @@ function trackEvent(event: SessionEvent, state: StreamState): void {
       }
       break;
     }
-    case "agent.custom_tool_use": {
-      if (event.id) {
-        state.pendingToolUses.set(event.id, {
-          input: (event.input ?? {}) as Record<string, unknown>,
-          name: String(event.name ?? ""),
-        });
-      }
+    case "agent.custom_tool_use":
+      state.pendingToolUses.set(event.id, {
+        input: event.input,
+        name: event.name,
+      });
       break;
-    }
     case "agent.tool_use":
-    case "agent.mcp_tool_use": {
-      if (event.id && event.evaluated_permission === "ask") {
+    case "agent.mcp_tool_use":
+      if (event.evaluated_permission === "ask") {
         state.pendingPermissionAsks.add(event.id);
       }
       break;
-    }
-    case "span.outcome_evaluation_end": {
-      state.outcome = {
-        explanation: event.explanation ? String(event.explanation) : undefined,
-        result: String(event.result ?? ""),
-      };
+    case "span.outcome_evaluation_end":
+      state.outcome = { explanation: event.explanation, result: event.result };
       break;
-    }
     default:
       break;
   }
@@ -384,7 +456,7 @@ function finalText(opts: RunTaskOptions, state: StreamState): string {
 async function executeCustomTool(
   toolsByName: Map<string, CustomToolSpec>,
   eventId: string,
-  use: { name: string; input: Record<string, unknown> } | undefined
+  use: PendingToolUse | undefined
 ): Promise<string> {
   if (!use) {
     return `Error: no agent.custom_tool_use event seen for ${eventId}`;
@@ -403,12 +475,6 @@ async function executeCustomTool(
 // ---------------------------------------------------------------------------
 // Artifact loading (used by console.ts and the eve wrappers)
 // ---------------------------------------------------------------------------
-
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import dotenvx from "@dotenvx/dotenvx";
 
 /**
  * The source-tree location works when running from tsx CLIs; when eve bundles
@@ -444,13 +510,13 @@ dotenvx.config({
   quiet: true,
 });
 
-export interface CompiledAgent {
+export type CompiledAgent = {
   dir: string;
   instructions: string;
   manifest: AgentManifest;
   rubric?: string;
   tools: CustomToolSpec[];
-}
+};
 
 /**
  * Load a compiled artifact from `agent/compiled/<name>/` (manifest,
@@ -474,9 +540,15 @@ export async function loadCompiledAgent(
       `no compiled agent at agent/compiled/${name}/ (missing manifest.json)`
     );
   }
-  const manifest = JSON.parse(
-    await readFile(manifestPath, "utf8")
-  ) as AgentManifest;
+  const parsed = AgentManifest.safeParse(
+    JSON.parse(await readFile(manifestPath, "utf8"))
+  );
+  if (!parsed.success) {
+    throw new Error(
+      `invalid manifest at agent/compiled/${name}/manifest.json:\n${z.prettifyError(parsed.error)}`
+    );
+  }
+  const manifest = parsed.data;
   const instructions = await readFile(join(dir, "instructions.md"), "utf8");
   const rubricPath = join(dir, "rubric.md");
   const rubric = existsSync(rubricPath)

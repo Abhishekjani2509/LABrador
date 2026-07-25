@@ -3,7 +3,8 @@
     "@ai-sdk/anthropic": "^4.0.16",
     "@anthropic-ai/sdk": "^0.112.4",
     "@dotenvx/dotenvx": "^2.17.4",
-    "eve": "^0.26.1"
+    "eve": "^0.26.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",
