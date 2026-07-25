@@ -30,12 +30,9 @@ const onceIndex = args.indexOf("--once");
 const once = onceIndex === -1 ? undefined : args[onceIndex + 1];
 const quiet = args.includes("--quiet");
 
-const compiled = await loadCompiledAgent(name);
-const { manifest, rubric, tools } = compiled;
+const { manifest, rubric, tools } = await loadCompiledAgent(name);
 
-const agentLabel = manifest.deployment
-  ? manifest.deployment.agent_id
-  : "(not deployed)";
+const agentLabel = manifest.deployment?.agent_id ?? "(not deployed)";
 console.error(
   `[${manifest.name}] agent ${agentLabel} · ` +
     `${manifest.invocation} mode · ${tools.length} custom tool(s)`

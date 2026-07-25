@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { toFile } from "@anthropic-ai/sdk";
 import {
   type AgentManifest,
@@ -31,8 +31,8 @@ if (!name) {
 }
 
 const client = makeClient();
-const compiled = await loadCompiledAgent(name);
-const { dir, manifest, instructions, tools } = compiled;
+const { dir, manifest, instructions, tools } = await loadCompiledAgent(name);
+const mcpServers = manifest.mcp_servers ?? [];
 const deployment: NonNullable<AgentManifest["deployment"]> =
   manifest.deployment ?? {
     agent_id: "",
@@ -59,7 +59,7 @@ await Promise.all(skillDirs.map((skillDir) => deploySkill(skillDir)));
 async function deploySkill(skillDir: string): Promise<void> {
   const bundleHash = await hashDir(join(skillsRoot, skillDir));
   const existing = deployment.skills[skillDir];
-  if (existing && existing.hash === bundleHash) {
+  if (existing?.hash === bundleHash) {
     console.log(`skill ${skillDir}: unchanged (${existing.skill_id})`);
     return;
   }
@@ -106,11 +106,11 @@ for (const known of Object.keys(deployment.skills)) {
 
 const agentConfig = {
   description: manifest.description,
-  // "permission" is compile-time metadata for the toolset mapping above — the
+  // "permission" is compile-time metadata for the toolset mapping below — the
   // API's mcp_servers entries only accept {type, name, url}.
-  mcp_servers: (
-    (manifest.mcp_servers ?? []) as Array<{ permission?: string }>
-  ).map(({ permission: _permission, ...server }) => server) as never[],
+  mcp_servers: mcpServers.map(
+    ({ permission: _permission, ...server }) => server
+  ) as never[],
   model: manifest.model,
   name: manifest.name,
   skills: Object.values(deployment.skills).map((skill) => ({
@@ -125,12 +125,7 @@ const agentConfig = {
     // Each server's manifest entry may carry a "permission" field ("always_allow"
     // or "always_ask", default "always_ask") chosen by the founder at compile
     // time; deploy maps it onto the toolset's permission_policy.
-    ...(
-      (manifest.mcp_servers ?? []) as Array<{
-        name: string;
-        permission?: "always_allow" | "always_ask";
-      }>
-    ).map((server) => ({
+    ...mcpServers.map((server) => ({
       default_config: {
         enabled: true,
         permission_policy: {
@@ -197,23 +192,15 @@ if (nextManifest === (await readFile(manifestPath, "utf8"))) {
 // --- helpers --------------------------------------------------------------
 
 async function hashDir(root: string): Promise<string> {
-  const entries: string[] = [];
-  async function walk(current: string, prefix: string): Promise<void> {
-    const dirents = await readdir(current, { withFileTypes: true });
-    await Promise.all(
-      dirents.map(async (entry) => {
-        const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          await walk(join(current, entry.name), rel);
-        } else {
-          entries.push(
-            `${rel}:${sha(await readFile(join(current, entry.name)))}`
-          );
-        }
-      })
-    );
-  }
-  await walk(root, "");
+  const files = (
+    await readdir(root, { recursive: true, withFileTypes: true })
+  ).filter((entry) => entry.isFile());
+  const entries = await Promise.all(
+    files.map(async (entry) => {
+      const path = join(entry.parentPath, entry.name);
+      return `${relative(root, path)}:${sha(await readFile(path))}`;
+    })
+  );
   return sha(entries.toSorted(compareCodeUnits).join("\n"));
 }
 
