@@ -85,6 +85,8 @@ prototype that scrapes or researches.
 /managed-agent-prototype <braindump>   # interview + scaffold managed/<name>/, then
                                        #   exercise the agent's job on the fixtures
 /managed-agent-deploy <name>           # compile this session, deploy, smoke-test
+/managed-agent-setup                   # first run (bun install, .env + key check)
+                                       #   and later: un-ignore agents, wire auth
 ```
 
 ```bash

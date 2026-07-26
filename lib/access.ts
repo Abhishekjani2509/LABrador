@@ -8,7 +8,8 @@ import type { DynamicResolveContext } from "eve/tools";
 // before revealing its tool. A `{ public: true }` ACL means every caller sees
 // the tool — identical to having no gating at all.
 //
-// To gate tools per caller after forking this repo:
+// To gate tools per caller after forking this repo (/managed-agent-setup
+// walks you through all three):
 //
 //   1. Wire authentication into the eve router so ctx.session.auth is
 //      populated: https://eve.dev/docs/guides/auth-and-route-protection

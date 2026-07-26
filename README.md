@@ -65,9 +65,8 @@ The story, end to end:
 
 ```bash
 git clone <this repo> && cd mvp
-bun install
-cp .env.example .env   # add your ANTHROPIC_API_KEY
 claude                 # then, in the session:
+                       #   /managed-agent-setup    ← installs deps, sets up .env, checks your key
                        #   /managed-agent-prototype what customer-1 needs, in your own words …
                        #   /managed-agent-deploy customer-1-agent   ← once it works
 ```
@@ -109,6 +108,7 @@ managed/<name>/        # one dir per agent — the workspace you prototype in
 .claude/skills/
   managed-agent-prototype/   # braindump → an agent that works in-session
   managed-agent-deploy/      # that session → a deployed agent
+  managed-agent-setup/       # make the repo yours: version agents, wire auth
 agent/                 # the eve router app
   tools/<name>.ts      # COMPILED — eve tool wrapper (file name = tool name)
 lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
@@ -121,8 +121,10 @@ build output you can edit. Recompiling three-way-merges your hand-edits with
 the new derivation; it never clobbers them.
 
 Agents are untracked by default — fixtures often carry real customer data —
-so `git status` stays quiet as you build. Versioning yours in a fork is one
-block deleted from `.gitignore`.
+so `git status` stays quiet as you build. When the repo becomes yours, run
+`/managed-agent-setup`: it removes that `.gitignore` block so your agents
+version, and walks you through wiring your auth (Supabase, WorkOS, Clerk,
+better-auth, your own JWT) into the router so per-agent ACLs enforce.
 
 ## And there's more
 
