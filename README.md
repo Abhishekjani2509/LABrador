@@ -12,6 +12,24 @@ while prototyping upload to the platform **unchanged** — same `SKILL.md`
 format on your laptop and in production. That continuity is the point: no
 rewrite between "works on my machine" and "deployed".
 
+## Why it's shaped like this
+
+Revenue is king and distribution is the moat. Every day of the batch counts,
+and it counts in customers onboarded — not in architecture. Whatever you
+engineer against customer one is already wrong; the real product shows up
+somewhere around customer 10, 20, 30.
+
+So treat every customer as forward-deployed engineering. Sit with them, get the
+agent working on *their* use case in a single Claude Code session, then let
+`/make-managed-agent` compile that session into a deployed agent. Works on my
+machine → production, hands-free, in about twenty minutes. Then go get the next
+customer.
+
+What that deletes is the detour. Should I use LangChain? LangGraph? the Agent
+SDK? Do I need eve? Where does state live? Who hosts the sandbox? That's a week
+of engineering exercise and it onboards nobody. The answers are already wired
+up here, so you don't have to have the argument.
+
 The story, end to end:
 
 1. **Prototype** — `claude` in this repo, work in `prototypes/<your-agent>/`.
@@ -19,7 +37,8 @@ The story, end to end:
 2. **Compile** — `/make-managed-agent <your-agent>`. Claude mines the transcript
    (including the debugging lessons), asks you a few questions — each with a
    recommended answer — and emits a complete artifact: instructions, skills,
-   a quality rubric, custom-tool handlers.
+   custom-tool handlers, plus a grading rubric if you opt into defining an
+   outcome.
 3. **Deploy** — `bun run deploy <your-agent>` uploads the skills and
    creates (or versions) the agent on the Managed Agents API.
 4. **Call it** — `bun run console <your-agent>` opens the deployed agent in
@@ -38,17 +57,8 @@ The story, end to end:
 git clone <this repo> && cd mvp
 bun install
 cp .env.example .env   # add your ANTHROPIC_API_KEY
-bun run prototype <name>   # create/enter prototypes/<name> + auto-mode claude there … then: /make-managed-agent <name>
+bun run prototype customer-1-agent   # create/enter prototypes/customer-1-agent + auto-mode claude there … then: /make-managed-agent customer-1-agent
 ```
-
-Three worked examples ship in `prototypes/` — each was prototyped in a real
-Claude Code session and compiled with `/make-managed-agent`:
-
-| Example | What it shows |
-| --- | --- |
-| `contract-reviewer` | Document processing: a client contract in, parties/dates/obligations/red-flags out. Authored skill uploads unchanged. |
-| `social-reporter` | Automation over external systems: reads and writes posts through **custom tools** — the deployed agent calls back into *your* process for anything that touches your systems. (Mocked here; swap the handlers for your real API.) |
-| `metrics-reporter` | Deliverable mode: CSV in, weekly report out, graded by a rubric via `user.define_outcome` — the platform's built-in grader iterates until the report passes. Its skill ships executable `scripts/`. |
 
 ## How a compiled agent runs
 
@@ -79,11 +89,11 @@ prototypes/<name>/     # SOURCE — your prototypes (fixtures, .claude/skills, .
   make-managed-agent/        # the compiler skill
 agent/                 # the eve router app
   tools/<name>.ts      # COMPILED — eve tool wrapper (file name = tool name)
-  compiled/<name>/     # COMPILED — instructions.md, rubric.md, skills/,
-                       #   manifest.json, tools.ts (custom-tool handlers,
-                       #   run in your process)
+  compiled/<name>/     # COMPILED — instructions.md, skills/, manifest.json,
+                       #   tools.ts (custom-tool handlers, run in your
+                       #   process), rubric.md if you defined an outcome
 lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
-scripts/               # deploy.ts, console.ts
+scripts/               # prototype.sh, deploy.ts, console.ts
 ```
 
 `prototypes/` is source, `agent/tools/*.ts` + `agent/compiled/` are build output — but build output you
