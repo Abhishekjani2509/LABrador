@@ -9,12 +9,12 @@
  * The web Console can't answer custom tools (this process executes those), so
  * agents with custom tools park at requires_action there — use --once instead.
  * Outcome-mode agents (manifest.invocation === "outcome") treat the --once input
- * as an outcome description and run it against the compiled rubric.md.
+ * as an outcome description and run it against the agent's rubric.md.
  */
 import { spawn } from "node:child_process";
 import {
   getOrCreateEnvironment,
-  loadCompiledAgent,
+  loadManagedAgent,
   makeClient,
   runTask,
   type SessionEvent,
@@ -30,7 +30,7 @@ const onceIndex = args.indexOf("--once");
 const once = onceIndex === -1 ? undefined : args[onceIndex + 1];
 const quiet = args.includes("--quiet");
 
-const { manifest, rubric, tools } = await loadCompiledAgent(name);
+const { manifest, rubric, tools } = await loadManagedAgent(name);
 
 const agentLabel = manifest.deployment?.agent_id ?? "(not deployed)";
 console.error(

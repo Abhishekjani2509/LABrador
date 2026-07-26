@@ -1,10 +1,10 @@
 /**
- * Deploy a compiled agent to the Claude Managed Agents API.
+ * Deploy a managed agent to the Claude Managed Agents API.
  *
  *   bun run deploy <name>
  *
  * Thin Anthropic SDK wrapper, idempotent by content hash:
- *   1. zip + upload each skills/<dir>/ bundle that changed  → Skills API
+ *   1. zip + upload each .claude/skills/<dir>/ bundle that changed → Skills API
  *   2. create the agent, or update it (new version) if config changed
  *   3. write agent_id / versions / hashes back into manifest.json
  *
@@ -20,7 +20,7 @@ import { join, relative } from "node:path";
 import { toFile } from "@anthropic-ai/sdk";
 import {
   type AgentManifest,
-  loadCompiledAgent,
+  loadManagedAgent,
   makeClient,
 } from "@/lib/claude-managed-agent.ts";
 
@@ -31,7 +31,7 @@ if (!name) {
 }
 
 const client = makeClient();
-const { dir, manifest, instructions, tools } = await loadCompiledAgent(name);
+const { dir, manifest, instructions, tools } = await loadManagedAgent(name);
 const mcpServers = manifest.mcp_servers ?? [];
 const deployment: NonNullable<AgentManifest["deployment"]> =
   manifest.deployment ?? {
@@ -47,7 +47,7 @@ const sha = (text: string | Buffer) =>
 
 // --- 1. skills ------------------------------------------------------------
 
-const skillsRoot = join(dir, "skills");
+const skillsRoot = join(dir, ".claude", "skills");
 const skillDirs = existsSync(skillsRoot)
   ? (await readdir(skillsRoot, { withFileTypes: true }))
       .filter((e) => e.isDirectory())
@@ -183,10 +183,10 @@ manifest.deployment = deployment;
 const manifestPath = join(dir, "manifest.json");
 const nextManifest = `${JSON.stringify(manifest, null, 2)}\n`;
 if (nextManifest === (await readFile(manifestPath, "utf8"))) {
-  console.log(`manifest unchanged: agent/compiled/${name}/manifest.json`);
+  console.log(`manifest unchanged: managed/${name}/manifest.json`);
 } else {
   await writeFile(manifestPath, nextManifest);
-  console.log(`manifest updated: agent/compiled/${name}/manifest.json`);
+  console.log(`manifest updated: managed/${name}/manifest.json`);
 }
 
 // --- helpers --------------------------------------------------------------

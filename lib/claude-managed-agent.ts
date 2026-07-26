@@ -1,15 +1,15 @@
 /**
  * Runtime for calling deployed Claude Managed Agents.
  *
- * One loop, used by both `scripts/console.ts` (CLI) and the compiled eve
- * tool wrappers in `agent/tools/<name>/index.ts`:
+ * One loop, used by both `scripts/console.ts` (CLI) and the eve tool
+ * wrappers in `agent/tools/<name>.ts`:
  *
  *   get-or-create session → send user event → consume SSE →
  *   answer custom-tool calls in-process → return the final agent message.
  *
  * Custom tools are the interesting part: when the managed agent calls one,
  * the session parks at `status_idle` with `stop_reason: requires_action`
- * until *this process* runs the matching handler from the compiled
+ * until *this process* runs the matching handler from the agent's
  * `tools.ts` and posts a `user.custom_tool_result`. The process running
  * this file is the tool executor — no extra infrastructure.
  */
@@ -22,7 +22,7 @@ import dotenvx from "@dotenvx/dotenvx";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Schemas + types shared with compiled artifacts
+// Schemas + types shared with managed agent dirs
 // ---------------------------------------------------------------------------
 
 /** One custom tool: declaration (sent to the agent) + local handler. */
@@ -34,12 +34,12 @@ export type CustomToolSpec = {
 };
 
 /**
- * Shape of `agent/compiled/<name>/manifest.json`, validated on load.
+ * Shape of `managed/<name>/manifest.json`, validated on load.
  * Loose objects throughout: `scripts/deploy.ts` round-trips the manifest back
  * to disk, so unknown keys must survive a parse.
  */
 export const AgentManifest = z.looseObject({
-  // Written by `/make-managed-agent` at compile time; basis for Claude-merge.
+  // Written by `/managed-agent-deploy` at compile time; basis for Claude-merge.
   compiled_hashes: z.record(z.string(), z.string()).optional(),
   // Written by `scripts/deploy.ts`. Absent until first deploy.
   deployment: z
@@ -92,7 +92,7 @@ export type RunTaskOptions = {
   manifest: AgentManifest;
   /** Observe every stream event (CLI rendering, transcript capture). */
   onEvent?: (event: SessionEvent) => void;
-  /** Outcome mode: rubric markdown (from the compiled rubric.md). */
+  /** Outcome mode: rubric markdown (from the agent's rubric.md). */
   rubric?: string;
   /** Reuse an existing session (session_policy "reuse"); omit to create one. */
   sessionId?: string;
@@ -479,17 +479,17 @@ async function executeCustomTool(
 /**
  * The source-tree location works when running from tsx CLIs; when eve bundles
  * this module, import.meta.url points into the build output, so fall back to
- * walking up from cwd to the repo root (the dir holding prototypes/ + package.json).
+ * walking up from cwd to the repo root (the dir holding managed/ + package.json).
  */
 function findRepoRoot(): string {
   const fromSource = join(dirname(fileURLToPath(import.meta.url)), "..");
-  if (existsSync(join(fromSource, "prototypes"))) {
+  if (existsSync(join(fromSource, "managed"))) {
     return fromSource;
   }
   let dir = process.cwd();
   for (;;) {
     if (
-      existsSync(join(dir, "prototypes")) &&
+      existsSync(join(dir, "managed")) &&
       existsSync(join(dir, "package.json"))
     ) {
       return dir;
@@ -510,7 +510,7 @@ dotenvx.config({
   quiet: true,
 });
 
-export type CompiledAgent = {
+export type ManagedAgent = {
   dir: string;
   instructions: string;
   manifest: AgentManifest;
@@ -519,25 +519,26 @@ export type CompiledAgent = {
 };
 
 /**
- * Load a compiled artifact from `agent/compiled/<name>/` (manifest,
- * instructions, rubric, skills, tools.ts — one dir per agent). The dir lives
- * outside eve's authored slots on purpose: eve requires modules under
- * `agent/tools/**` to BE tools and rejects data files under `agent/lib/**`.
+ * Load an agent from `managed/<name>/` (manifest, CLAUDE.md, rubric, skills,
+ * tools.ts — one dir per agent). The dir lives outside `agent/` on purpose:
+ * eve requires every module under `agent/tools/**` to BE a tool, so the
+ * agent dir — tools.ts included — sits beyond eve's discovery, and only the
+ * thin wrapper `agent/tools/<name>.ts` is authored.
  *
  * `skipToolImport`: the eve tool wrappers import their `tools.ts` statically
  * (so the bundler sees it) and pass handlers via `runTask`; they set this to
- * avoid a runtime dynamic import inside the bundled app. CLIs (tsx) leave it
+ * avoid a runtime dynamic import inside the bundled app. CLIs (bun) leave it
  * unset and get handlers loaded dynamically.
  */
-export async function loadCompiledAgent(
+export async function loadManagedAgent(
   name: string,
   opts?: { skipToolImport?: boolean }
-): Promise<CompiledAgent> {
-  const dir = join(repoRoot, "agent", "compiled", name);
+): Promise<ManagedAgent> {
+  const dir = join(repoRoot, "managed", name);
   const manifestPath = join(dir, "manifest.json");
   if (!existsSync(manifestPath)) {
     throw new Error(
-      `no compiled agent at agent/compiled/${name}/ (missing manifest.json)`
+      `no managed agent at managed/${name}/ (missing manifest.json)`
     );
   }
   const parsed = AgentManifest.safeParse(
@@ -545,11 +546,11 @@ export async function loadCompiledAgent(
   );
   if (!parsed.success) {
     throw new Error(
-      `invalid manifest at agent/compiled/${name}/manifest.json:\n${z.prettifyError(parsed.error)}`
+      `invalid manifest at managed/${name}/manifest.json:\n${z.prettifyError(parsed.error)}`
     );
   }
   const manifest = parsed.data;
-  const instructions = await readFile(join(dir, "instructions.md"), "utf8");
+  const instructions = await readFile(join(dir, "CLAUDE.md"), "utf8");
   const rubricPath = join(dir, "rubric.md");
   const rubric = existsSync(rubricPath)
     ? await readFile(rubricPath, "utf8")
