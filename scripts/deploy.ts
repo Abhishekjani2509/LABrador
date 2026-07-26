@@ -30,8 +30,8 @@ if (!name) {
   process.exit(1);
 }
 
-const client = makeClient();
 const { dir, manifest, instructions, tools } = await loadManagedAgent(name);
+const client = makeClient();
 const mcpServers = manifest.mcp_servers ?? [];
 const deployment: NonNullable<AgentManifest["deployment"]> =
   manifest.deployment ?? {
@@ -48,13 +48,41 @@ const sha = (text: string | Buffer) =>
 // --- 1. skills ------------------------------------------------------------
 
 const skillsRoot = join(dir, ".claude", "skills");
-const skillDirs = existsSync(skillsRoot)
-  ? (await readdir(skillsRoot, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-  : [];
+const skillDirs: string[] = [];
+if (existsSync(skillsRoot)) {
+  for (const entry of await readdir(skillsRoot, { withFileTypes: true })) {
+    if (
+      !(
+        entry.isDirectory() &&
+        existsSync(join(skillsRoot, entry.name, "SKILL.md"))
+      )
+    ) {
+      console.error(
+        `skill ${entry.name}: skipped — only skill dirs (containing SKILL.md) belong under .claude/skills/`
+      );
+      continue;
+    }
+    skillDirs.push(entry.name);
+  }
+}
 
-await Promise.all(skillDirs.map((skillDir) => deploySkill(skillDir)));
+const skillResults = await Promise.allSettled(
+  skillDirs.map((skillDir) => deploySkill(skillDir))
+);
+const skillFailures = skillResults.flatMap((result, i) =>
+  result.status === "rejected"
+    ? [{ dir: skillDirs[i], reason: result.reason }]
+    : []
+);
+if (skillFailures.length > 0) {
+  // Persist the IDs of skills that did upload, so a re-run versions them
+  // instead of creating workspace orphans.
+  await persistManifest();
+  for (const failure of skillFailures) {
+    console.error(`skill ${failure.dir}: failed — ${String(failure.reason)}`);
+  }
+  process.exit(1);
+}
 
 async function deploySkill(skillDir: string): Promise<void> {
   const bundleHash = await hashDir(join(skillsRoot, skillDir));
@@ -179,14 +207,18 @@ deployment.tools_hash = toolsHash;
 
 // --- 3. write back --------------------------------------------------------
 
-manifest.deployment = deployment;
-const manifestPath = join(dir, "manifest.json");
-const nextManifest = `${JSON.stringify(manifest, null, 2)}\n`;
-if (nextManifest === (await readFile(manifestPath, "utf8"))) {
-  console.log(`manifest unchanged: managed/${name}/manifest.json`);
-} else {
-  await writeFile(manifestPath, nextManifest);
-  console.log(`manifest updated: managed/${name}/manifest.json`);
+await persistManifest();
+
+async function persistManifest(): Promise<void> {
+  manifest.deployment = deployment;
+  const manifestPath = join(dir, "manifest.json");
+  const nextManifest = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (nextManifest === (await readFile(manifestPath, "utf8"))) {
+    console.log(`manifest unchanged: managed/${name}/manifest.json`);
+  } else {
+    await writeFile(manifestPath, nextManifest);
+    console.log(`manifest updated: managed/${name}/manifest.json`);
+  }
 }
 
 // --- helpers --------------------------------------------------------------

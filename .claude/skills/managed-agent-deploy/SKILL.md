@@ -29,7 +29,9 @@ Explore before you ask anything. From the repo root:
   thing that won't carry over). A server the session reached via interactive
   OAuth needs a headless credential to deploy: provision an API key, store it
   as a vault credential keyed by the MCP URL (`static_bearer`), and put the
-  vault ID in the manifest's `vault_ids`. Each carried-over server also needs
+  vault ID in the manifest's `vault_ids`. Vault provisioning is a manual step
+  (Console or API) — nothing in `scripts/` automates it; the runtime only
+  attaches `vault_ids` at session create. Each carried-over server also needs
   a permission mode — asked in Phase 3.
 - `managed/<name>/.claude/skills/*/SKILL.md` — authored skills; these upload
   to the Skills API **unchanged, straight from where they sit**. No copying.
@@ -96,7 +98,7 @@ Always resolve (asking only where the evidence is genuinely ambiguous):
 | Model                             | `claude-sonnet-5` (upgrade only if the session needed deep reasoning). Confirm it as its own one-line question — never bundled into the keep/drop list                                                                                                                                                                                                                                                                                                         |
 | Invocation mode                   | **Always ask this one directly: "do you want to define an outcome — a rubric a machine grades every run against — or keep it conversational?"** Recommend `message` by default; recommend `outcome` only when the founder wants a _machine_ to grade iterations. The discriminator is **"do they want to stop hand-checking?"**, not "did they hand-check this session?" — corrections the founder wants codified into a rubric so it's enforced automatically every future run point to `outcome` (recurring, gradeable deliverable); corrections made because they want to keep eyeballing raw output each run point to `message`. The answer decides whether `rubric.md` exists at all |
 | Session policy                    | `reuse` (conversational continuity); `fresh` for stateless one-shot tasks                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Access**                        | **Always ask on a first deploy: "who should be able to call this agent through the router — everyone, a specific org id, or specific user ids?"** Recommend everyone (`{ public: true }`) until the founder has wired auth. The answer becomes `managed/<name>/acl.ts`. When they restrict, say plainly that enforcement begins only once auth is wired into the eve router (`lib/access.ts` resolves the caller from `ctx.session.auth`, which nothing populates until then) — until that day a restricted acl.ts denies nobody real, it's declared intent. On a recompile, keep the existing acl.ts unless the founder raises it |
+| **Access**                        | **Always ask on a first deploy: "who should be able to call this agent through the router — everyone, a specific org id, or specific user ids?"** Recommend everyone (`{ public: true }`) until the founder has wired auth. The answer becomes `managed/<name>/acl.ts`. When they restrict, say plainly what the code does today: principals resolve from `ctx.session.auth`, nothing populates that until auth is wired into the eve router, and unresolved callers **fail closed** — so a restricted acl.ts hides the tool from *every* caller (HTTP, Slack, all of them) until auth exists. Restricting before wiring auth means shipping an agent nobody can reach through the router; `bun run console` still works, which makes the gap easy to miss. On a recompile, keep the existing acl.ts unless the founder raises it |
 | MCP permission mode               | **Ask per carried-over MCP server: `always_allow` or `always_ask`?** MCP tool calls default to a permission "ask" that parks the session on a human confirmation — which a headless caller can never answer (the runtime denies it with an explanatory message rather than deadlocking). So `always_ask` effectively disables the server for deployed runs; recommend `always_allow` when the founder kept the server on purpose, and say plainly what that means (the agent uses that service unattended, on the founder's account/credits). The answer goes on the server's manifest entry as `"permission"` |
 | Keep/drop                         | your mined list of skills + custom tools, shown as a short list for confirmation                                                                                                                                                                                                                                                                                                                                                                               |
 
@@ -118,7 +120,7 @@ is authored where eve looks.
 | `managed/<name>/manifest.json`                | Schema below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `managed/<name>/tools.ts`                     | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in `CLAUDE.md` — don't leave the gap for the smoke test to trip on. |
 | `managed/<name>/acl.ts`                       | The Phase 3 access answer. Template below; the wrapper imports it and `lib/access.ts` enforces it once auth is wired.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `agent/tools/<name>.ts`                       | eve tool wrapper — this file's name is the router-facing tool name. Template below; emit it verbatim with the name substituted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `agent/tools/<name>.ts`                       | eve tool wrapper — this file's name is the router-facing tool name. Template below; substitute the name, and include the `tools` import and its `runTask` argument **only when the agent has custom tools** — omit both otherwise (a bare `tools` reference with no import fails typecheck).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Then append one dispatch entry to `agent/instructions.md` under
 `## Specialists`: tool name, one line on when to dispatch to it.
@@ -200,6 +202,13 @@ debugging cycle at runtime):**
 - The outcome-mode smoke test needs event-level proof, same as custom tools:
   the trace must show `grader: satisfied` AND the final reply carrying the
   real deliverable (not a short wrap-up) — those are independent facts.
+- **The input side has no separate channel.** The task string (what `--once`
+  sends) becomes the *outcome description* in `user.define_outcome` — so the
+  agent's input must arrive inline in that description or through a custom
+  tool it can call. Design `CLAUDE.md`, the rubric, and the smoke test around
+  wherever the real input actually lives; piping a fixture file into `--once`
+  makes the fixture the outcome description, which is only right when you
+  mean it to be.
 
 **Runtime fixes.** If this session fixed shared runtime code (`lib/`,
 `scripts/`) along the way, record each fix as a one-line entry in
@@ -217,12 +226,14 @@ reader that the bug class was hit and solved.
   "session_policy": "reuse | fresh",
   "max_iterations": 3,
   "mcp_servers": [{ "type": "url", "name": "<name>", "url": "<https url>", "permission": "always_allow | always_ask" }],
+  "vault_ids": ["<vault id — only when an MCP credential lives in a vault>"],
   "runtime_notes": ["<one line per shared-runtime fix made during this session>"],
   "compiled_hashes": { "<relative path>": "<sha256>" }
 }
 ```
 
-(`deployment` is added by `deploy.ts`; never write it by hand.)
+(`deployment` is added by `deploy.ts`; never write it by hand. `max_iterations`
+applies to `outcome` mode only, max 20; omit it in `message` mode.)
 
 ### managed/<name>/acl.ts template
 

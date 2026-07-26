@@ -27,6 +27,13 @@ if (!name) {
   process.exit(1);
 }
 const onceIndex = args.indexOf("--once");
+if (onceIndex !== -1 && !args[onceIndex + 1]?.trim()) {
+  // Catches `--once "$(cat wrong/path)"` expanding to "" — without this the
+  // script would fall through to opening a Console session and exit 0, which
+  // reads as a passing smoke test.
+  console.error("--once needs a non-empty task");
+  process.exit(1);
+}
 const once = onceIndex === -1 ? undefined : args[onceIndex + 1];
 const quiet = args.includes("--quiet");
 

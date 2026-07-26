@@ -120,6 +120,10 @@ the four `COMPILED` files plus `agent/tools/<name>.ts` are build output — but
 build output you can edit. Recompiling three-way-merges your hand-edits with
 the new derivation; it never clobbers them.
 
+Agents are untracked by default — fixtures often carry real customer data —
+so `git status` stays quiet as you build. Versioning yours in a fork is one
+block deleted from `.gitignore`.
+
 ## And there's more
 
 - **Remote MCP servers** (streamable-HTTP) carry over to the deployed agent's
@@ -127,9 +131,10 @@ the new derivation; it never clobbers them.
   prototype against a repo-root `.mcp.json` you add; a `managed/<name>/.mcp.json`
   is for when one agent should deploy with a set of its own.
 - **Dreaming** (research preview): the platform consolidates memory across
-  your agent's sessions while it's idle.
+  your agent's sessions while it's idle — comes with the platform, nothing to
+  wire here.
 - **Scheduled deployments**: run any of these agents on a cron straight from
-  the API — no worker of your own.
+  the API — no worker of your own, and nothing in this repo to set up.
 - The eve router deploys to Vercel as-is; when you want this in front of
   users — your app's frontend, Slack, email — eve's channels are built for
   exactly that, with your compiled agents already wired in as tools.
