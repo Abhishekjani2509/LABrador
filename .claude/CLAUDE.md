@@ -16,7 +16,7 @@ to the compiler than a clean final answer. Don't quietly redo a broken approach 
 show the break and the fix.
 
 **Void superseded things out loud.** The compiler cannot tell stale from current,
-and it reads everything. In the session that produced `managed/fondo-event-agent`:
+and it reads everything. From the session that produced this repo's first agent:
 
 - an early SKILL.md was rewritten, but the Skill tool re-injected the *superseded*
   copy verbatim into the transcript, where it read as current design;
@@ -54,9 +54,7 @@ is the deliverable, not a scratch note. Two things make one good:
 
 - **A failure-modes section, and make it the longest one.** Procedure is cheap;
   knowing that page 1 of a search lies, or that a document's stated legal name
-  won't match the registry, is what the next run actually needs. See
-  `managed/fondo-event-agent/.claude/skills/lookup-company-registration/SKILL.md`
-  for the shape.
+  won't match the registry, is what the next run actually needs.
 - **Name the skill for what it does, not what it decides.** `verify-*` reads as a
   decision mandate to the compiler; `lookup-*` doesn't. Keep the agent's contract
   in the frontmatter description, including what it explicitly does *not* do.
@@ -67,8 +65,8 @@ cases were real.
 
 ## Discipline for agents that read the web
 
-Learned the hard way in the fondo prototype; applies to any agent you prototype
-here that scrapes or researches.
+Learned the hard way in an early prototype here; applies to any agent you
+prototype that scrapes or researches.
 
 - **Sub-model extractors infer and present it as fact.** A WebFetch of a privacy
   policy reported "incorporated in Delaware, as indicated by the address" — an

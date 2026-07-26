@@ -233,7 +233,7 @@ import type { ACL } from "@/lib/access.ts";
 // is wired into the eve router (see lib/access.ts).
 export const acl: ACL = { public: true };
 // Restricted instead:
-// export const acl: ACL = { principals: ["org_fondo"] };
+// export const acl: ACL = { principals: ["org_acme"] };
 ```
 
 ### agent/tools/<name>.ts template

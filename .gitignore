@@ -3,3 +3,8 @@ node_modules/
 .eve/
 *.log
 .DS_Store
+
+# Local worked examples — never committed (real fixture data, live deployment IDs)
+managed/*
+!managed/.gitkeep
+agent/tools/fondo-event-agent.ts
