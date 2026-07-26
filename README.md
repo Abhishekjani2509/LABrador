@@ -98,6 +98,7 @@ no extra infrastructure.
 ```
 managed/<name>/        # one dir per agent — the workspace you prototype in
                        #   AND the thing that gets deployed
+                       #   (empty until your first /managed-agent-prototype)
   CLAUDE.md            #   SOURCE — the agent's instructions, deployed verbatim
   .claude/skills/      #   SOURCE — uploaded to the Skills API straight from here
   fixtures/            #   SOURCE — what you test against; never uploaded
@@ -123,8 +124,8 @@ the new derivation; it never clobbers them.
 
 - **Remote MCP servers** (streamable-HTTP) carry over to the deployed agent's
   `mcp_servers`, with OAuth handled by platform credential vaults. You
-  prototype against the repo-root `.mcp.json`; add a `managed/<name>/.mcp.json`
-  when one agent should deploy with a set of its own.
+  prototype against a repo-root `.mcp.json` you add; a `managed/<name>/.mcp.json`
+  is for when one agent should deploy with a set of its own.
 - **Dreaming** (research preview): the platform consolidates memory across
   your agent's sessions while it's idle.
 - **Scheduled deployments**: run any of these agents on a cron straight from

@@ -16,7 +16,8 @@ to the compiler than a clean final answer. Don't quietly redo a broken approach 
 show the break and the fix.
 
 **Void superseded things out loud.** The compiler cannot tell stale from current,
-and it reads everything. From the session that produced this repo's first agent:
+and it reads everything. From the session that produced the first agent built
+with this starter:
 
 - an early SKILL.md was rewritten, but the Skill tool re-injected the *superseded*
   copy verbatim into the transcript, where it read as current design;
@@ -106,8 +107,9 @@ is the repo root, so skills under `managed/<name>/.claude/skills/` are outside
 what the Skill tool discovers — you can't invoke one to test it. Read the
 SKILL.md and follow it by hand instead; `/managed-agent-deploy`'s smoke test is
 what proves real skill loading against the deployed agent. Same split for MCP:
-the root `.mcp.json` is the live one in-session, while
-`managed/<name>/.mcp.json` is an optional per-agent record that deploy reads.
+a root `.mcp.json` (add one when an agent needs MCP) is the live one
+in-session, while `managed/<name>/.mcp.json` is an optional per-agent record
+that deploy reads.
 
 **Re-read a SKILL.md after editing it.** The skill listing and the Skill tool's
 loaded copy can lag the file on disk, and this session saw on-disk content
