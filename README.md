@@ -127,6 +127,7 @@ agent/                 # the eve router app — the integration layer (step 4)
   tools/<name>.ts      # COMPILED — eve tool wrapper (file name = tool name)
 lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
 scripts/               # deploy.ts, console.ts
+docs/                  # frame.md (why this exists), audience.md (who it's for)
 ```
 
 One directory, both roles: you write the instructions, skills and fixtures;
