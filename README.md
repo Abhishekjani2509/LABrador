@@ -1,5 +1,21 @@
 # mvp — prototype in Claude Code, ship on the Claude Developer Platform
 
+## tl;dr
+
+What you build for customer 1 is wrong by customer 12 — so spend the batch on
+customers, not agent frameworks. Two skills take you from "works in my Claude
+Code" => "works for my customer":
+
+- `/managed-agent-prototype {voice-mode braindump}` — an agent that does the
+  job, live in your session
+- `/managed-agent-deploy` => a deployed agent endpoint, in minutes not days
+
+Clone it and have your agent set it up (`/managed-agent-setup`). Built on
+Claude Managed Agents with an [eve](https://eve.dev) router in front, so
+frontends, Slack, and email are config, not code.
+
+---
+
 The transcript where your agent finally worked *is* the spec. This starter
 turns it into a deployed agent.
 
