@@ -205,7 +205,30 @@ if (!deployment.agent_id) {
 deployment.system_hash = systemHash;
 deployment.tools_hash = toolsHash;
 
-// --- 3. write back --------------------------------------------------------
+// --- 3. memory ------------------------------------------------------------
+
+// One store per agent (one agent per customer ⇒ one store per customer),
+// created once and reused; runTask attaches it at session create. The store's
+// name sets its /mnt/memory/<slug> mount path, so it gets the agent's name.
+if (manifest.memory) {
+  if (deployment.memory_store_id) {
+    console.log(`memory store unchanged: ${deployment.memory_store_id}`);
+  } else {
+    const store = await client.beta.memoryStores.create({
+      description: manifest.memory.description,
+      name: manifest.name,
+    });
+    deployment.memory_store_id = store.id;
+    console.log(`memory store created: ${store.id}`);
+  }
+} else if (deployment.memory_store_id) {
+  console.log(
+    `memory store detached: ${deployment.memory_store_id} (left in workspace with its memories)`
+  );
+  deployment.memory_store_id = undefined;
+}
+
+// --- 4. write back --------------------------------------------------------
 
 await persistManifest();
 

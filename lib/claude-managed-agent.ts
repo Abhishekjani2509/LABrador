@@ -46,6 +46,8 @@ export const AgentManifest = z.looseObject({
     .looseObject({
       agent_id: z.string(),
       agent_version: z.number(),
+      // Provisioned by deploy when the manifest has a `memory` block.
+      memory_store_id: z.string().optional(),
       // skills dir name → uploaded skill.
       skills: z.record(
         z.string(),
@@ -74,6 +76,18 @@ export const AgentManifest = z.looseObject({
         permission: z.enum(["always_allow", "always_ask"]).optional(),
       })
     )
+    .optional(),
+  // Cross-session memory. When present, deploy provisions one memory store
+  // for this agent (one agent per customer ⇒ one store per customer) and
+  // every session attaches it, mounted under /mnt/memory/. `description`
+  // and `instructions` are shown to the agent; access defaults read_write —
+  // prefer read_only when the agent processes untrusted input.
+  memory: z
+    .looseObject({
+      access: z.enum(["read_write", "read_only"]).optional(),
+      description: z.string().optional(),
+      instructions: z.string().optional(),
+    })
     .optional(),
   // Model for the managed agent, e.g. "claude-sonnet-5".
   model: z.string(),
@@ -249,6 +263,19 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
       title: `${opts.manifest.name}: ${titleSnippet(opts.task)}`,
       ...(opts.manifest.vault_ids?.length
         ? { vault_ids: opts.manifest.vault_ids }
+        : {}),
+      // Memory stores attach at session create only (not addable later).
+      ...(deployment.memory_store_id
+        ? {
+            resources: [
+              {
+                access: opts.manifest.memory?.access ?? "read_write",
+                instructions: opts.manifest.memory?.instructions,
+                memory_store_id: deployment.memory_store_id,
+                type: "memory_store" as const,
+              },
+            ],
+          }
         : {}),
     });
     sessionId = session.id;
