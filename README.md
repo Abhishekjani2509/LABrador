@@ -1,179 +1,193 @@
 # LABrador
 
-LABrador is a hackathon prototype for stress-testing life-science indication
-theses with specialist agents. It turns an asset–indication hypothesis into
-inspectable evidence about the literature, small-molecule tractability, and
-clinical recruitability.
+LABrador is a hackathon workspace for stress-testing therapeutic program
+hypotheses. Its components examine four different questions: whether the
+literature supports the mechanism, whether the target is tractable with a small
+molecule, whether a proposed trial can recruit, and whether the resulting
+program economics hold together.
 
-The repository is a merged workspace, not yet a finished end-to-end product.
-The recruitability engine and Managed Agents runtime are runnable; the
-druggability specialist has a detailed evidence contract and calibration set;
-the literature graph is currently specified but not implemented.
+The repository is not wired into one end-to-end product yet. `managed/` is a
+workspace convention, not a maturity claim: some directories contain runnable
+engines, one is a partial agent prototype, one is a design packet, and one is
+an internal infrastructure probe.
 
-## What is here
+## Capabilities
 
-| Workstream | Question it answers | Current state |
+| Capability | What it actually does | Current state |
 | --- | --- | --- |
-| `simulated-clinical` | Could the proposed trial recruit the required population in a credible time window? | Runnable engine, fixtures, demo, and six-trial backtest |
-| `druggability-dossier` | Can the target be addressed with a small molecule, and what evidence supports that conclusion? | Specialist instructions, ten-target calibration data, and a static pipeline view |
-| `literature-graph` | What does the literature claim, where does it disagree, and which relationships remain untested? | Schema, delivery contract, and build plan; implementation remains open |
-| `spike` | Can the deployed sandbox run bundled scripts, use memory, and reach Paperclip? | Deployed environment probe used to settle platform assumptions |
-| Managed Agents harness | How do local specialist prototypes become callable cloud agents? | Runtime, deployment CLI, console CLI, and eve router scaffold |
+| **Small-Molecule Tractability Review** | Combines chemical precedent, structural pocket analysis, and a falsification pass into a provenance-heavy target review. | Partial agent prototype with four skills, calibration fixtures, a Modal pocket scanner, and no deployment manifest or router wrapper |
+| **Trial Recruitment Forecaster** | Estimates enrollment time from trial precedent, sample size, site count, biomarker prevalence, eligibility burden, and competition. | Runnable local TypeScript engine with fixtures, a demo, and a six-trial backtest; not a Managed Agent |
+| **Research Evidence Mapper** | Plans to turn papers into a persistent graph of exact claims, disagreements, and untested relationships. | Design packet only; the agent, skills, deterministic assembler, and fixtures remain to be built |
+| **Therapeutic Program Economics** | Simulates pricing, access, affordability, patent-window cash flow, risk-adjusted NPV, and uncertainty from analyst-supplied inputs. | Runnable Python package with CLI, Streamlit UI, synthetic fixtures, and regression tests; not a Managed Agent |
 
-The shared contract is
-[`IndicationThesis`](./managed/simulated-clinical/thesis.ts). It makes the
-asset, target direction, disease, biomarker population, endpoint, mechanism,
-evidence, and uncertainty explicit so downstream nodes can exchange evidence
-without relying on prose conventions.
+The **Sandbox Capability Probe** under
+[`managed/sandbox-capability-probe`](./managed/sandbox-capability-probe) is
+development infrastructure, not a product capability. It is the only currently
+deployed Managed Agent in the repository and exists to test the remote
+sandbox's Python runtime, memory mount, filesystem, network access, and bundled
+skill files.
 
 ## Quickstart
 
-You need [Bun](https://bun.sh) and an Anthropic API key. The key is required for
-commands that call Claude; typechecking and static checks do not use it.
+The TypeScript workspace requires [Bun](https://bun.sh). Commands that call
+Claude also require `ANTHROPIC_API_KEY`; typechecking and static checks do not.
 
 ```bash
 git clone https://github.com/Abhishekjani2509/LABrador.git
 cd LABrador
 bun install --frozen-lockfile
 cp .env.example .env
-# Add ANTHROPIC_API_KEY to .env
+# Add ANTHROPIC_API_KEY to .env when you need model-backed commands.
 
 bun run typecheck
 bun run check
 ```
 
-## Run the clinical-recruitability demo
+## Trial Recruitment Forecaster
 
-The demo evaluates the included indication theses with current
-ClinicalTrials.gov data and Claude-assisted eligibility analysis:
-
-```bash
-# Run every fixture against current evidence
-bun managed/simulated-clinical/demo.ts
-
-# Run one fixture
-bun managed/simulated-clinical/demo.ts dupi-eoe
-
-# Re-run the same thesis with a historical evidence horizon
-bun managed/simulated-clinical/demo.ts dupi-eoe 2018-01-01
-```
-
-Each result reports estimated enrollment time, required sample size, site
-count, screening burden, supporting trials, failed precedents, and the smallest
-counterfactual change that could make the design recruitable. Historical runs
-filter registry evidence by the supplied date, though the model-based
-eligibility read cannot provide a perfectly sealed historical knowledge
-boundary; [`NEXT.md`](./managed/simulated-clinical/NEXT.md) tracks that and the
-remaining validation limits.
-
-The backtest compares predictions with completed trials:
+[`managed/trial-recruitment-forecaster`](./managed/trial-recruitment-forecaster)
+accepts a structured `IndicationThesis`, queries ClinicalTrials.gov, and
+estimates how long a proposed trial would take to enroll. It derives enrollment
+velocity from completed precedent trials, estimates the required sample size
+and site count, uses Claude to read eligibility criteria, discounts for
+biomarker narrowing and competing trials, and proposes a counterfactual when
+the original design looks too slow.
 
 ```bash
-bun managed/simulated-clinical/backtest.ts
-bun managed/simulated-clinical/backtest.ts NCT03633617 NCT04394351
-bun managed/simulated-clinical/backtest.ts --condition "Eosinophilic Esophagitis" 10
+# Every bundled fixture against current evidence
+bun managed/trial-recruitment-forecaster/demo.ts
+
+# One fixture
+bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe
+
+# The same fixture with a historical registry horizon
+bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe 2018-01-01
+
+# Backtest against the default panel or selected trials
+bun managed/trial-recruitment-forecaster/backtest.ts
+bun managed/trial-recruitment-forecaster/backtest.ts NCT03633617 NCT04394351
 ```
 
-These commands call external services and can take time. A transient failure
-for one fixture is reported without discarding completed runs for the others.
+The output includes simulated enrollment months and range, required sample
+size, sites, screening burden, cited precedent, failed trials, and the smallest
+modeled change that reaches the target time window. These are modeled estimates,
+not observed outcomes. Historical runs filter registry evidence by date, but
+the model-based eligibility read cannot guarantee a sealed historical knowledge
+boundary; [`NEXT.md`](./managed/trial-recruitment-forecaster/NEXT.md) records
+that limitation and the known large-site forecasting error.
 
-## Explore the evidence workstreams
+The shared [`IndicationThesis`](./managed/trial-recruitment-forecaster/thesis.ts)
+contract covers the asset, target direction, disease, biomarker population,
+endpoint, mechanism, evidence, and uncertainty. Other planned pipeline stages
+have not adopted it yet.
 
-The druggability dossier deliberately keeps retrieved precedent separate from
-computed tractability. That distinction matters because a target can have
-strong biological validation but no small-molecule precedent, while geometric
-pocket scoring can miss cryptic sites that appear only in ligand-bound
-structures.
+## Small-Molecule Tractability Review
 
-- [`CLAUDE.md`](./managed/druggability-dossier/CLAUDE.md) defines the specialist's input, output, evidence rules, and refusal conditions.
-- [`fixtures/README.md`](./managed/druggability-dossier/fixtures/README.md) explains the calibration ladder from straightforward kinase targets through modality traps, cryptic pockets, contradictory evidence, and insufficient data.
-- [`pipeline.html`](./managed/druggability-dossier/pipeline.html) is a standalone visual walkthrough that can be opened directly in a browser.
+[`managed/small-molecule-tractability-review`](./managed/small-molecule-tractability-review)
+is a specialist prototype for one narrow question: can this protein target be
+addressed with a small molecule? It keeps retrieved precedent separate from
+computed structural tractability, because approved biologics do not establish
+small-molecule tractability and geometric pocket scoring can miss ligand-induced
+sites.
 
-The literature graph is designed around mechanically verifiable quotes,
-stable graph identifiers, explicit disagreement, and persistent state across
-research rounds. Its current artifacts are contracts for the implementation:
+- [`CLAUDE.md`](./managed/small-molecule-tractability-review/CLAUDE.md) defines the input and JSON review contract.
+- [`fixtures/README.md`](./managed/small-molecule-tractability-review/fixtures/README.md) explains the ten-target calibration set and its failure modes.
+- [`pipeline.html`](./managed/small-molecule-tractability-review/pipeline.html) is a standalone visual walkthrough.
 
-- [`SCHEMA.md`](./managed/literature-graph/SCHEMA.md) defines requests, graph JSON, storage, and guarantees.
-- [`CONTRACT.md`](./managed/literature-graph/CONTRACT.md) assigns the search, extraction, assembly, and deployment responsibilities.
-- [`BUILD.md`](./managed/literature-graph/BUILD.md) gives the implementation order and blocking verification criteria.
+The repository contains real procedural skills and a Modal pocket-scanning
+implementation, but the complete review is not runnable through `bun run
+console`: there is no manifest, custom-tool bridge, rubric, or router wrapper.
 
-## Managed Agents workflow
+## Research Evidence Mapper
 
-The repository includes a harness for taking a specialist that works in Claude
-Code and deploying the same instructions and skills as a Claude Managed Agent:
+[`managed/research-evidence-mapper`](./managed/research-evidence-mapper) is the
+design for a research agent that searches papers, extracts exact source-backed
+claims, distinguishes primary evidence from cited background, surfaces
+condition-dependent disagreement, and records missing relationships worth
+testing. Follow-up requests would extend a persistent graph rather than start
+over.
 
-1. **Prototype.** Run `/managed-agent-prototype <description>` in Claude Code.
-   The specialist's instructions, skills, and fixtures live together under
-   `managed/<name>/`.
-2. **Compile and deploy.** Run `/managed-agent-deploy <name>` from the working
-   prototype session. The transcript supplies the debugging context, while the
-   skill emits a manifest, access policy, local custom-tool handlers, and an eve
-   wrapper.
-3. **Call the agent.** Use `bun run console <name>` for the visual console or
-   `bun run console <name> -- --once "task"` for a headless run.
-4. **Expose the router.** Use `bun run dev` to start the eve router after at
-   least one specialist wrapper has been generated under `agent/tools/`.
+- [`SCHEMA.md`](./managed/research-evidence-mapper/SCHEMA.md) defines requests, graph JSON, and persistent storage.
+- [`CONTRACT.md`](./managed/research-evidence-mapper/CONTRACT.md) assigns search, extraction, assembly, and deployment responsibilities.
+- [`BUILD.md`](./managed/research-evidence-mapper/BUILD.md) gives the implementation order and blocking verification criteria.
 
-To redeploy an already compiled specialist without recompiling its prototype
-session:
+Those files describe planned guarantees. No implementation currently enforces
+them, and long-lived Paperclip authentication remains an open integration gate.
+
+## Therapeutic Program Economics
+
+[`managed/therapeutic-program-economics`](./managed/therapeutic-program-economics)
+is a deterministic Python simulator, not an autonomous research agent. It takes
+a validated therapeutic program, explicitly typed comparable prices, and a
+random seed; then it produces pricing corridors, access and affordability
+views, annual cash flow, protected and post-loss-of-exclusivity revenue,
+risk-adjusted NPV percentiles, warnings, provenance, and a decision-grade flag.
+
+It requires Python 3.11 or 3.12. From its directory:
 
 ```bash
-bun run deploy <name>
+cd managed/therapeutic-program-economics
+uv sync --frozen --extra dev
+
+uv run labrador validate fixtures/demo_program.json \
+  --comparables fixtures/demo_comparables.json
+uv run labrador analyze fixtures/demo_program.json \
+  --comparables fixtures/demo_comparables.json \
+  --simulations 1000 --seed 42
+uv run streamlit run app.py
 ```
 
-Deployment creates or versions remote resources and writes their identifiers
-back to `managed/<name>/manifest.json`. Treat it as an external state change,
-not as a local build command.
+Every bundled economic input is synthetic and therefore
+`NOT_DECISION_GRADE`. Public reimbursement and list prices remain distinct
+from estimated or observed net prices, and the output is screening support—not
+medical, reimbursement, investment, legal, or patent advice. The component's
+own [README](./managed/therapeutic-program-economics/README.md) documents its
+full input and output contracts.
 
-## Runtime model
+## Managed Agents harness
 
-```text
-caller / eve router
-        |
-        | task
-        v
-lib/claude-managed-agent.ts ---- create session ----> Managed Agents API
-        ^                                                   |
-        |                                                   | agent events
-        +---------------------- SSE stream ------------------+
-        |
-        +---- run local custom tool ---- return result ----->
-```
+The root workspace includes a harness for turning a specialist that works in
+Claude Code into a callable Claude Managed Agent:
 
-The calling process is the custom-tool server. When a remote agent requests a
-custom tool, the runtime executes the handler from `managed/<name>/tools.ts`,
-posts the result to the session, and continues consuming events until the agent
-finishes. This keeps credentials and system integrations in the caller's
-process instead of copying them into the remote sandbox.
+1. Run `/managed-agent-prototype <description>` to build and exercise a
+   specialist under `managed/<name>/`.
+2. Run `/managed-agent-deploy <name>` from that working session to create its
+   manifest, access policy, custom-tool handlers, and eve wrapper, then deploy
+   and smoke-test it.
+3. Use `bun run console <name> -- --once "task"` for a headless call, or `bun
+   run console <name>` for the visual console.
+4. Use `bun run dev` after wrappers exist under `agent/tools/` to expose the
+   specialists through the eve router.
+
+`bun run deploy <name>` creates or versions remote resources and writes their
+identifiers into the component's manifest. It is an external state change, not
+a local build command.
 
 ## Repository layout
 
 ```text
 managed/
-  simulated-clinical/     recruitability engine, fixtures, demo, backtest
-  druggability-dossier/   specialist contract, calibration data, visualizer
-  literature-graph/       schema, delivery contract, build plan
-  spike/                  deployed sandbox capability probe
-agent/                    eve router and generated specialist wrappers
-lib/                      Managed Agents runtime and access control
-scripts/                  deploy and console CLIs
-.claude/skills/           prototype, deploy, and setup workflows
-docs/                     original Managed Agents starter framing
+  small-molecule-tractability-review/  partial target-review agent
+  trial-recruitment-forecaster/        runnable enrollment model
+  research-evidence-mapper/            agent design packet
+  therapeutic-program-economics/       runnable economics simulator
+  sandbox-capability-probe/             internal deployed probe
+agent/                                  eve router and generated wrappers
+lib/                                    Managed Agents runtime and access rules
+scripts/                                deploy and console CLIs
+.claude/skills/                         prototype, deploy, and setup workflows
 ```
 
-## Known integration gaps
+## Integration gaps
 
 - There is no top-level orchestrator connecting hypothesis generation,
-  evidence enrichment, recruitability, and ROI into one command.
-- The `IndicationThesis` contract has not yet been adopted by every planned
-  node, so composition across branches still needs an integration pass.
-- The literature graph has design artifacts but lacks its agent instructions,
-  skills, deterministic assembler, fixtures, and router wrapper.
-- The root eve router has no registered specialists yet; generated wrappers are
-  added only when a managed agent is compiled.
-- Restricting an agent's ACL before router authentication is wired makes that
-  tool unavailable to every router caller. Direct console calls bypass the
-  router and do not validate ACL behavior.
+  evidence mapping, tractability, recruitment, and economics.
+- Only the sandbox probe currently has a deployment manifest; no product
+  capability is registered with the root eve router.
+- The shared `IndicationThesis` does not yet feed the economics simulator or
+  the planned evidence mapper.
+- The four capabilities use different maturity and verification standards, so
+  their outputs should not yet be presented as one validated decision pipeline.
 
 ## License
 
