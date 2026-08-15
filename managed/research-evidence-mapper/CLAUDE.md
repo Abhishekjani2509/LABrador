@@ -196,6 +196,55 @@ indistinguishable from "there was nothing there".
 
 ---
 
+## Paperclip liveness — check before you conclude anything
+
+**A dead search tool and an empty literature look identical in the output, and
+confusing them is the worst failure this agent can produce.** "No evidence
+found" is a scientific claim. Emitting it because the corpus was unreachable is
+not a degraded answer, it is a fabricated one, and a caller cannot tell.
+
+So, in order:
+
+**1. Probe first.** Before the real queries, run one cheap canary whose answer
+you already know:
+
+```
+search -s pmc "rheumatoid arthritis" -n 1
+```
+
+A healthy corpus returns `Found 1 papers [s_...]`. Anything else — an error, an
+auth failure, a timeout, an empty result on *that* query — means Paperclip is
+not serving, because that query cannot legitimately return nothing.
+
+**2. If the canary fails, stop.** Do not run the planned queries. Do not fall
+back to another source; there is no other source. Return immediately with:
+
+- `status: "failed"`
+- `error` — the tool's own message, verbatim, one line. Not your summary of it.
+- `coverage.stop_reason: "search_unavailable"`
+- `coverage.found: 0`, `read: 0`, `used: 0`
+- every list empty, and for an extending ask, the prior graph **unchanged** in
+  memory — never overwrite good state with a failed round.
+
+**3. If Paperclip dies mid-round**, keep whatever you already verified, and
+return `status: "partial"` with `stop_reason: "search_unavailable"` and `error`
+populated. Findings already extracted and quote-verified are still real. What
+you must not do is let the shortfall pass silently into `coverage` as though
+the budget simply ran out.
+
+**4. Never report absence on a failed round.** `status: "empty"` means the
+search ran and matched nothing. If the search did not run, the status is
+`failed`, and `gaps` must not gain a `searched_in_round` — nothing was
+searched. A `test_gap` that could not query is not evidence the pair is
+missing.
+
+**5. Say it in the reply, not just the status.** `error` carries the cause in
+plain text so a human reading the JSON sees it without decoding `coverage`.
+
+Two failures on the same query is a query problem; a failing canary is a
+service problem. Do not retry a dead service in a loop — report it.
+
+
 ## Memory
 
 State lives at `/mnt/memory/literature-graph/` and survives across sessions.
@@ -365,7 +414,7 @@ Field vocabularies, exact spellings, no substitutes:
 - `links.state` — `agreed` | `disagreed` | `single_source` | `no_effect`
 - `links.basis` — `primary` | `hedged_only` | `background_only` | `mixed`
 - `rounds[].outcome` — `new_evidence` | `nothing_new` | `promoted` | `contradicted`
-- `coverage.stop_reason` — `max_papers` | `queries_exhausted` | `no_new_results` | `time_limit` | `complete`
+- `coverage.stop_reason` — `max_papers` | `queries_exhausted` | `no_new_results` | `time_limit` | `complete` | `search_unavailable`
 - `links.why` — only when `state` is `disagreed`; otherwise `null`
 - `flags` — labels for the caller, never filters
 
