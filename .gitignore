@@ -1,5 +1,6 @@
 node_modules/
 .env
+.claude/settings.local.json
 .eve/
 .output/
 *.log
@@ -13,5 +14,8 @@ node_modules/
 # delete it.
 managed/*
 !managed/.gitkeep
+# simulated-clinical is deliberately visible: fixtures are public CT.gov
+# data and there is no manifest.json with live deployment IDs yet.
+!managed/simulated-clinical
 agent/tools/*
 !agent/tools/workflow.ts
