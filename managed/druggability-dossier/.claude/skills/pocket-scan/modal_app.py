@@ -53,6 +53,12 @@ image = (
         # means a proto-tools dependency change cannot fail every structure at
         # stage "prepare".
         "gemmi>=0.7",
+        # NOT metapredict. It is the right disorder tool on merit — MIT, CPU,
+        # and it separates MYC (0.828 disordered) from folded controls (0.015)
+        # where IUPred3's licence forbids commercial use — but a bare
+        # `metapredict` pin FAILS TO BUILD A WHEEL in this image and takes the
+        # whole deploy down with it. Needs its own build investigation; do not
+        # re-add it untested.
         "proto-tools[mcp] @ git+https://github.com/evo-design/proto-tools.git",
     )
 )
@@ -467,17 +473,61 @@ def pocket_scan(
     pdb_ids: list[str],
     chains: dict[str, list[str]] | None = None,
     ligand_codes: list[str] | None = None,
+    site_residues: list[int] | None = None,
 ) -> dict:
     """Scan an ensemble at every clustering value and report the spread.
 
     Returns volume with its across-structure spread as the PRIMARY number, and
-    druggability only as a range. Measured on five apo TNF-alpha structures:
-    volume varied +/-16%, druggability varied 650-fold over the same site.
+    druggability only as a range.
+
+    SAME-SITE TRACKING. A spread is only a measurement if every value describes
+    the SAME site. On an apo structure there is no ligand to anchor to, so
+    without a site signature this falls back to "most druggable pocket
+    anywhere" — and pooling that across an ensemble compares different pockets
+    in different places, which measures nothing.
+
+    The signature is a set of residue numbers, matched chain-agnostically. It
+    comes from one of two places:
+
+      * `site_residues`, supplied by the caller; or
+      * automatically, from the ligand site of any HOLO structure in the same
+        run. Put one holo entry in an otherwise apo ensemble and every apo
+        structure is then scored at the site the holo one points at. That is
+        the KRAS 6OIM/4OBE case and the TNF-alpha 2AZ5/apo case.
+
+    Read `site_pocket_selected_by` before quoting any spread: only
+    `ligand_site_jaccard` and `site_signature_overlap` are same-site.
     """
     work = Path("/tmp/pockets")
     work.mkdir(parents=True, exist_ok=True)
     chains = chains or {}
     results: dict[str, dict] = {}
+    site_signature: set[str] = {str(r) for r in (site_residues or [])}
+    signature_source = "caller" if site_signature else None
+
+    # A holo structure anywhere in the ensemble donates its ligand site as the
+    # signature for the apo ones, so order the pass holo-first.
+    if not site_signature:
+        for pid in pdb_ids:
+            try:
+                raw = _fetch(pid, work)
+                st, _chains_avail, _renames = _load(raw)
+                ligs = _ligands(st)
+                dl = [lig for lig in ligs if lig["druglike"]]
+                if not dl:
+                    continue
+                comp = next(
+                    (lig["comp_id"] for lig in ligs
+                     if ligand_codes and lig["comp_id"] in ligand_codes),
+                    dl[0]["comp_id"],
+                )
+                res, _copy = _ligand_site(st, comp, None)
+                if res:
+                    site_signature = {r.split("/")[-1] for r in res}
+                    signature_source = f"{pid}:{comp}"
+                    break
+            except Exception:  # noqa: BLE001, S112
+                continue
 
     for pid in pdb_ids:
         # One unfetchable structure must not lose the whole ensemble, and the
@@ -567,6 +617,30 @@ def pocket_scan(
                     # arbitrary first pocket as "the site pocket" is worse than
                     # returning nothing — that is the false negative in rule 4.
                     best, basis = None, "no_pocket_overlapped_ligand_site"
+            elif site_signature:
+                # SAME-SITE TRACKING. Without this, an apo structure falls back
+                # to "most druggable pocket anywhere", and pooling those across
+                # an ensemble compares different pockets on different proteins'
+                # surfaces — which is not a measurement of anything.
+                #
+                # Match by residue NUMBER, deliberately chain-agnostic: the
+                # site of interest is often inter-subunit (TNF-alpha's axial
+                # channel is lined by the same residues from all three chains),
+                # and chain letters are not stable across depositions.
+                for p in pockets:
+                    nums = {r.split("/")[-1] for r in p.get("residues", [])}
+                    p["signature_overlap"] = (
+                        round(len(nums & site_signature) / len(site_signature), 3)
+                        if site_signature
+                        else None
+                    )
+                best = max(
+                    pockets, key=lambda p: p.get("signature_overlap") or 0.0,
+                    default=None,
+                )
+                basis = "site_signature_overlap"
+                if best and not (best.get("signature_overlap") or 0.0):
+                    best, basis = None, "no_pocket_matched_site_signature"
             else:
                 best = max(
                     pockets,
