@@ -19,7 +19,9 @@ import streamlit as st
 from labrador_roi.cli import (
     DEMO_COMPARABLES_JSON,
     DEMO_PROGRAM,
+    build_interpretability_manifest,
     comparable_summary,
+    reality_anchor_surface,
     run_analysis,
     validate_comparables_payload,
     validate_program_payload,
@@ -276,13 +278,24 @@ with st.sidebar:
     st.divider()
     simulations = st.slider("Simulation draws", 100, 5_000, 1_000, 100)
     seed = st.number_input("Random seed", min_value=0, max_value=2_147_483_647, value=42)
+    run_reality_checks = st.checkbox(
+        "Run cited RA/I&I plausibility checks",
+        value=False,
+        help=(
+            "Runs a separate reality-anchor harness. A result inside a cited band is a range "
+            "check, not validation of this program or model."
+        ),
+    )
     analyze = st.button(
         "Run analysis",
         type="primary",
         width="stretch",
         disabled=program_payload is None or comparable_payload is None,
     )
-    st.caption("Same seed + same inputs → same modeled outputs; run timestamps still differ.")
+    st.caption(
+        "Same seed + same input snapshot → same modeled outputs. Replay checks the saved artifact; "
+        "timestamps still differ."
+    )
 
 st.markdown(
     """
@@ -290,7 +303,8 @@ st.markdown(
       <div class="eyebrow" style="color:#cbe9df">LABrador · Launch, access &amp; benefit</div>
       <h1>Therapeutic Program Economics, with the assumptions showing</h1>
       <p>Connect comparable evidence to value, access, affordability and protected cash flow.
-      Every output retains its provenance and decision-grade warnings.</p>
+      Model outputs, cited anchors, configuration checks and falsification controls stay
+      distinct.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -320,15 +334,22 @@ if analyze:
                 simulations=int(simulations),
                 seed=int(seed),
             )
-        st.session_state["analysis_result"] = _data(analysis_result)
+            anchor_report = reality_anchor_surface(enabled=run_reality_checks)
+        analysis_data = _data(analysis_result)
+        st.session_state["analysis_result"] = analysis_data
         st.session_state["program"] = _data(validated_program)
         st.session_state["comparables"] = _data(validated_comparables)
+        st.session_state["interpretability"] = build_interpretability_manifest(
+            analysis_data,
+            reality_report=anchor_report,
+        )
     except Exception as exc:
         st.error(f"Analysis failed validation or execution: {exc}")
 
 result = st.session_state.get("analysis_result")
 program = st.session_state.get("program")
 comparables = st.session_state.get("comparables")
+interpretability = st.session_state.get("interpretability")
 
 if result is None:
     st.info("Choose inputs and run the analysis. The bundled demo is ready immediately.")
@@ -344,6 +365,9 @@ if result is None:
         )
     st.stop()
 
+if not isinstance(interpretability, dict):
+    interpretability = build_interpretability_manifest(result)
+
 currency = str(_lookup(program, ("currency",)) or "USD")
 synthetic = (
     _contains_synthetic(program) or _contains_synthetic(comparables) or _contains_synthetic(result)
@@ -355,7 +379,8 @@ if synthetic:
 status_class = "status-warning" if decision_grade != "DECISION_GRADE" else "status-ok"
 st.markdown(
     f'<div class="{status_class}"><strong>{decision_grade}</strong> · '
-    "Screening output, not medical, reimbursement, legal, investment, or patent advice.</div>",
+    "Evidence-gate status for a screening model—not independent validation or medical, "
+    "reimbursement, legal, investment, or patent advice.</div>",
     unsafe_allow_html=True,
 )
 
@@ -371,6 +396,10 @@ tabs = st.tabs(
 
 with tabs[0]:
     st.markdown("#### Decision snapshot")
+    st.caption(
+        "MODEL OUTPUT · Calculated from the submitted snapshot and assumptions. These values are "
+        "not observed outcomes or independently validated forecasts."
+    )
     metric_columns = st.columns(4)
     summary_data = result.get("summary", {})
     pricing_data = result.get("pricing", [])
@@ -387,7 +416,18 @@ with tabs[0]:
     )
     npv = summary_data.get("p50_rnpv")
     probability = summary_data.get("probability_positive_rnpv")
-    metric_columns[0].metric("Modeled price", _format_money(price, currency))
+    price_context = interpretability.get("price_context", [])
+    selected_price_context = price_context[0] if price_context else {}
+    price_basis = str(selected_price_context.get("price_basis") or "UNSPECIFIED")
+    valuation_year = selected_price_context.get("valuation_year")
+    metric_columns[0].metric(
+        f"Modeled annual {price_basis}",
+        _format_money(price, currency),
+        help=(
+            f"{currency}; valuation year {valuation_year or '—'}. See Price & Comparables for "
+            "anchor years and bases."
+        ),
+    )
     metric_columns[1].metric("Peak active patients", _format_number(patients))
     metric_columns[2].metric("P50 risk-adjusted NPV", _format_money(npv, currency))
     metric_columns[3].metric(
@@ -408,15 +448,32 @@ with tabs[0]:
     else:
         st.caption("No engine warnings were returned. Source-policy caveats still apply.")
 
+    decision_status = interpretability.get("decision_status", {})
+    critical_gaps = decision_status.get("critical_evidence_gaps", [])
+    if critical_gaps:
+        with st.expander(f"Critical evidence gaps ({len(critical_gaps)})"):
+            st.caption(
+                "These are implemented evidence-gate failures. Clearing them does not by itself "
+                "validate the economic model."
+            )
+            st.code("\n".join(str(item) for item in critical_gaps), language=None)
+
     summary = _lookup(result, ("executive_summary", "summary", "recommendation"))
     if isinstance(summary, str):
         st.markdown("#### Interpretation")
         st.write(summary)
-    with st.expander("Validated program assumptions"):
-        st.json(program, expanded=False)
+    with st.expander("Exact input snapshot used for this run"):
+        st.caption(f"Digest: {interpretability.get('input_record', {}).get('input_digest') or '—'}")
+        st.json(result.get("input_snapshot", {"program": program, "comparables": comparables}))
 
 with tabs[1]:
     st.markdown("#### Comparable evidence — price types stay separate")
+    st.caption(
+        "Every amount below must be read with its currency, price basis, price year and valuation "
+        "year. An ESTIMATED_NET output is a modeled scenario, not an observed contract price."
+    )
+    if price_context:
+        st.dataframe(pd.DataFrame(price_context), width="stretch", hide_index=True)
     corridor_rows = []
     for snapshot in result.get("pricing", []):
         corridor = snapshot.get("annual_net_price_corridor")
@@ -489,7 +546,8 @@ with tabs[1]:
         st.json(comparable_summary(comparables), expanded=False)
     st.warning(
         "Public reimbursement, acquisition-cost, list, and synthetic values are not proof of "
-        "an actual confidential manufacturer net price."
+        "an actual confidential manufacturer net price. A comparable range check is not price "
+        "validation."
     )
 
 with tabs[2]:
@@ -556,6 +614,12 @@ with tabs[2]:
     )
     affordability_columns[3].metric("Exposure PMPM", _format_money(pmpm, currency))
     oop_basis = str(selected_access.get("patient_oop_basis") or "UNKNOWN")
+    if oop_basis != "EXPLICIT_ANNUAL_OOP":
+        st.error(
+            f"Patient OOP basis is {oop_basis}, not an explicit annual patient-liability input. "
+            "Affordability outputs remain screening-only and cannot support a decision-grade "
+            "patient-access claim."
+        )
     st.caption(
         f"Patient OOP basis: **{oop_basis}**. Patient income is an access and out-of-pocket "
         "constraint. It does not mechanically "
@@ -565,6 +629,20 @@ with tabs[2]:
 
 with tabs[3]:
     st.markdown("#### Protected cash flow")
+    patent_clock = interpretability.get("patent_clock", {})
+    patent_columns = st.columns(4)
+    patent_columns[0].metric("Filing year", patent_clock.get("filing_year") or "—")
+    patent_columns[1].metric("Asset patent expiry", patent_clock.get("patent_expiry_year") or "—")
+    patent_columns[2].metric("Initial launch", patent_clock.get("initial_launch_year") or "—")
+    expansion_years = patent_clock.get("expansion_launch_years", [])
+    patent_columns[3].metric(
+        "Expansion launch(es)",
+        ", ".join(str(year) for year in expansion_years) if expansion_years else "None",
+    )
+    st.info(
+        "SHARED ASSET CLOCK · Filing, launch and expansion years are calendar dates. Every label "
+        "shares the same asset-level expiry; expansion does not receive a new 20-year term."
+    )
     cash_rows = _first_table(result, ("year", "revenue")) or _first_table(result, ("year", "cash"))
     if cash_rows:
         cash_frame = pd.DataFrame(cash_rows)
@@ -603,6 +681,26 @@ with tabs[3]:
 
 with tabs[4]:
     st.markdown("#### Sensitivity and reproducibility")
+    simulation_design = interpretability.get("simulation_design", {})
+    simulation_columns = st.columns(3)
+    simulation_columns[0].metric(
+        "Seed",
+        simulation_design.get("seed") if simulation_design.get("seed") is not None else "—",
+    )
+    simulation_columns[1].metric(
+        "Draws",
+        simulation_design.get("draws") if simulation_design.get("draws") is not None else "—",
+    )
+    simulation_columns[2].metric(
+        "Sampled drivers", len(simulation_design.get("sampled_drivers", []))
+    )
+    st.caption(str(simulation_design.get("interpretation", "")))
+    with st.expander("Exact sampled-driver and RNG contract"):
+        st.markdown("**Sampled drivers and ranges**")
+        st.json(simulation_design.get("assumption_ranges", {}), expanded=False)
+        st.markdown("**RNG contract and correlation**")
+        st.json(simulation_design.get("rng_contract", {}), expanded=False)
+
     sensitivity_rows = _first_table(result, ("parameter", "value")) or _first_table(
         result, ("variable", "impact")
     )
@@ -678,6 +776,56 @@ with tabs[4]:
         else:
             st.info("No chartable sensitivity or uncertainty output was returned.")
 
+    st.markdown("#### Internal output reconciliation")
+    reconciliation = interpretability.get("output_reconciliation", {})
+    reconciliation_status = str(reconciliation.get("status", "NOT_AVAILABLE"))
+    if reconciliation_status == "FAIL":
+        st.error(
+            "Internal reconciliation failed. Do not use the headline outputs until the mismatch "
+            "is investigated."
+        )
+    elif reconciliation_status == "PASS":
+        st.success("Internal arithmetic reconciliation passed.")
+    else:
+        st.warning("Internal reconciliation was not available for this artifact.")
+    st.caption(str(reconciliation.get("interpretation", "")))
+    reconciliation_checks = reconciliation.get("checks", [])
+    if isinstance(reconciliation_checks, list) and reconciliation_checks:
+        st.dataframe(pd.DataFrame(reconciliation_checks), width="stretch", hide_index=True)
+    elif reconciliation_checks:
+        st.json(reconciliation_checks, expanded=False)
+
+    st.markdown("#### Cited reality anchors — separate from this program")
+    st.dataframe(
+        pd.DataFrame(interpretability.get("status_legend", [])),
+        width="stretch",
+        hide_index=True,
+    )
+    anchor_surface = interpretability.get("reality_anchors", {})
+    st.caption(str(anchor_surface.get("interpretation", "")))
+    anchor_status = str(anchor_surface.get("status", "NOT_RUN"))
+    anchor_report = anchor_surface.get("report")
+    if anchor_status == "REPORTED" and isinstance(anchor_report, dict):
+        bucket_counts = anchor_report.get("bucket_counts")
+        if bucket_counts:
+            st.markdown("##### Counts by honest bucket")
+            st.json(bucket_counts, expanded=False)
+        anchor_results = anchor_report.get("results")
+        if isinstance(anchor_results, list) and anchor_results:
+            st.dataframe(pd.json_normalize(anchor_results), width="stretch", hide_index=True)
+        else:
+            st.json(anchor_report, expanded=False)
+    elif anchor_status == "NOT_RUN":
+        st.info(
+            "Reality checks were not run. Select the sidebar option and rerun to compare the "
+            "implementation with cited RA/I&I plausibility bands."
+        )
+    else:
+        st.warning(
+            f"Reality-anchor status: {anchor_status}. "
+            f"{anchor_surface.get('reason') or 'No report was returned.'}"
+        )
+
     left, right = st.columns((1, 1))
     with left:
         st.markdown("##### Calculation record")
@@ -687,10 +835,13 @@ with tabs[4]:
         st.code(
             "labrador analyze fixtures/demo_program.json "
             "--comparables fixtures/demo_comparables.json "
-            f"--simulations {simulations} --seed {seed}",
+            f"--simulations {simulations} --seed {seed} --output analysis.json\n"
+            "labrador replay analysis.json",
             language="bash",
         )
-        result_json = json.dumps(result, indent=2, sort_keys=True)
+        download_payload = dict(result)
+        download_payload["interpretability"] = interpretability
+        result_json = json.dumps(download_payload, indent=2, sort_keys=True)
         st.download_button(
             "Download complete JSON",
             data=result_json,
@@ -699,5 +850,7 @@ with tabs[4]:
             width="stretch",
         )
         st.caption(
-            "The JSON output preserves inputs, warnings, provenance and assumptions for audit."
+            "The JSON preserves the input snapshot, seed, draw count, warnings, provenance, "
+            "assumptions and interpretation manifest. Replay verifies engine-owned fields; the "
+            "presentation manifest is excluded from replay equality."
         )

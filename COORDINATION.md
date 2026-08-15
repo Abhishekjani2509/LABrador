@@ -218,3 +218,4 @@ process working.*
 Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 resolutions logged here too).
 
 - **2026-08-15 23:55 UTC** — merged `msoliman6/literature-graph-mcp` (0941254, tier-2 rename-location resolution); earlier today: `f84bfff` + `1b39569` same class — typecheck+check green.
+- **2026-08-15 23:58 UTC** — merged `vaalessi/program-strategy-valuation` (253a04f, tier-2: rename locations + pyproject version conflict — kept Vince's 0.2.0 bump with main's naming; new evaluation/replay/red-team modules) — his pytest 87/87 + typecheck+check green.

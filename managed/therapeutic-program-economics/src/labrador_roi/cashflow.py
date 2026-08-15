@@ -22,7 +22,7 @@ class _FrozenModel(BaseModel):
 class DevelopmentStage(_FrozenModel):
     """A stage cost is paid if the program reaches the stage, before its outcome is known."""
 
-    name: str
+    name: str = Field(min_length=1)
     year: int
     cost: float = Field(ge=0)
     success_probability: float = Field(ge=0, le=1)
@@ -35,6 +35,15 @@ class PatentAssumptions(_FrozenModel):
     base_term_years: Literal[20] = 20
     extension_years: float = Field(default=0, ge=0, le=5)
     regulatory_exclusivity_end_year: float | None = None
+
+    @model_validator(mode="after")
+    def validate_regulatory_exclusivity_date(self) -> PatentAssumptions:
+        if (
+            self.regulatory_exclusivity_end_year is not None
+            and self.regulatory_exclusivity_end_year < self.filing_year
+        ):
+            raise ValueError("regulatory exclusivity cannot end before patent filing")
+        return self
 
     @property
     def expiry_year(self) -> float:
@@ -53,9 +62,9 @@ class PatentAssumptions(_FrozenModel):
 class IndicationCommercialAssumptions(_FrozenModel):
     """Patient, access, adherence, price, and cost assumptions for one indication."""
 
-    indication_id: str
+    indication_id: str = Field(min_length=1)
     launch_year: int
-    route: str = "oral"
+    route: str = Field(default="oral", min_length=1)
     backlog_patients: float = Field(default=0, ge=0)
     backlog_release_years: int = Field(default=1, ge=1)
     annual_incident_patients: float = Field(default=0, ge=0)
@@ -151,9 +160,9 @@ class ExpansionAssumptions(_FrozenModel):
 class ProgramCashFlowInputs(_FrozenModel):
     """Complete manufacturer-perspective inputs for the protected cash-flow calculation."""
 
-    program_id: str
+    program_id: str = Field(min_length=1)
     valuation_year: int
-    currency: str = "USD"
+    currency: str = Field(default="USD", pattern=r"^[A-Za-z]{3}$")
     forecast_end_year: int
     discount_rate: float = Field(default=0.1, gt=-1)
     tax_rate: float = Field(default=0.21, ge=0, le=1)
@@ -165,6 +174,11 @@ class ProgramCashFlowInputs(_FrozenModel):
     loe_volume_retention: tuple[float, ...] = (0.75, 0.55, 0.4, 0.3, 0.2)
     critical_inputs_supported: bool = False
     evidence_references: tuple[str, ...] = ()
+
+    @field_validator("currency")
+    @classmethod
+    def normalize_currency(cls, value: str) -> str:
+        return value.upper()
 
     @model_validator(mode="after")
     def _validate_contract(self) -> ProgramCashFlowInputs:
@@ -186,6 +200,13 @@ class ProgramCashFlowInputs(_FrozenModel):
             and self.expansion.indication.launch_year < self.initial_indication.launch_year
         ):
             raise ValueError("expansion launch cannot precede initial-indication launch")
+        if self.patent.filing_year > self.initial_indication.launch_year:
+            raise ValueError("the modeled patent filing cannot occur after initial launch")
+        if (
+            self.expansion
+            and self.expansion.indication.indication_id == self.initial_indication.indication_id
+        ):
+            raise ValueError("initial and expansion indication IDs must be distinct")
         if self.expansion and any(
             stage.year > self.expansion.indication.launch_year
             for stage in self.expansion.development_stages
@@ -212,6 +233,16 @@ class DevelopmentRealization(_FrozenModel):
     expansion_success: bool = False
     initial_development_costs_by_year: dict[int, float] = Field(default_factory=dict)
     expansion_development_costs_by_year: dict[int, float] = Field(default_factory=dict)
+
+    @field_validator(
+        "initial_development_costs_by_year",
+        "expansion_development_costs_by_year",
+    )
+    @classmethod
+    def validate_realized_costs(cls, value: dict[int, float]) -> dict[int, float]:
+        if any(not math.isfinite(cost) or cost < 0 for cost in value.values()):
+            raise ValueError("realized development costs must be finite and non-negative")
+        return value
 
 
 class AnnualCashFlow(_FrozenModel):
@@ -257,6 +288,8 @@ class CashFlowResult(_FrozenModel):
     expansion_approval_probability: float
     annual_cash_flows: tuple[AnnualCashFlow, ...]
     npv: float
+    peak_annual_net_revenue: float
+    peak_annual_net_revenue_year: int | None
     peak_cash_at_risk: float
     value_lost_per_launch_delay_year: float
     value_decomposition: ValueDecomposition
@@ -323,6 +356,19 @@ def _development_expectations(
     realization: DevelopmentRealization | None,
 ) -> tuple[float, float, dict[int, float], dict[int, float]]:
     if realization is not None:
+        if inputs.expansion is None and (
+            realization.expansion_success or realization.expansion_development_costs_by_year
+        ):
+            raise ValueError("expansion realization supplied for a program without an expansion")
+        if (
+            inputs.expansion
+            and inputs.expansion.conditional_on_initial_success
+            and not realization.initial_success
+            and (realization.expansion_success or realization.expansion_development_costs_by_year)
+        ):
+            raise ValueError(
+                "a conditional expansion cannot proceed after the initial program fails"
+            )
         return (
             float(realization.initial_success),
             float(realization.expansion_success),
@@ -629,6 +675,7 @@ def _calculate_cashflow(
         initial_indication_discounted_fcf=discounted_initial_fcf,
         expansion_increment_discounted_fcf=discounted_expansion_increment,
     )
+    peak_revenue_row = max(rows, key=lambda row: row.net_revenue)
     return CashFlowResult(
         patent_expiry_year=inputs.patent.expiry_year,
         effective_exclusivity_end_year=inputs.patent.effective_exclusivity_end_year,
@@ -644,6 +691,10 @@ def _calculate_cashflow(
         expansion_approval_probability=expansion_probability,
         annual_cash_flows=tuple(rows),
         npv=npv,
+        peak_annual_net_revenue=peak_revenue_row.net_revenue,
+        peak_annual_net_revenue_year=(
+            peak_revenue_row.year if peak_revenue_row.net_revenue > 0 else None
+        ),
         peak_cash_at_risk=-minimum_cumulative_cash,
         value_lost_per_launch_delay_year=0.0,
         value_decomposition=decomposition,
