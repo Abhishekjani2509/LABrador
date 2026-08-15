@@ -1,6 +1,6 @@
-# LABrador
+# Therapeutic Program Economics
 
-LABrador is an interpretable, screening-grade simulator for therapeutic program strategy. It
+Therapeutic Program Economics is an interpretable, screening-grade simulator for therapeutic program economics. It
 connects a provenance-aware program brief and comparable-price evidence to value, access,
 affordability, protected cash flow, and seeded uncertainty. It is designed for a human analyst
 and an AI agent to reach the same result from the same files.

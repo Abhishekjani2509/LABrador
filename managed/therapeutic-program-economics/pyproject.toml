@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "labrador-roi"
 version = "0.1.0"
-description = "Interpretable therapeutic program strategy valuation from comparable prices to protected cash flow."
+description = "Interpretable therapeutic program economics from comparable prices to protected cash flow."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [{ name = "LABrador contributors" }]

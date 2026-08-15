@@ -1,4 +1,4 @@
-# simulated-clinical — state of play
+# Trial Recruitment Forecaster — state of play
 
 Node (4) of the GO Hackathon pipeline, Track A. Owner: Abhishek.
 Answers: *given an indication thesis, could this trial actually be enrolled?*
@@ -12,10 +12,10 @@ Answers: *given an indication thesis, could this trial actually be enrolled?*
 | `recruitability.ts` | The engine. Empirical velocity → biomarker narrowing (floored) → eligibility burden (median of 3 Claude reads of real I/E prose) → competition → powering (phase-3 floored) → sites from precedent → counterfactual search. |
 | `backtest.ts` | Validation harness: predicted vs actual enrolment for completed trials, horizon rolled back to each trial's start. |
 | `fixtures/theses.json` | 4 fixtures, one per mode, each with a `whyInSet` rationale. |
-| `demo.ts` | Runnable. `bun managed/simulated-clinical/demo.ts [id] [asOf]` |
+| `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
 
 Verified end to end on 2026-08-15 (evening): typecheck + ultracite clean, all
-four fixtures coherent, hero retrospective solid, backtest runs. `managed/simulated-clinical`
+four fixtures coherent, hero retrospective solid, backtest runs. `managed/trial-recruitment-forecaster`
 is un-gitignored (narrow negation; full `/managed-agent-setup` Phase 2 with
 auth wiring remains a team decision).
 
@@ -68,7 +68,7 @@ withdrawn 2023) appears only in today-runs.
 
 ## Backtest results and what they mean
 
-`bun managed/simulated-clinical/backtest.ts` — 6 completed EoE-family trials.
+`bun managed/trial-recruitment-forecaster/backtest.ts` — 6 completed EoE-family trials.
 The comparator is now honest: predicted ENROLLING months vs the registry
 window minus each trial's own endpoint window.
 

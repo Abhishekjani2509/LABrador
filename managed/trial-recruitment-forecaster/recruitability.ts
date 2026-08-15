@@ -1,5 +1,5 @@
 /**
- * Simulated clinical recruitability.
+ * Trial recruitment forecasting.
  *
  * Answers one question about an indication thesis: *could this trial actually
  * be enrolled, and how long would it take?* — with every input traceable to a

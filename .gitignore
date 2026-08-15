@@ -17,8 +17,8 @@ __pycache__/
 # delete it.
 managed/*
 !managed/.gitkeep
-# simulated-clinical is deliberately visible: fixtures are public CT.gov
+# trial-recruitment-forecaster is deliberately visible: fixtures are public CT.gov
 # data and there is no manifest.json with live deployment IDs yet.
-!managed/simulated-clinical
+!managed/trial-recruitment-forecaster
 agent/tools/*
 !agent/tools/workflow.ts

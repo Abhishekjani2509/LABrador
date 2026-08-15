@@ -16,9 +16,9 @@
  * made), and the powering formula (N is taken as actual, not derived).
  * Every predicted number is SIMULATED; only the "actual" column is real.
  *
- *   bun managed/simulated-clinical/backtest.ts                       # default panel (EoE, seeded with NCT03633617)
- *   bun managed/simulated-clinical/backtest.ts NCT03633617 NCT...    # specific trials
- *   bun managed/simulated-clinical/backtest.ts --condition "eosinophilic esophagitis" 8
+ *   bun managed/trial-recruitment-forecaster/backtest.ts
+ *   bun managed/trial-recruitment-forecaster/backtest.ts NCT03633617 NCT...
+ *   bun managed/trial-recruitment-forecaster/backtest.ts --condition "eosinophilic esophagitis" 8
  */
 import {
   enrollmentMonths,

@@ -133,10 +133,10 @@ Rules:
 `graph_id` and gets the graph back.
 
 State lives in the agent's memory store, mounted at
-`/mnt/memory/literature-graph/`, and survives across sessions:
+`/mnt/memory/research-evidence-mapper/`, and survives across sessions:
 
 ```
-/mnt/memory/literature-graph/
+/mnt/memory/research-evidence-mapper/
   index.json              # graph_id → question, round, updated_at
   g_7f2a/
     meta.json             # question, round, rounds[], coverage, status

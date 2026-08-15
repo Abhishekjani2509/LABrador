@@ -1,4 +1,4 @@
-# literature-graph — build plan
+# Research Evidence Mapper — build plan
 
 One deployed Managed Agent. Question in, knowledge graph out, state kept between
 rounds. Contract is `SCHEMA.md`.
@@ -54,7 +54,7 @@ request {graph_id?, ask, target, depth}
 **Compiled by `/managed-agent-deploy`:** `manifest.json` (sonnet-5, `message`,
 `session_policy: "fresh"`, Paperclip in `mcp_servers` with
 `permission: "always_allow"`, `memory` block), `acl.ts` (`{ public: true }`),
-`agent/tools/literature-graph.ts`. No `tools.ts` unless Paperclip turns out to be
+`agent/tools/research-evidence-mapper.ts`. No `tools.ts` unless Paperclip turns out to be
 stdio — then one handler wraps it.
 
 ## Order
@@ -65,7 +65,7 @@ stdio — then one handler wraps it.
 | 1 | `fixtures/` | defines "done" before anything aims at it |
 | 2 | `CLAUDE.md` + 3 skills | |
 | 3 | **Hand-run the pipeline in this session** on the largest fixture | demo-safe fallback if deploy fails |
-| 4 | `/managed-agent-deploy literature-graph` + smoke | |
+| 4 | `/managed-agent-deploy research-evidence-mapper` + smoke | |
 | 5 | HTML render | where the points are; needs real data first |
 
 ## Verify
@@ -73,7 +73,7 @@ stdio — then one handler wraps it.
 `bun run typecheck && bun run check`, then blocking:
 
 ```
-bun run console literature-graph -- --once "$(cat managed/literature-graph/fixtures/q-disputed.txt)"
+bun run console research-evidence-mapper -- --once "$(cat managed/research-evidence-mapper/fixtures/q-disputed.txt)"
 ```
 
 Six facts, each independently checked:

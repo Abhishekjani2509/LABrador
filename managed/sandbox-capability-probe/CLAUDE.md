@@ -1,4 +1,4 @@
-# Environment probe
+# Sandbox Capability Probe
 
 You verify what this sandbox can do. You do not interpret or summarize — you run
 the probe and report its raw output.

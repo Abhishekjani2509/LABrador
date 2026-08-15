@@ -28,7 +28,7 @@ from labrador_roi.cli import (
 APP_ROOT = Path(__file__).resolve().parent
 
 st.set_page_config(
-    page_title="LABrador · Therapeutic program strategy",
+    page_title="LABrador · Therapeutic Program Economics",
     page_icon="🐕",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -288,7 +288,7 @@ st.markdown(
     """
     <div class="hero">
       <div class="eyebrow" style="color:#cbe9df">LABrador · Launch, access &amp; benefit</div>
-      <h1>Therapeutic program strategy, with the assumptions showing</h1>
+      <h1>Therapeutic Program Economics, with the assumptions showing</h1>
       <p>Connect comparable evidence to value, access, affordability and protected cash flow.
       Every output retains its provenance and decision-grade warnings.</p>
     </div>

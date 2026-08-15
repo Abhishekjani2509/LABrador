@@ -1,6 +1,6 @@
-# LABrador engineering contract
+# Therapeutic Program Economics engineering contract
 
-LABrador is a screening-grade therapeutic program strategy simulator. It is decision support,
+Therapeutic Program Economics is a screening-grade simulator. It is decision support,
 not medical, reimbursement, investment, legal, or patent advice.
 
 ## Non-negotiable model rules

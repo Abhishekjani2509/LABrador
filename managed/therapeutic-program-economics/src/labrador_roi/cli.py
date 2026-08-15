@@ -24,7 +24,7 @@ from labrador_roi.provenance import redact
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Interpretable, screening-grade therapeutic program strategy analysis.",
+    help="Interpretable, screening-grade therapeutic program economics.",
 )
 
 PACKAGE_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"

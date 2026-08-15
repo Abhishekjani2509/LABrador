@@ -1,9 +1,9 @@
 /**
- * Runnable demo for the simulated-clinical node.
+ * Runnable demo for the Trial Recruitment Forecaster.
  *
- *   bun managed/simulated-clinical/demo.ts              # all fixtures, today
- *   bun managed/simulated-clinical/demo.ts dupi-eoe     # one fixture
- *   bun managed/simulated-clinical/demo.ts dupi-eoe 2018-01-01   # as-of run
+ *   bun managed/trial-recruitment-forecaster/demo.ts
+ *   bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe
+ *   bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe 2018-01-01
  *
  * The third form is the stage moment: same thesis, evidence horizon rolled
  * back to before dupilumab had any EoE approval.

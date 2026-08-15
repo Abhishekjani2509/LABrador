@@ -13,13 +13,13 @@
     "system_hash": "c9ec91c1dc66719413482ef5a422246670c5349d61cf6fc827b61b5d2ab72ad0",
     "tools_hash": "addeca92e69310dbd55b3aef8dad6fbafb02ba412bb23ec9e4b9fa07f5a98769"
   },
-  "description": "Throwaway probe: verifies sandbox affordances before literature-graph is built.",
+  "description": "Development probe for Managed Agents sandbox capabilities.",
   "invocation": "message",
   "memory": {
     "access": "read_write",
-    "description": "Scratch store for the environment probe. Holds nothing of value."
+    "description": "Scratch store for the sandbox capability probe. Holds nothing of value."
   },
   "model": "claude-sonnet-5",
-  "name": "spike",
+  "name": "sandbox-capability-probe",
   "session_policy": "fresh"
 }

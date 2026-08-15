@@ -19,7 +19,7 @@ print(f"MEMORY_MOUNT_EXISTS: {os.path.isdir(mem)}")
 if os.path.isdir(mem):
     print(f"MEMORY_CONTENTS: {sorted(os.listdir(mem))}")
     for store in sorted(os.listdir(mem)):
-        target = os.path.join(mem, store, "spike_probe.txt")
+        target = os.path.join(mem, store, "sandbox_capability_probe.txt")
         try:
             with open(target, "w") as fh:
                 fh.write("written by probe.py")
