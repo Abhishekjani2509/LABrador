@@ -19,9 +19,54 @@ ours, not literature.
 
 ## Setup
 
-Runs inside the Modal CPU image, which carries `fpocket` (conda-forge, 4.2.3)
-alongside `proto-tools`. The binary self-reports `fpocket 4.0` in its banner —
-cosmetic upstream mismatch, not a wrong install.
+Runs inside the Modal CPU image, which carries `fpocket` (conda-forge, 4.2.3),
+**P2Rank 2.5.1** (MIT, needs JDK 17 — Java 11 dies with
+`UnsupportedClassVersionError`, class file v61), and `proto-tools`. The fpocket
+binary self-reports `fpocket 4.0` in its banner — cosmetic upstream mismatch,
+not a wrong install.
+
+## fpocket detects, PRANK ranks
+
+Keep these jobs separate in your head. fpocket's alpha-sphere *detection* is
+sound; its *ranking* is the weak link, and its druggability score is a
+three-descriptor logistic regression fitted on 21 positives.
+
+The best-recall configuration in the LIGYSIS benchmark of 13 predictors is
+**fpocket detection + PRANK rescoring** — 60% top-(N+2) recall, ahead of
+DeepPocket at 58% and P2Rank standalone at 52%. Note that even the winner
+recovers only 60% of known sites; there is no method here that finds everything.
+
+Measured on our own structures:
+
+| site | fpocket rank | PRANK rank |
+| --- | --- | --- |
+| 6OIM switch-II (sotorasib) | **9** | **2** |
+| 2AZ5 SPD304 | 2 | **1** |
+| SPD304 site across 4 apo TNF-alpha trimers | druggability noise | **rank 2-3 in all four** |
+
+That last row is the one that matters: on apo structures where fpocket's
+druggability was indistinguishable from zero, PRANK still put the real site near
+the top. Ranking recovers what scoring loses.
+
+`prank_rank` is reported **alongside** fpocket's rank, never replacing it. A
+large gap between the two is itself a finding — it says the ranking is carrying
+the result, so treat the fpocket score with more suspicion than usual.
+
+### Two P2Rank gotchas, both confirmed by direct test
+
+**The `probability` column is only calibrated in `predict` mode, not `rescore`.**
+In rescore mode the true SPD304 site scored 0.011 while a large decoy scored
+0.783 — the ranking is usable, the probability is not. `predict` mode on the
+same site gives 0.735. So use `rescore` for within-structure ranking and a
+separate `predict` run if you need a cross-structure comparable score.
+
+**`-chains A` is silently ignored by `predict`.** Passing it returned all 3,483
+atoms of a trimer and an identical score. The documentation shows the flag; it
+does nothing. Use the `chains` column of a dataset (`.ds`) file instead.
+
+Also: `rescore` emits no `_residues.csv` — P2Rank only lays SAS points over the
+surface in `predict` mode. And skip the `conservation_*` models, which need
+HMMER and MSAs; `default` and `rescore_2024` use structure-derived features only.
 
 ## Procedure
 

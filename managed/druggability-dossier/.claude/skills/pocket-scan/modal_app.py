@@ -43,10 +43,21 @@ import modal
 # gemmi (0.7.5) arrives as a proto-tools dependency and is REQUIRED, not
 # optional — the mmCIF parse is the whole input path now. If proto-tools ever
 # stops depending on it this image needs an explicit `gemmi` pin.
+P2RANK_VERSION = "2.5.1"
+P2RANK_HOME = f"/opt/p2rank_{P2RANK_VERSION}"
+
 image = (
     modal.Image.micromamba(python_version="3.12")
     .micromamba_install("fpocket", channels=["conda-forge"])
-    .apt_install("git")
+    # JDK 17 is a hard floor for P2Rank 2.5.1 — Java 11 dies with
+    # UnsupportedClassVersionError (class file v61).
+    .apt_install("git", "curl", "openjdk-17-jre-headless")
+    .run_commands(
+        f"curl -sL -o /tmp/p2rank.tar.gz https://github.com/rdk/p2rank/releases/"
+        f"download/{P2RANK_VERSION}/p2rank_{P2RANK_VERSION}.tar.gz",
+        "tar xzf /tmp/p2rank.tar.gz -C /opt",
+        f"{P2RANK_HOME}/prank --help > /dev/null 2>&1 || true",
+    )
     .pip_install(
         # gemmi is a HARD requirement — mmCIF is the only structure format read.
         # It also arrives transitively via proto-tools, but pinning it directly
@@ -417,6 +428,71 @@ def _ligand_site(
     )
 
 
+def _prank_rescore(out_dir: Path, work: Path) -> dict[int, int]:
+    """Re-rank fpocket's pockets with PRANK. Returns {fpocket_rank: prank_rank}.
+
+    Why this exists: fpocket's DETECTION geometry is sound but its own ranking
+    is the known weak link, and the best-recall configuration in the LIGYSIS
+    benchmark of 13 predictors is fpocket detection + PRANK rescoring (60% top-
+    N+2 recall, ahead of DeepPocket 58% and P2Rank standalone 52%).
+
+    Measured on our own structures:
+        6OIM switch-II   fpocket rank 9  ->  PRANK rank 2
+        2AZ5 SPD304      fpocket rank 2  ->  PRANK rank 1
+
+    Two gotchas, both confirmed by direct test, both load-bearing:
+
+      * In RESCORE mode the `probability` column is NOT calibrated — the true
+        SPD304 site scored 0.011 and a large decoy scored 0.783. Only the
+        RANKING is usable here. `predict` mode's probability is well-calibrated
+        (0.735 on the same site), so cross-structure probability needs a
+        separate `predict` run.
+      * `rescore` emits no `_residues.csv`; P2Rank only lays SAS points over the
+        surface in `predict` mode.
+
+    A failure here is non-fatal by design: fpocket's own ranking survives and
+    the caller sees prank_rank missing rather than a dead run.
+    """
+    pdbs = list(out_dir.glob("*_out.pdb"))
+    if not pdbs:
+        return {}
+    ds = work / f"{out_dir.name}_rescore.ds"
+    ds.write_text(f"{pdbs[0]}\n")
+    outdir = work / f"{out_dir.name}_prank"
+    shutil.rmtree(outdir, ignore_errors=True)
+    proc = subprocess.run(  # noqa: S603
+        [
+            f"{P2RANK_HOME}/prank", "rescore", str(ds),
+            "-o", str(outdir), "-c", "rescore_2024",
+        ],
+        check=False, capture_output=True, timeout=600,
+    )
+    if proc.returncode != 0:
+        return {}
+    csvs = list(outdir.rglob("*_rescored.csv"))
+    if not csvs:
+        return {}
+    mapping: dict[int, int] = {}
+    lines = csvs[0].read_text().splitlines()
+    if not lines:
+        return {}
+    hdr = [h.strip().lower() for h in lines[0].split(",")]
+    try:
+        i_old, i_new = hdr.index("pocket"), hdr.index("new_rank")
+    except ValueError:
+        return {}
+    for line in lines[1:]:
+        parts = [c.strip() for c in line.split(",")]
+        if len(parts) <= max(i_old, i_new):
+            continue
+        try:
+            old = int("".join(ch for ch in parts[i_old] if ch.isdigit()))
+            mapping[old] = int(float(parts[i_new]))
+        except ValueError:
+            continue
+    return mapping
+
+
 def _parse_pockets(out_dir: Path) -> list[dict]:
     # Verified against real output: fpocket writes <input_stem>_out/ and inside
     # it <input_stem>_info.txt. removesuffix, not replace — replace() would eat
@@ -599,10 +675,16 @@ def pocket_scan(
                 capture_output=True,
             )
             pockets = _parse_pockets(out_dir)
+            prank_ranks = _prank_rescore(out_dir, run)
             for p in pockets:
                 p["jaccard_vs_ligand_site"] = (
                     _jaccard(p.get("residues", []), true_site) if true_site else None
                 )
+                # fpocket's geometry with PRANK's ranking. Reported alongside
+                # fpocket's own rank, never replacing it — a large gap between
+                # the two is itself a finding about how much the ranking is
+                # carrying.
+                p["prank_rank"] = prank_ranks.get(p["rank"])
             # Rank by overlap with the real site when we have one; by
             # druggability only when we do not.
             if true_site:
