@@ -21,49 +21,55 @@ Request arrives as the task string. One ask per request, one round per request.
 
 ---
 
-## 2. Paperclip — a CLI, not an MCP server
+## 2. MCP — Paperclip only
 
-> **Voided 2026-08-15 by spike run `sesn_01TsJ1p4AfH7zd9Msbe12ArF`.** This section
-> previously read "MCP — Paperclip only" and framed the open question as a
-> transport fork between *remote-HTTP MCP* and *stdio MCP*. Both branches were
-> wrong: Paperclip exposes no MCP server at all. There is nothing to put in
-> `manifest.mcp_servers`, and `vault_ids` is still needed but not for MCP OAuth.
-> Ignore any earlier text or discussion describing "Paperclip MCP".
+> **Correction, 2026-08-15.** An earlier revision of this section claimed
+> "Paperclip is a CLI, not an MCP server" and told you to pip-install it into the
+> sandbox. **That was wrong — ignore it.** Paperclip does run a hosted MCP server;
+> it was missed because the *local* install is a CLI and no `.mcp.json` exists in
+> this repo. The original design in this section was right, and it is restored
+> below. The sandbox needs no pip install and no wheel download.
 
-Paperclip is a Python CLI (`gxl-paperclip`, 0.7.36) over a REST API at
-`https://paperclip.gxl.ai`. The deployed agent installs it into its own sandbox
-and shells out to it. No MCP, and no host-side relay.
+**Endpoint:** `https://paperclip.gxl.ai/mcp` — remote streamable HTTP, so it goes
+straight into `manifest.mcp_servers` with `permission: "always_allow"`.
 
-**Install, proven in the deployed sandbox:**
+Verified live: `initialize` returns 200 with
+`serverInfo {name: "paperclip", version: "1.0.0"}`, protocol `2025-03-26`,
+capabilities `{tools: {listChanged: false}}`.
 
-```bash
-# NOT `pip install https://paperclip.gxl.ai/paperclip.whl` — the server serves the
-# file under a name that violates PEP 427, and pip rejects it on the filename
-# before downloading. Fetch first, rename from the archive's own .dist-info.
-curl -sL -o /tmp/gxl_paperclip-0.7.36-py3-none-any.whl https://paperclip.gxl.ai/paperclip.whl
-pip install /tmp/gxl_paperclip-0.7.36-py3-none-any.whl
-```
+**Auth:** `Authorization: Bearer <token>` — proven working with a Paperclip token.
+The CLI also supports `X-API-Key` for API keys; **which header the MCP endpoint
+accepts for a long-lived API key is not yet settled** and needs a real key to test.
+The key rides in a platform credential vault, id in `manifest.vault_ids`.
 
-`pip install gxl-paperclip` does **not** work — the PyPI simple index returns 200
-for that name but carries no distributions.
+**The server exposes exactly one tool**, and this shapes the whole design:
 
-**Auth:** a vault credential of type `environment_variable`, `secret_name:
-"PAPERCLIP_API_KEY"`, `networking` limited to `paperclip.gxl.ai`,
-`injection_location: {header: true}` — the CLI sends the key as an `X-API-Key`
-header. The sandbox holds only a placeholder; the platform substitutes the real
-value on outbound requests to that host. The credential id goes in
-`manifest.vault_ids`. Provisioning is manual (`client.beta.vaults.create` then
-`client.beta.vaults.credentials.create`); nothing in `scripts/` automates it.
+| | |
+|---|---|
+| name | `paperclip` |
+| input | `{ command: string }` — one required property |
+| example | `search "CRISPR" -n 5` · `search -s fda "pembrolizumab"` · `cat /papers/bio_xxx/meta.json` |
 
-**`literature-search` remains the only component that touches Paperclip** —
-everything downstream consumes our normalized record. That seam was designed for
-an unknown MCP tool surface and is worth keeping for an unknown CLI surface.
+It is a passthrough: the server runs the Paperclip CLI on its own infrastructure
+in `PAPERCLIP_MCP=1` mode, with a denylist of local-only commands (`login`,
+`logout`, `setup`, `config`, `install`, `update`, …). So "calling the MCP" means
+**constructing a CLI command string** — the tool surface is the CLI's surface.
+
+Two consequences worth holding onto:
+
+- **`literature-search` is still the only component that touches Paperclip.** The
+  seam was designed to absorb an unknown tool surface; it now absorbs command-string
+  construction instead. Unchanged in value.
+- **Hosted MCP is stateless** — repo selection never carries across tool calls.
+  Any `repo`/`git` command must name its repo explicitly every time, via
+  `--repo <name>` or `-f <name>`. Bare repo commands fail by design rather than
+  falling back to hidden state.
 
 | capability | command |
 |---|---|
-| search | `paperclip search -s pmc,biorxiv,medrxiv "<query>"` |
-| metadata | `paperclip cat /papers/<id>/meta.json` |
-| full text | `paperclip cat /papers/<id>/...` — exact path TBD from `paperclip skill` |
+| search | `search -s pmc,biorxiv,medrxiv "<query>"` |
+| metadata | `cat /papers/<id>/meta.json` |
+| full text | `cat /papers/<id>/content.lines` (+ `sections/`) |
 
 Fallback if a capability is missing: Europe PMC REST via built-in `web_fetch`
 (egress to `ebi.ac.uk` confirmed working in the sandbox).
@@ -197,16 +203,21 @@ output. Non-determinism here silently corrupts every score.
 | bundled script executes in sandbox | **yes** — skills materialize at `/workspace/skills/<name>/`, non-`SKILL.md` files included |
 | `python3` present | **yes** — 3.11.15 at `/usr/local/bin/python3` |
 | `/mnt/memory` writable | **yes** — mounts at `/mnt/memory/<store>/`, write→read roundtrip OK |
-| Paperclip usable | **install and run yes; auth outstanding** — wheel installs clean including the compiled `rookiepy`, `--help` RC 0, `search` RC 1 `Not authenticated` |
+| Paperclip reachable | **yes** — egress to `paperclip.gxl.ai` confirmed 200 from the sandbox |
 
 Also observed: `/mnt/session/outputs` exists · `curl`, `jq`, `pip`, `pip3`, `uv`
 present · **`sqlite3` ABSENT** (already ruled out by design, now confirmed) ·
 egress open to `ebi.ac.uk`, `paperclip.gxl.ai` and `pypi.org`.
 
-One unknown remains: whether the vault-injected `PAPERCLIP_API_KEY` placeholder
-survives the CLI's local handling and gets substituted onto the outbound
-`X-API-Key` header. It needs a real key to settle. Everything else is green, so
-steps 1–3 are no longer gated.
+The probe also pip-installed the Paperclip CLI into the sandbox and ran it
+successfully. **That path is now moot** — it was explored while this contract
+wrongly said no MCP existed. Keep it only as a fallback if the MCP endpoint is
+ever unavailable; the MCP is the design.
+
+One unknown remains: which auth header the MCP endpoint accepts for a long-lived
+API key. `Authorization: Bearer <token>` is proven; `X-API-Key` is what the CLI
+uses against the REST API and may or may not be accepted by the MCP. Needs a real
+key to settle. Everything else is green, so steps 1–3 are no longer gated.
 
 **Smoke facts** (`bun run console literature-graph -- --once "$(cat fixtures/q-disputed.txt)"`):
 1. Paperclip called at event level, not claimed in prose
@@ -220,8 +231,9 @@ steps 1–3 are no longer gated.
 
 ## 7. Open, non-blocking
 
-- ~~Paperclip transport → decided on sight~~ → **settled**: CLI installed
-  in-sandbox, not MCP. See §2.
+- ~~Paperclip transport → decided on sight~~ → **settled**: remote streamable
+  HTTP MCP at `https://paperclip.gxl.ai/mcp`. See §2. (An intermediate revision
+  of this file said "CLI, not MCP" — that was wrong and is retracted.)
 - ~~Bundled-script execution → spike step 0~~ → **settled**: works.
   `assemble.py` stays a bundled script; no host-side custom tool is needed, so
   `tools.ts` does not get built.
