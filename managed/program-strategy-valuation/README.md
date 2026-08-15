@@ -3,12 +3,22 @@
 LABrador is an interpretable, screening-grade simulator for therapeutic program strategy. It
 connects a provenance-aware program brief and comparable-price evidence to value, access,
 affordability, protected cash flow, and seeded uncertainty. It is designed for a human analyst
-and an AI agent to reach the same result from the same files.
+and an AI agent to inspect the same calculation from the same input snapshot.
 
 > **Decision boundary:** LABrador is decision support, not medical, reimbursement, investment,
 > legal, or patent advice. The bundled demo is **SYNTHETIC** and
 > **NOT_DECISION_GRADE**. Public prices or comparable products do not reveal an actual
 > confidential manufacturer net price.
+
+Interpretability is not validation. LABrador labels four different result types and never treats
+them as one score:
+
+- `MODEL_OUTPUT` — a calculation from submitted inputs and assumptions;
+- `CITED_REALITY_ANCHOR` — a sourced plausibility-band comparison, not validation or calibration;
+- `CONFIGURATION_CHECK` — confirmation that a declared convention is configured as intended;
+- `FALSIFICATION_CONTROL` — a perturbed case that should fail, proving only that the harness can.
+
+See [the interpretability contract](docs/interpretability-contract.md) before quoting a result.
 
 ## What it does
 
@@ -40,6 +50,7 @@ labrador analyze fixtures/demo_program.json \
   --comparables fixtures/demo_comparables.json \
   --simulations 1000 --seed 42 \
   --output analysis.json
+labrador replay analysis.json
 ```
 
 The CLI prints JSON by default. `--compact` produces one-line JSON for agent pipelines. A CSV
@@ -53,6 +64,10 @@ labrador portfolio fixtures/demo_program.json fixtures/demo_program_b.json \
   --simulations 1000 --seed 42 --sort-by p50_rnpv --descending
 ```
 
+Add `--reality-checks` to `labrador analyze` to run the separate cited RA/I&I plausibility
+harness. A passing band does not upgrade the submitted program's decision grade and must not be
+reported as model validation.
+
 Launch the dashboard:
 
 ```bash
@@ -65,7 +80,8 @@ The dashboard provides five coordinated views:
 2. **Price & Comparables** — explicit price bases, matched evidence, and provenance.
 3. **Access & Affordability** — eligible and treated patients, payer budget impact, and PMPM.
 4. **Cash Flow** — protected versus post-LOE revenue, costs, and discounted cash flow.
-5. **Sensitivity / Audit** — uncertainty drivers and the complete reproducible JSON record.
+5. **Sensitivity / Audit** — declared simulation drivers, internal reconciliation, separately
+   bucketed reality anchors, full input snapshot, and replayable JSON record.
 
 ## Input contract
 
@@ -81,7 +97,8 @@ contains:
 A comparable keeps product context and `PriceObservation` together. Every observation specifies
 amount, currency, period, price year, price basis, and evidence metadata. Course or unit prices
 also require annualization units. CSV upload is a transport convenience; it is normalized into
-the same nested validated contract before analysis.
+the same nested validated contract before analysis. When an indication supplies `comparator_ids`,
+that list is an explicit analyst allowlist: unlisted catalog records cannot anchor its price.
 
 Start from the bundled files:
 
@@ -109,9 +126,15 @@ code `2`:
 }
 ```
 
-For reproducibility, persist the validated inputs, simulation count, seed, package version, full
-result JSON, and source-access dates together. Do not scrape a displayed KPI and discard its
-warnings or provenance.
+Each analysis JSON includes an `interpretability` manifest with the status taxonomy, decision-grade
+warning, input digest/version context, price currency/basis/year context, patient OOP basis, shared
+patent clock, declared simulation design, internal output reconciliation, and optional reality-anchor
+report. Do not scrape a displayed KPI and discard those fields.
+
+`labrador replay analysis.json` reconstructs the recorded inputs and verifies engine-owned fields.
+The CLI/dashboard interpretation envelope is excluded from replay equality. A successful replay
+establishes deterministic engine-artifact consistency for the recorded version and locked compatible
+dependency environment; it is not empirical validation.
 
 `labrador portfolio` accepts two or more program JSON paths plus one shared comparable catalog.
 It returns standardized P10/P50/P90 rNPV, probability-positive, cash-at-risk, protected-years,
@@ -144,6 +167,14 @@ programs still require evidence replacement and review.
   and does not substitute for a product-specific legal/FDA exclusivity review.
 - Results should be reported as ranges and scenarios. Synthetic demo precision is interface
   precision, not evidentiary precision.
+- P10/P50/P90 are percentiles from the declared scenario model, not confidence intervals, observed
+  frequencies, or independently validated forecasts. Always quote the seed, draw count, and sampled
+  driver registry.
+- Simulation uses NumPy `default_rng`/PCG64. Commercial shocks are shared across the initial and
+  expansion indication within a draw; stage Bernoulli events are sequential. Draw order is an
+  implementation detail, so seed plus JSON is not a cross-version or cross-dependency guarantee.
+- Internal output reconciliation checks arithmetic consistency between headline fields and the
+  underlying ledger. It does not establish that inputs or model structure are correct.
 - Route is an explicit stratification field, not a hidden adherence multiplier. Encode
   route-specific administration burden, persistence, capacity, and costs as sourced assumptions.
 
@@ -162,6 +193,10 @@ Use bounded, auditable evidence lanes:
 - Paperclip for bounded literature retrieval, followed by primary-source verification.
 
 The complete rules and authoritative links are in [docs/source-policy.md](docs/source-policy.md).
+Evaluation and reporting semantics are in
+[docs/interpretability-contract.md](docs/interpretability-contract.md).
+The Claude-review remediation map is in
+[docs/red-team-hardening.md](docs/red-team-hardening.md).
 
 ## Build and verification plan
 
@@ -191,6 +226,8 @@ src/labrador_roi/cli.py        JSON/CSV adapters and CLI commands
 src/labrador_roi/models.py     Validated domain contracts
 src/labrador_roi/engine.py     Analysis orchestrator
 docs/source-policy.md          Evidence and price-basis rules
+docs/interpretability-contract.md  Output, evaluation, and replay semantics
+docs/red-team-hardening.md     Review finding to regression/limitation map
 tests/                         Economic, provenance, and CLI regression tests
 ```
 
@@ -200,6 +237,19 @@ LABrador does not itself establish clinical efficacy, perform legal patent analy
 coverage, retrieve confidential rebate contracts, predict competitor behavior, or replace a
 jurisdiction-specific HEOR model. Missing, synthetic, low-grade, or internally asserted inputs
 must remain visible in the output and may keep the result `NOT_DECISION_GRADE`.
+
+- COGS is an evidenced program input. LABrador does not infer manufacturing cost from SMILES,
+  peptide sequence, synthetic-accessibility scores, or an SPPS yield model.
+- Development probabilities are program inputs; no hidden small-molecule/peptide modality
+  multiplier or therapeutic-area prior is applied.
+- The cash-flow MVP values one initial indication and one expansion. Additional expansions are
+  rejected from decision-grade use instead of being silently ignored.
+- IRA/MFP timing, tax-loss carryforwards, a configurable cross-driver correlation matrix, and
+  stage-level Monte Carlo draw logs are not implemented.
+
+The RA/I&I reality anchors are sourced plausibility checks for defined US scenarios. They are not a
+blinded back-test, calibration set, prospective validation, or evidence that another indication or
+geography is modeled correctly. Numeric bands must be re-grounded before transfer.
 
 No repository license has been selected yet. The repository owner should choose one before
 redistribution or external reuse.

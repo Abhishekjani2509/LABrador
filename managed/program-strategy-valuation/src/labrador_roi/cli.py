@@ -12,7 +12,7 @@ import csv
 import importlib
 import json
 import shutil
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from statistics import mean, median
 from typing import Annotated, Any, Literal
@@ -73,6 +73,8 @@ def _json_default(value: Any) -> Any:
 def _as_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump(mode="json")
+    if is_dataclass(value) and not isinstance(value, type):
+        return _as_data(asdict(value))
     if isinstance(value, dict):
         return {str(key): _as_data(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -347,6 +349,397 @@ def comparable_summary(comparables: Any) -> dict[str, Any]:
     }
 
 
+STATUS_LEGEND: tuple[dict[str, str], ...] = (
+    {
+        "kind": "MODEL_OUTPUT",
+        "meaning": (
+            "A calculation produced by LABrador from the submitted inputs and assumptions. "
+            "It is not an observed outcome or an independently validated forecast."
+        ),
+    },
+    {
+        "kind": "CITED_REALITY_ANCHOR",
+        "meaning": (
+            "A published or authoritative plausibility reference with a source and expected "
+            "band. A pass is a range check, not model validation or calibration."
+        ),
+    },
+    {
+        "kind": "CONFIGURATION_CHECK",
+        "meaning": (
+            "An assertion that a declared convention or rule is configured as intended. It does "
+            "not test predictive accuracy and is counted separately from reality anchors."
+        ),
+    },
+    {
+        "kind": "FALSIFICATION_CONTROL",
+        "meaning": (
+            "A deliberately perturbed case that should breach a plausibility band. It tests "
+            "whether the harness can fail, not whether the model is correct."
+        ),
+    },
+)
+
+
+def _price_context(result_data: dict[str, Any]) -> list[dict[str, Any]]:
+    snapshot = result_data.get("input_snapshot", {})
+    program = snapshot.get("program", {}) if isinstance(snapshot, dict) else {}
+    comparables_snapshot = snapshot.get("comparables", {}) if isinstance(snapshot, dict) else {}
+    comparable_rows = _records(comparables_snapshot)
+    comparable_by_id = {
+        str(row.get("comparable_id")): row
+        for row in comparable_rows
+        if row.get("comparable_id") not in (None, "")
+    }
+    valuation_year = program.get("valuation_year") if isinstance(program, dict) else None
+    contexts: list[dict[str, Any]] = []
+    for pricing in result_data.get("pricing", []):
+        if not isinstance(pricing, dict):
+            continue
+        corridor = pricing.get("annual_net_price_corridor")
+        if not isinstance(corridor, dict):
+            continue
+        tiers = pricing.get("comparable_ids_by_tier", {})
+        anchor_ids: list[str] = []
+        if isinstance(tiers, dict):
+            for tier in ("PRIMARY", "SECONDARY"):
+                values = tiers.get(tier, [])
+                if isinstance(values, list):
+                    anchor_ids.extend(str(value) for value in values)
+        anchor_price_years = sorted(
+            {
+                row["price"]["price_year"]
+                for anchor_id in anchor_ids
+                if isinstance((row := comparable_by_id.get(anchor_id)), dict)
+                and isinstance(row.get("price"), dict)
+                and row["price"].get("price_year") is not None
+            }
+        )
+        contexts.append(
+            {
+                "indication_id": pricing.get("indication_id"),
+                "selected_annual_price": corridor.get("selected_annual_net_price"),
+                "price_basis": corridor.get("basis"),
+                "currency": corridor.get("currency"),
+                "valuation_year": valuation_year,
+                "anchor_price_years": anchor_price_years,
+                "year_basis_aligned": bool(anchor_price_years)
+                and all(year == valuation_year for year in anchor_price_years),
+                "interpretation": (
+                    "Modeled annual manufacturer price on the stated basis. Public list or "
+                    "reimbursement observations do not establish confidential net price."
+                ),
+            }
+        )
+    return contexts
+
+
+def _oop_context(result_data: dict[str, Any]) -> list[dict[str, Any]]:
+    contexts: list[dict[str, Any]] = []
+    for pricing in result_data.get("pricing", []):
+        if not isinstance(pricing, dict):
+            continue
+        corridor = pricing.get("annual_net_price_corridor")
+        estimates = pricing.get("access_estimates", [])
+        if not isinstance(corridor, dict) or not isinstance(estimates, list):
+            continue
+        selected_price = _number(corridor.get("selected_annual_net_price"))
+        valid_estimates = [item for item in estimates if isinstance(item, dict)]
+        if selected_price is None or not valid_estimates:
+            continue
+        selected = min(
+            valid_estimates,
+            key=lambda item: abs(
+                (_number(item.get("annual_net_price")) or selected_price) - selected_price
+            ),
+        )
+        basis = str(selected.get("patient_oop_basis") or "UNKNOWN")
+        contexts.append(
+            {
+                "indication_id": pricing.get("indication_id"),
+                "basis": basis,
+                "expected_annual_patient_oop": selected.get("expected_patient_oop"),
+                "decision_grade_eligible": basis == "EXPLICIT_ANNUAL_OOP",
+                "interpretation": (
+                    "Patient OOP is an access input, not a clinical-value or manufacturer-price "
+                    "multiplier. Manufacturer-net cost-share proxies are screening-only."
+                ),
+            }
+        )
+    return contexts
+
+
+def _internal_reconciliation(result_data: dict[str, Any]) -> dict[str, Any]:
+    existing = result_data.get("output_reconciliation")
+    if isinstance(existing, dict):
+        return {
+            "kind": "INTERNAL_RECONCILIATION",
+            "status": existing.get("status", "REPORTED"),
+            "interpretation": (
+                "Internal arithmetic consistency check only; it is not external validation."
+            ),
+            "checks": existing,
+        }
+
+    summary = result_data.get("summary", {})
+    cash_flow = result_data.get("cash_flow", {})
+    uncertainty = result_data.get("uncertainty", {})
+    decomposition = result_data.get("value_decomposition", {})
+    checks: list[dict[str, Any]] = []
+
+    def add_check(check_id: str, left: Any, right: Any) -> None:
+        left_number = _number(left)
+        right_number = _number(right)
+        if left_number is None or right_number is None:
+            checks.append(
+                {
+                    "check_id": check_id,
+                    "status": "NOT_AVAILABLE",
+                    "left": left,
+                    "right": right,
+                    "difference": None,
+                }
+            )
+            return
+        difference = left_number - right_number
+        tolerance = max(1e-6, 1e-9 * max(abs(left_number), abs(right_number), 1.0))
+        checks.append(
+            {
+                "check_id": check_id,
+                "status": "PASS" if abs(difference) <= tolerance else "FAIL",
+                "left": left_number,
+                "right": right_number,
+                "difference": difference,
+            }
+        )
+
+    if isinstance(summary, dict) and isinstance(cash_flow, dict):
+        add_check(
+            "deterministic_rnpv_equals_cashflow_npv",
+            summary.get("deterministic_rnpv"),
+            cash_flow.get("npv"),
+        )
+    rnpv_uncertainty = uncertainty.get("rnpv", {}) if isinstance(uncertainty, dict) else {}
+    if isinstance(summary, dict) and isinstance(rnpv_uncertainty, dict):
+        add_check(
+            "summary_p50_equals_uncertainty_p50",
+            summary.get("p50_rnpv"),
+            rnpv_uncertainty.get("p50"),
+        )
+        add_check(
+            "summary_mean_equals_uncertainty_mean",
+            summary.get("simulated_mean_rnpv"),
+            rnpv_uncertainty.get("mean"),
+        )
+    if isinstance(summary, dict) and isinstance(decomposition, dict):
+        add_check(
+            "indication_components_equal_deterministic_rnpv",
+            (_number(decomposition.get("initial_indication_discounted_fcf")) or 0.0)
+            + (_number(decomposition.get("expansion_increment_discounted_fcf")) or 0.0),
+            summary.get("deterministic_rnpv"),
+        )
+
+    available = [check for check in checks if check["status"] != "NOT_AVAILABLE"]
+    status = (
+        "NOT_AVAILABLE"
+        if not available
+        else "PASS"
+        if all(check["status"] == "PASS" for check in available)
+        else "FAIL"
+    )
+    return {
+        "kind": "INTERNAL_RECONCILIATION",
+        "status": status,
+        "interpretation": "Internal arithmetic consistency check only; not external validation.",
+        "checks": checks,
+    }
+
+
+def reality_anchor_surface(*, enabled: bool) -> dict[str, Any]:
+    """Run the optional cited-anchor harness without coupling analysis to it.
+
+    Reality anchors are deliberately separate from the submitted therapeutic program. A passing
+    anchor means one implementation output landed in a cited plausibility band; it does not make
+    the program output decision-grade.
+    """
+
+    interpretation = (
+        "Cited plausibility range checks are not model validation, calibration, a back-test, or "
+        "evidence that the submitted program is correct. Configuration checks and falsification "
+        "controls are counted separately."
+    )
+    if not enabled:
+        return {"status": "NOT_RUN", "interpretation": interpretation, "report": None}
+    try:
+        evaluation = importlib.import_module("labrador_roi.evaluation")
+    except ModuleNotFoundError as exc:
+        if exc.name != "labrador_roi.evaluation":
+            return {
+                "status": "ERROR",
+                "interpretation": interpretation,
+                "report": None,
+                "error_type": type(exc).__name__,
+                "reason": f"Reality-anchor dependency is unavailable: {redact(str(exc))}",
+            }
+        return {
+            "status": "UNAVAILABLE",
+            "interpretation": interpretation,
+            "report": None,
+            "error_type": type(exc).__name__,
+            "reason": "The optional reality-anchor adapter is not installed in this build.",
+        }
+    try:
+        evaluator = evaluation.evaluate_reality_anchors
+    except AttributeError as exc:
+        return {
+            "status": "UNAVAILABLE",
+            "interpretation": interpretation,
+            "report": None,
+            "error_type": type(exc).__name__,
+            "reason": "This build does not expose the reality-anchor evaluator.",
+        }
+    try:
+        report = evaluator()
+    except Exception as exc:
+        return {
+            "status": "ERROR",
+            "interpretation": interpretation,
+            "report": None,
+            "error_type": type(exc).__name__,
+            "reason": redact(str(exc)),
+        }
+    report_data = report.to_dict() if hasattr(report, "to_dict") else _as_data(report)
+    return {"status": "REPORTED", "interpretation": interpretation, "report": report_data}
+
+
+def build_interpretability_manifest(
+    result: Any,
+    *,
+    reality_report: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create an honest, machine-readable interpretation layer around engine output."""
+
+    result_data = _as_data(result)
+    snapshot = result_data.get("input_snapshot", {})
+    program = snapshot.get("program", {}) if isinstance(snapshot, dict) else {}
+    cash_flow = result_data.get("cash_flow", {})
+    warnings = result_data.get("warnings", [])
+    warning_count = len(warnings) if isinstance(warnings, list) else int(bool(warnings))
+    critical_status = result_data.get("critical_evidence_status", {})
+    gaps = (
+        sorted(str(key) for key, supported in critical_status.items() if not supported)
+        if isinstance(critical_status, dict)
+        else []
+    )
+    patent = program.get("patent", {}) if isinstance(program, dict) else {}
+    initial = program.get("initial_indication", {}) if isinstance(program, dict) else {}
+    expansions = program.get("expansion_indications", []) if isinstance(program, dict) else []
+    reality = reality_report or reality_anchor_surface(enabled=False)
+    simulation_assumptions = result_data.get("simulation_assumptions", {})
+    uncertainty = result_data.get("uncertainty", {})
+    uncertainty = uncertainty if isinstance(uncertainty, dict) else {}
+    sampled_drivers = (
+        sorted(str(key) for key in simulation_assumptions)
+        if isinstance(simulation_assumptions, dict)
+        else list(simulation_assumptions)
+        if isinstance(simulation_assumptions, list)
+        else []
+    )
+    return {
+        "status_legend": list(STATUS_LEGEND),
+        "decision_status": {
+            "decision_grade": result_data.get("decision_grade", "UNKNOWN"),
+            "recommendation": result_data.get("recommendation", "UNKNOWN"),
+            "warning_count": warning_count,
+            "critical_evidence_gaps": gaps,
+            "interpretation": (
+                "Decision grade reports implemented evidence-gate status only. It does not mean "
+                "the model is independently validated or suitable for an investment, medical, "
+                "reimbursement, legal, or patent decision."
+            ),
+        },
+        "input_record": {
+            "input_digest": result_data.get("input_digest"),
+            "full_snapshot_included": isinstance(snapshot, dict)
+            and {"program", "comparables"}.issubset(snapshot),
+            "currency": program.get("currency") if isinstance(program, dict) else None,
+            "base_year": program.get("base_year") if isinstance(program, dict) else None,
+            "valuation_year": program.get("valuation_year") if isinstance(program, dict) else None,
+            "engine_version": result_data.get("engine_version"),
+            "schema_version": result_data.get("schema_version"),
+        },
+        "price_context": _price_context(result_data),
+        "patient_oop_context": _oop_context(result_data),
+        "patent_clock": {
+            "shared_across_indications": True,
+            "filing_year": patent.get("filing_year") if isinstance(patent, dict) else None,
+            "base_term_years": patent.get("base_term_years") if isinstance(patent, dict) else None,
+            "extension_years": patent.get("extension_years") if isinstance(patent, dict) else None,
+            "patent_expiry_year": cash_flow.get("patent_expiry_year")
+            if isinstance(cash_flow, dict)
+            else None,
+            "effective_exclusivity_end_year": cash_flow.get("effective_exclusivity_end_year")
+            if isinstance(cash_flow, dict)
+            else None,
+            "initial_launch_year": initial.get("launch_year")
+            if isinstance(initial, dict)
+            else None,
+            "expansion_launch_years": [
+                item.get("launch_year") for item in expansions if isinstance(item, dict)
+            ],
+            "interpretation": (
+                "The patent term starts at filing. Every indication shares the asset-level "
+                "expiry; a label expansion does not restart the clock."
+            ),
+        },
+        "simulation_design": {
+            "seed": result_data.get("seed"),
+            "draws": result_data.get("simulations"),
+            "sampled_drivers": sampled_drivers,
+            "assumption_ranges": simulation_assumptions,
+            "rng_contract": {
+                "generator": "numpy.random.default_rng",
+                "bit_generator": uncertainty.get("rng_bit_generator", "UNKNOWN"),
+                "numpy_version": uncertainty.get("numpy_version", "UNKNOWN"),
+                "draw_order_contract_version": uncertainty.get(
+                    "draw_order_contract_version", "UNKNOWN"
+                ),
+                "draw_order": (
+                    "Implementation-dependent: commercial triangular draws followed by sequential "
+                    "stage Bernoulli draws within each simulation."
+                ),
+                "commercial_correlation": uncertainty.get(
+                    "commercial_driver_correlation",
+                    "Each named commercial shock is shared across indications within a draw.",
+                ),
+                "development_path": (
+                    "Stage Bernoulli draws occur sequentially; spending stops after failure, and a "
+                    "conditional expansion begins only when its gateway succeeds."
+                ),
+                "replay_requirement": (
+                    "Exact replay requires the recorded engine version and a locked compatible "
+                    "dependency environment; seed plus JSON alone is not a cross-version guarantee."
+                ),
+            },
+            "interpretation": (
+                "Percentiles describe this declared scenario model. They are not confidence "
+                "intervals, observed frequencies, or independently validated forecasts."
+            ),
+        },
+        "output_reconciliation": _internal_reconciliation(result_data),
+        "reality_anchors": reality,
+    }
+
+
+def _analysis_payload(result: Any, *, reality_checks: bool) -> dict[str, Any]:
+    payload = _as_data(result)
+    payload["interpretability"] = build_interpretability_manifest(
+        payload,
+        reality_report=reality_anchor_surface(enabled=reality_checks),
+    )
+    return payload
+
+
 def _portfolio_row(program: Any, result: Any, source_path: Path) -> dict[str, Any]:
     result_data = _as_data(result)
     summary = result_data["summary"]
@@ -435,6 +828,16 @@ def analyze_command(
         typer.Option("--simulations", "-n", min=1, help="Monte Carlo draws."),
     ] = 1_000,
     seed: Annotated[int, typer.Option("--seed", help="Deterministic random seed.")] = 42,
+    reality_checks: Annotated[
+        bool,
+        typer.Option(
+            "--reality-checks/--no-reality-checks",
+            help=(
+                "Run the separate cited RA/I&I plausibility harness. Passing bands are not "
+                "model validation."
+            ),
+        ),
+    ] = False,
     output: Annotated[
         Path | None,
         typer.Option("--output", "-o", dir_okay=False, help="Write result JSON to this path."),
@@ -454,9 +857,60 @@ def analyze_command(
             simulations=simulations,
             seed=seed,
         )
-        _emit(result, pretty=pretty, output=output)
+        _emit(
+            _analysis_payload(result, reality_checks=reality_checks),
+            pretty=pretty,
+            output=output,
+        )
     except Exception as exc:
         _fail(exc, operation="analyze", pretty=pretty)
+
+
+@app.command("replay")
+def replay_command(
+    analysis_path: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="Analysis JSON containing its input snapshot, seed, and simulation settings.",
+        ),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", dir_okay=False, help="Write replay report JSON here."),
+    ] = None,
+    pretty: Annotated[
+        bool, typer.Option("--pretty/--compact", help="Pretty-print JSON output.")
+    ] = True,
+) -> None:
+    """Recompute and verify engine-owned fields in a saved analysis artifact."""
+
+    try:
+        artifact = _read_json(analysis_path)
+        replay = importlib.import_module("labrador_roi.replay")
+        report = replay.replay_analysis(artifact)
+        payload = {
+            "status": "MATCH",
+            "operation": "replay",
+            "verified_scope": (
+                "Engine version, input digest, recorded seed, draw count, uncertainty assumptions, "
+                "and engine-owned analysis fields."
+            ),
+            "excluded_scope": (
+                "The CLI/dashboard interpretability presentation envelope is regenerated or "
+                "displayed separately and is not part of replay equality."
+            ),
+            "interpretation": (
+                "A match establishes deterministic engine-artifact consistency for this software "
+                "version; it is not external validation."
+            ),
+            "analysis": _as_data(report),
+        }
+        _emit(payload, pretty=pretty, output=output)
+    except Exception as exc:
+        _fail(exc, operation="replay", pretty=pretty)
 
 
 @app.command("compare")

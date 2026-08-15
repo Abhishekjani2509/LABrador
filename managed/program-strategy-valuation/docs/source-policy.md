@@ -116,3 +116,8 @@ result, audit, or source fields.
 not turn a screening model into a reimbursement submission, investment recommendation, or legal
 opinion. A result remains `NOT_DECISION_GRADE` when critical inputs are synthetic, unsupported,
 materially stale, inapplicable to the target geography/indication, or missing essential context.
+
+`DECISION_GRADE` is not a claim of model validation. Cited reality anchors, configuration checks,
+falsification controls, internal arithmetic reconciliation, and replay each answer different
+questions and must remain separately labeled. See
+[interpretability-contract.md](interpretability-contract.md).

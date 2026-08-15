@@ -273,6 +273,15 @@ class PatentAssumptions(BaseModel):
     evidence: dict[str, EvidenceMetadata] = Field(default_factory=dict)
     assumptions: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_regulatory_exclusivity_date(self) -> PatentAssumptions:
+        if (
+            self.regulatory_exclusivity_end_year is not None
+            and self.regulatory_exclusivity_end_year < self.filing_year
+        ):
+            raise ValueError("regulatory exclusivity cannot end before patent filing")
+        return self
+
     @property
     def patent_expiry_year(self) -> float:
         return self.filing_year + self.base_term_years + self.extension_years
@@ -318,7 +327,7 @@ def development_stage_sort_key(name: str) -> tuple[int, str]:
 class DevelopmentAssumptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    current_stage: str
+    current_stage: str = Field(min_length=1)
     stage_costs: dict[str, float] = Field(default_factory=dict)
     stage_durations_years: dict[str, float] = Field(default_factory=dict)
     stage_success_probabilities: dict[str, float] = Field(default_factory=dict)
@@ -370,12 +379,12 @@ class IndicationInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    indication_id: str
-    name: str
-    therapeutic_area: str
-    target_population: str
-    line_of_therapy: str
-    geography: str
+    indication_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    therapeutic_area: str = Field(min_length=1)
+    target_population: str = Field(min_length=1)
+    line_of_therapy: str = Field(min_length=1)
+    geography: str = Field(min_length=1)
     currency: str = Field(min_length=3, max_length=3)
     launch_year: int
     severity: str | None = None
@@ -408,9 +417,9 @@ class ProgramInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    program_id: str
-    program_name: str
-    target: str
+    program_id: str = Field(min_length=1)
+    program_name: str = Field(min_length=1)
+    target: str = Field(min_length=1)
     modality: Modality
     molecule_identifier: str | None = None
     route: RouteOfAdministration
@@ -439,6 +448,13 @@ class ProgramInput(BaseModel):
             raise ValueError("indication IDs must be unique within a program")
         if any(item.currency != self.currency for item in indications):
             raise ValueError("indication and program currencies must match")
+        if self.patent.filing_year > self.initial_indication.launch_year:
+            raise ValueError("the modeled patent filing cannot occur after initial launch")
+        if any(
+            item.launch_year < self.initial_indication.launch_year
+            for item in self.expansion_indications
+        ):
+            raise ValueError("expansion launch cannot precede initial-indication launch")
         return self
 
     def indication(self, indication_id: str | None = None) -> IndicationInput:
