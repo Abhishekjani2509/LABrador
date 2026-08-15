@@ -56,9 +56,16 @@ FROM pdb_v.structures_by_accession s
 LEFT JOIN pdb_v.entry_ligands l ON l.entry_id = s.entry_id
 WHERE s.accession = '<ACC>'
 GROUP BY s.entry_id, s.resolution, s.exptl_method, s.release_date
-ORDER BY 5 DESC, s.resolution NULLS LAST
+ORDER BY s.resolution NULLS LAST, s.release_date DESC
 LIMIT 25
 ```
+
+**Do not order by the state column.** An earlier version of this query used
+`ORDER BY 5 DESC`, where column 5 is the `'HOLO'|'APO'` CASE string. Since
+`'HOLO' > 'APO'` alphabetically, every apo entry falls past the row limit and
+becomes invisible — TNF-alpha looked like it had no apo structures at all when
+the real split is **17 holo / 35 apo**. Order by resolution, and get the counts
+from a separate `GROUP BY state` query rather than by reading the first page.
 
 **Controls: 4OBE must return APO, 6OIM must return HOLO (MOV).** If either
 flips, the exclusion list or the MW window has broken.

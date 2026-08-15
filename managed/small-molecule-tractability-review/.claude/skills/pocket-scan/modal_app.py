@@ -428,8 +428,120 @@ def _ligand_site(
     )
 
 
-def _prank_rescore(out_dir: Path, work: Path, protein: Path) -> dict[int, int]:
-    """Re-rank fpocket's pockets with PRANK. Returns {fpocket_rank: prank_rank}.
+def _chain_sequences(st, chains: list[str] | None = None) -> dict[str, dict[int, str]]:
+    """Per-chain polymer sequence as {seqid -> residue name}.
+
+    Keyed on author residue number rather than on position, because that is the
+    numbering everything else in this module compares on, and because the
+    protomers of a biological assembly of a homo-oligomer carry identical
+    numbering by construction.
+    """
+    seqs: dict[str, dict[int, str]] = {}
+    for chain in st[0]:
+        if chains and chain.name not in chains:
+            continue
+        seq = {r.seqid.num: r.name for r in chain if r.het_flag == "A" and len(r)}
+        if len(seq) >= 20:
+            seqs[chain.name] = seq
+    return seqs
+
+
+def _homo_oligomer(
+    st, chains: list[str] | None = None, min_identity: float = 0.9
+) -> dict:
+    """Detect several chains with identical or near-identical sequence.
+
+    This is not a curiosity, it invalidates a specific measurement. The site
+    signature used to track the SAME site across an ensemble is a set of residue
+    NUMBERS with chain identity discarded. On a homotrimer the three protomers
+    triplicate every number, so a 19-residue reference site collapses to 11
+    distinct numbers and a C3-symmetric site cannot be resolved even in
+    principle — any of the three symmetry copies, and pockets that touch none of
+    them, score identically. Measured on apo TNF-alpha: 4 of 5 structures matched
+    a pocket 7.7 A off-site sharing only residues 61 and 119, and the fifth
+    matched a pocket 12.2 A away from those four. All five were reported as "the
+    same site".
+
+    So when this returns True the caller must NOT present
+    `site_signature_overlap` as a same-site basis.
+    """
+    seqs = _chain_sequences(st, chains)
+    names = sorted(seqs)
+    groups: list[list[str]] = []
+    for name in names:
+        cur = seqs[name]
+        for g in groups:
+            ref = seqs[g[0]]
+            shared = ref.keys() & cur.keys()
+            if not shared or len(shared) < 0.5 * min(len(ref), len(cur)):
+                continue
+            if sum(ref[k] == cur[k] for k in shared) / len(shared) >= min_identity:
+                g.append(name)
+                break
+        else:
+            groups.append([name])
+    biggest = max(groups, key=len) if groups else []
+    return {
+        "is_homo_oligomer": len(biggest) > 1,
+        "n_identical_chains": len(biggest),
+        "identical_chains": sorted(biggest) if len(biggest) > 1 else [],
+        "n_polymer_chains": len(names),
+        "sequence_identity_threshold": min_identity,
+    }
+
+
+def _centroid(coords: list[tuple[float, float, float]]) -> list[float] | None:
+    if not coords:
+        return None
+    n = len(coords)
+    return [round(sum(c[i] for c in coords) / n, 2) for i in range(3)]
+
+
+def _pairs(items: list):
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            yield items[i], items[j]
+
+
+def _distance(a: list[float] | None, b: list[float] | None) -> float | None:
+    if not a or not b:
+        return None
+    return round(sum((x - y) ** 2 for x, y in zip(a, b, strict=False)) ** 0.5, 2)
+
+
+def _pdb_coords(path: Path, records: tuple[str, ...] = ("ATOM",)) -> list[tuple]:
+    """Coordinates out of a PDB file, by fixed column, no parser dependency."""
+    coords: list[tuple[float, float, float]] = []
+    if not path.exists():
+        return coords
+    for line in path.read_text().splitlines():
+        if not line.startswith(records) or len(line) < 54:
+            continue
+        try:
+            coords.append(
+                (float(line[30:38]), float(line[38:46]), float(line[46:54]))
+            )
+        except ValueError:
+            continue
+    return coords
+
+
+def _prank_rescore(
+    out_dir: Path, work: Path, protein: Path
+) -> tuple[dict[int, int], dict]:
+    """Re-rank fpocket's pockets with PRANK.
+
+    Returns ({fpocket_rank: prank_rank}, status) where status carries
+    `prank_status` in {ok, failed, not_run} plus the reason and captured stderr
+    on failure.
+
+    The status field exists because the failure was INVISIBLE. `{}` on every
+    error meant the caller saw `prank_rank: null` for every pocket, which is
+    also exactly what a successful run that simply did not rank this pocket
+    looks like. Observed: two runs on the same 4 PDB IDs, one with all
+    `prank_rank: null` and no mention of p2rank anywhere in stdout, the next with
+    real ranks. An entire rescoring stage disappeared and nothing in the output
+    said so. A silent optional stage is worse than a missing one.
 
     `protein` is the SAME prepared PDB that was handed to fpocket. It is not
     optional and it is not cosmetic: `prank rescore` reads the dataset as two
@@ -472,9 +584,28 @@ def _prank_rescore(out_dir: Path, work: Path, protein: Path) -> dict[int, int]:
     A failure here is non-fatal by design: fpocket's own ranking survives and
     the caller sees prank_rank missing rather than a dead run.
     """
+    def fail(reason: str, stderr: bytes | str = b"") -> tuple[dict, dict]:
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode(errors="replace")
+        return {}, {
+            "prank_status": "failed",
+            "prank_reason": reason,
+            "prank_stderr": stderr.strip()[-1500:] or None,
+        }
+
     pdbs = list(out_dir.glob("*_out.pdb"))
     if not pdbs or not protein.exists():
-        return {}
+        # Nothing was ever handed to PRANK — fpocket produced no output to
+        # rescore. Distinct from PRANK itself dying, and reported as such.
+        return {}, {
+            "prank_status": "not_run",
+            "prank_reason": (
+                "no fpocket *_out.pdb to rescore"
+                if not pdbs
+                else f"prepared protein missing: {protein.name}"
+            ),
+            "prank_stderr": None,
+        }
     ds = work / f"{out_dir.name}_rescore.ds"
     ds.write_text(
         "PARAM.PREDICTION_METHOD=fpocket\n"
@@ -491,23 +622,23 @@ def _prank_rescore(out_dir: Path, work: Path, protein: Path) -> dict[int, int]:
             ],
             check=False, capture_output=True, timeout=600,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError) as exc:
         # A missing prank binary, a missing JRE or a timeout must cost the
         # rescore and nothing else — fpocket's own ranking is the deliverable
-        # and prank_rank is the optional extra.
-        return {}
+        # and prank_rank is the optional extra. Still non-fatal, now audible.
+        return fail(f"{type(exc).__name__}: {exc}")
     if proc.returncode != 0:
-        return {}
+        return fail(f"prank exited {proc.returncode}", proc.stderr)
     csvs = list(outdir.rglob("*_rescored.csv"))
     if not csvs:
-        return {}
+        return fail("prank wrote no *_rescored.csv", proc.stderr)
     mapping: dict[int, int] = {}
     lines = csvs[0].read_text().splitlines()
     if not lines:
-        return {}
+        return fail(f"{csvs[0].name} is empty", proc.stderr)
     hdr = [h.strip().lower() for h in lines[0].split(",")]
     if "rank" not in hdr:
-        return {}
+        return fail(f"no 'rank' column in {csvs[0].name}: {hdr}", proc.stderr)
     i_new = hdr.index("rank")
     # `old_rank` is the authoritative fpocket rank. `name` ("pocket.9") carries
     # the same number and is the fallback, so a column rename upstream costs the
@@ -524,7 +655,12 @@ def _prank_rescore(out_dir: Path, work: Path, protein: Path) -> dict[int, int]:
             mapping[int(digits)] = int(float(parts[i_new]))
         except ValueError:
             continue
-    return mapping
+    return mapping, {
+        "prank_status": "ok",
+        "prank_reason": None,
+        "prank_stderr": None,
+        "prank_pockets_ranked": len(mapping),
+    }
 
 
 def _parse_pockets(out_dir: Path) -> list[dict]:
@@ -558,6 +694,7 @@ def _parse_pockets(out_dir: Path) -> list[dict]:
         # onto its neighbour and silently gave rank 1 no residues at all.
         atm = out_dir / "pockets" / f"pocket{p['rank']}_atm.pdb"
         res = set()
+        coords: list[tuple[float, float, float]] = []
         if not atm.exists():
             # Never expected. Say so rather than reporting an empty pocket.
             p["residues_unavailable"] = atm.name
@@ -565,9 +702,17 @@ def _parse_pockets(out_dir: Path) -> list[dict]:
             for line in atm.read_text().splitlines():
                 if line.startswith(("ATOM", "HETATM")):
                     res.add(f"{line[21]}/{line[22:26].strip()}")
+            coords = _pdb_coords(atm, ("ATOM", "HETATM"))
         p["residues"] = sorted(
             res, key=lambda s: (s.split("/")[0], int(s.split("/")[1]))
         )
+        # WHERE the pocket is, not just which residue numbers line it. An
+        # overlap fraction cannot distinguish "the same site" from "a pocket
+        # 12 A away that happens to share residue numbers", and on a
+        # homo-oligomer sharing numbers is close to guaranteed. The centroid is
+        # what makes that check possible downstream.
+        p["centroid"] = _centroid(coords)
+        p["n_lining_atoms"] = len(coords)
     return pockets
 
 
@@ -605,8 +750,25 @@ def pocket_scan(
         structure is then scored at the site the holo one points at. That is
         the KRAS 6OIM/4OBE case and the TNF-alpha 2AZ5/apo case.
 
+    THE SIGNATURE PATH IS NOT VALID ON A HOMO-OLIGOMER. Chain-agnostic residue
+    numbers are triplicated by a homotrimer's protomers, so a C3-symmetric site
+    is unresolvable in principle and the match lands wherever the numbers land.
+    When `_homo_oligomer` fires, the basis is reported as
+    `site_signature_unreliable_homooligomer` and those values must not be pooled
+    as one site. See `_homo_oligomer` for the measurement.
+
+    `ligand_codes` is an OVERRIDE, NOT A REQUIREMENT. When a structure carries a
+    drug-like ligand and the caller named no code that matches it, that
+    structure's OWN drug-like ligand anchors its site. Not doing this made the
+    answer a function of the CLI: passing one code across four TNF structures
+    left three of them falling back to the weaker signature path, and passing
+    all four moved 7JRA from druggability 0.000 / 306.9 A^3 to 0.926 /
+    1542.9 A^3 — same structures, same clustering, near-total reversal driven by
+    an argument. `site_anchor_ligand` and `site_anchor_ligand_source` record what
+    was actually used and where it came from.
+
     Read `site_pocket_selected_by` before quoting any spread: only
-    `ligand_site_jaccard` and `site_signature_overlap` are same-site.
+    `ligand_site_jaccard` is same-site without qualification.
     """
     work = Path("/tmp/pockets")
     work.mkdir(parents=True, exist_ok=True)
@@ -614,6 +776,8 @@ def pocket_scan(
     results: dict[str, dict] = {}
     site_signature: set[str] = {str(r) for r in (site_residues or [])}
     signature_source = "caller" if site_signature else None
+    signature_donor_homo: dict | None = None
+    signature_n_residues_in = len(site_residues or [])
 
     # A holo structure anywhere in the ensemble donates its ligand site as the
     # signature for the apo ones, so order the pass holo-first.
@@ -635,6 +799,10 @@ def pocket_scan(
                 if res:
                     site_signature = {r.split("/")[-1] for r in res}
                     signature_source = f"{pid}:{comp}"
+                    signature_n_residues_in = len(res)
+                    # How badly the donor site collapses is itself the finding:
+                    # 19 residues -> 11 numbers on a homotrimer.
+                    signature_donor_homo = _homo_oligomer(st)
                     break
             except Exception:  # noqa: BLE001, S112
                 continue
@@ -659,6 +827,7 @@ def pocket_scan(
             )
             prepped, used_chains = _prep(st, work, pid, want)
             ligs = _ligands(st)
+            homo = _homo_oligomer(st, used_chains)
         except Exception as exc:  # noqa: BLE001
             results[pid] = {
                 "error": f"{type(exc).__name__}: {exc}",
@@ -674,7 +843,17 @@ def pocket_scan(
         cofactors = sorted({lig["comp_id"] for lig in ligs if lig["cofactor"]})
 
         # Ground-truth site, when a drug-like ligand is present.
+        #
+        # `ligand_codes` is an OVERRIDE, not a gate. The old `if ligand_codes:
+        # ... elif druglike:` meant that supplying ANY code disabled
+        # auto-derivation for every structure whose ligand was not in the list,
+        # so a structure this module had already identified as holo
+        # ("drug-like ligand VGY") was scored as though it were apo. That is not
+        # a missing feature, it is a wrong answer that moves with the command
+        # line: 7JRA went 0.000 -> 0.926 druggability and 306.9 -> 1542.9 A^3
+        # purely on whether its code was passed.
         target_comp = None
+        anchor_source = None
         if ligand_codes:
             target_comp = next(
                 (
@@ -684,13 +863,20 @@ def pocket_scan(
                 ),
                 None,
             )
-        elif druglike:
+            if target_comp:
+                anchor_source = "caller"
+        if target_comp is None and druglike:
+            # This structure's own drug-like ligand. Already computed above and
+            # already reported in tier_note; there is no reason it should not
+            # anchor the site.
             target_comp = druglike[0]["comp_id"]
+            anchor_source = "auto_derived"
         true_site, site_copy = (
             _ligand_site(st, target_comp, used_chains)
             if target_comp
             else ([], None)
         )
+        protein_centroid = _centroid(_pdb_coords(prepped))
 
         per_d = {}
         for d in D_VALUES:
@@ -712,7 +898,7 @@ def pocket_scan(
             # `tgt`, not `prepped`: PRANK must be given the identical file
             # fpocket read, or its surface and fpocket's alpha spheres are
             # computed over different atoms.
-            prank_ranks = _prank_rescore(out_dir, run, tgt)
+            prank_ranks, prank_info = _prank_rescore(out_dir, run, tgt)
             for p in pockets:
                 p["jaccard_vs_ligand_site"] = (
                     _jaccard(p.get("residues", []), true_site) if true_site else None
@@ -760,6 +946,15 @@ def pocket_scan(
                 basis = "site_signature_overlap"
                 if best and not (best.get("signature_overlap") or 0.0):
                     best, basis = None, "no_pocket_matched_site_signature"
+                elif homo["is_homo_oligomer"] or (
+                    signature_donor_homo or {}
+                ).get("is_homo_oligomer"):
+                    # Chain-agnostic numbers cannot resolve a symmetric site.
+                    # Report the match, but never as a same-site basis: the old
+                    # behaviour labelled a pocket 7.7 A off-site
+                    # `site_signature_overlap` on 4 of 5 apo TNF structures and
+                    # a pocket 12.2 A from those on the fifth.
+                    basis = "site_signature_unreliable_homooligomer"
             else:
                 best = max(
                     pockets,
@@ -767,6 +962,7 @@ def pocket_scan(
                     default=None,
                 )
                 basis = "max_druggability_no_ligand_site"
+            site_centroid = best.get("centroid") if best else None
             per_d[str(d)] = {
                 "n_pockets": len(pockets),
                 "site_pocket": best,
@@ -774,6 +970,18 @@ def pocket_scan(
                 "merge_suspected": bool(
                     best and best.get("volume", 0) > 1000
                 ),
+                # The centroid control. An overlap fraction cannot tell you that
+                # two pockets sharing residue numbers are 12 A apart; this can.
+                "site_pocket_centroid": site_centroid,
+                # Frame-independent companion to the raw centroid: the distance
+                # from this structure's own protein centre. Two deposited
+                # entries are not in a common frame, so a raw centroid-to-
+                # centroid distance across structures also contains their rigid
+                # -body offset; this radius does not.
+                "site_pocket_radius_from_protein_center_a": _distance(
+                    site_centroid, protein_centroid
+                ),
+                **prank_info,
             }
             if not pockets:
                 per_d[str(d)]["fpocket_failed"] = {
@@ -800,6 +1008,38 @@ def pocket_scan(
             ),
             "ligand_site_residues": true_site,
             "ligand_site_copy": site_copy,
+            # What actually anchored the site, and whether the caller chose it.
+            # Without these two the same structures at the same clustering can
+            # return different answers and the output gives no way to tell why.
+            "site_anchor_ligand": target_comp,
+            "site_anchor_ligand_source": anchor_source,
+            "site_anchor_available_druglike": [
+                lig["comp_id"] for lig in druglike
+            ],
+            "homo_oligomer": homo,
+            "protein_centroid": protein_centroid,
+            "site_pocket_centroids": {
+                k: v["site_pocket_centroid"] for k, v in per_d.items()
+            },
+            # Within ONE structure every clustering value shares a coordinate
+            # frame, so this distance is exact and needs no superposition — the
+            # frame-free half of the centroid control. Measured on apo TNF-alpha
+            # 1TNF: the pocket called "the site" at D 1.6 and the one called
+            # "the site" at D 2.4 are ~12 A apart, in the same structure. An
+            # overlap fraction reported both as the same site.
+            "site_pocket_centroid_spread_across_clustering_a": max(
+                (
+                    _distance(a, b) or 0.0
+                    for a, b in _pairs(
+                        [
+                            v["site_pocket_centroid"]
+                            for v in per_d.values()
+                            if v["site_pocket_centroid"]
+                        ]
+                    )
+                ),
+                default=None,
+            ),
             "by_clustering": per_d,
         }
         if renamed:
@@ -810,18 +1050,67 @@ def pocket_scan(
 
     # Ensemble spread — volume is the reproducible quantity, druggability is not.
     vols, drugs = [], []
-    n_ligand_confirmed, n_pooled = 0, 0
-    for r in results.values():
-        for d in r["by_clustering"].values():
+    n_ligand_confirmed, n_pooled, n_signature_unreliable = 0, 0, 0
+    prank_status_counts: dict[str, int] = {}
+    # {clustering value: [(pdb_id, centroid, radius), ...]}
+    centroids: dict[str, list[tuple[str, list[float], float | None]]] = {}
+    for pid, r in results.items():
+        for dkey, d in r["by_clustering"].items():
+            status = d.get("prank_status")
+            if status:
+                prank_status_counts[status] = prank_status_counts.get(status, 0) + 1
+            if d.get("site_pocket_centroid"):
+                centroids.setdefault(dkey, []).append(
+                    (
+                        pid,
+                        d["site_pocket_centroid"],
+                        d.get("site_pocket_radius_from_protein_center_a"),
+                    )
+                )
             sp = d["site_pocket"]
             if sp:
                 n_pooled += 1
                 if d["site_pocket_selected_by"] == "ligand_site_jaccard":
                     n_ligand_confirmed += 1
+                elif (
+                    d["site_pocket_selected_by"]
+                    == "site_signature_unreliable_homooligomer"
+                ):
+                    n_signature_unreliable += 1
                 if sp.get("volume"):
                     vols.append(sp["volume"])
                 if sp.get("druggability_score") is not None:
                     drugs.append(sp["druggability_score"])
+
+    # THE CONTROL. A pocket-matching step is a measurement and needs one: two
+    # pockets sharing residue numbers can be 12 A apart and no overlap fraction
+    # will say so. A large maximum pairwise distance means the "same site" is
+    # not the same site, and the pooled spread above is pooling different
+    # pockets.
+    centroid_by_d: dict[str, dict] = {}
+    all_max: list[float] = []
+    for dkey, entries in sorted(centroids.items()):
+        worst_pair, worst = None, None
+        for a, b in _pairs(entries):
+            dist = _distance(a[1], b[1])
+            if dist is not None and (worst is None or dist > worst):
+                worst, worst_pair = dist, [a[0], b[0]]
+        radii = [e[2] for e in entries if e[2] is not None]
+        centroid_by_d[dkey] = {
+            "n_structures_with_site_pocket": len(entries),
+            "max_pairwise_centroid_distance_a": worst,
+            "max_pairwise_pdb_ids": worst_pair,
+            "centroids": {e[0]: e[1] for e in entries},
+            # Frame-independent: same quantity measured from each structure's
+            # own centre, so it survives the fact that two PDB entries are not
+            # deposited in a common coordinate frame.
+            "radius_from_protein_center_a": {e[0]: e[2] for e in entries},
+            "max_radius_difference_a": (
+                round(max(radii) - min(radii), 2) if len(radii) > 1 else None
+            ),
+        }
+        if worst is not None:
+            all_max.append(worst)
 
     return {
         "structures": results,
@@ -831,6 +1120,56 @@ def pocket_scan(
             # Which of the pooled pockets are the site and which are a guess.
             "site_pockets_pooled": n_pooled,
             "site_pockets_ligand_confirmed": n_ligand_confirmed,
+            "site_pockets_signature_unreliable_homooligomer": n_signature_unreliable,
+            "site_signature": {
+                "source": signature_source,
+                "n_residues_in": signature_n_residues_in,
+                "n_distinct_numbers": len(site_signature),
+                # 19 residues collapsing to 11 numbers IS the homotrimer
+                # problem, stated as a number rather than as a warning.
+                "collapsed_by": (
+                    signature_n_residues_in - len(site_signature)
+                    if signature_n_residues_in
+                    else None
+                ),
+                "donor_homo_oligomer": signature_donor_homo,
+                "_warning": (
+                    "The signature is a set of residue NUMBERS with chain "
+                    "identity discarded. On a homo-oligomer the protomers "
+                    "triplicate every number, so a C3-symmetric site cannot be "
+                    "resolved in principle and any pocket carrying those "
+                    "numbers matches. Structures whose basis is "
+                    "site_signature_unreliable_homooligomer must not be pooled "
+                    "as one site; check site_centroid_control before quoting a "
+                    "spread over them."
+                ),
+            },
+            "prank_status_counts": prank_status_counts,
+            "site_centroid_control": {
+                "max_pairwise_centroid_distance_a": (
+                    max(all_max) if all_max else None
+                ),
+                "per_clustering": centroid_by_d,
+                "_note": (
+                    "A pocket-matching step is a measurement and this is its "
+                    "control. Two pockets sharing residue numbers can be 12 A "
+                    "apart and an overlap fraction will not tell you. A large "
+                    "value here means the 'same site' across the ensemble is "
+                    "not the same site and the pooled spread below is pooling "
+                    "different pockets."
+                ),
+                "_frame_caveat": (
+                    "Centroids are in each entry's OWN deposited coordinate "
+                    "frame; this module does not superpose. Across different "
+                    "PDB entries the raw pairwise distance therefore also "
+                    "contains their rigid-body offset and is an UPPER bound, "
+                    "not a site displacement. Within one entry across "
+                    "clustering values it is exact. Use "
+                    "max_radius_difference_a — distance from each structure's "
+                    "own protein centre — as the frame-independent check, and "
+                    "superpose before quoting a cross-entry displacement."
+                ),
+            },
             "_pooling_caveat": (
                 "Values are pooled across structures AND clustering values. "
                 "For a structure with no drug-like ligand there is no ligand "
@@ -859,9 +1198,25 @@ def pocket_scan(
                 ),
                 "_warning": (
                     "Druggability is NOT reproducible across structures or "
-                    "clustering values. Measured 650-fold spread over one "
-                    "TNF-alpha site. Report as a range; never drive a verdict "
-                    "from a single value. Volume is the reliable number."
+                    "clustering values. Measured on an apo TNF-alpha ensemble: "
+                    "fixing the site BY CONSTRUCTION (one grid definition "
+                    "applied to every superposed structure) rather than by "
+                    "post-hoc residue matching cut the across-ensemble CV from "
+                    "27.8% to 10.2% — the matching heuristic inflated the "
+                    "spread 2.7-fold. Report druggability as a range; never "
+                    "drive a verdict from a single value. Volume is the more "
+                    "reliable number."
+                ),
+                "_retracted": (
+                    "An earlier version of this warning carried a large "
+                    "fold-spread figure across five apo TNF-alpha structures "
+                    "'of the same site'. THAT FIGURE IS WITHDRAWN and is "
+                    "deliberately not reproduced here, so that it cannot be "
+                    "lifted out of this payload. mdpocket showed the "
+                    "residue-number matcher that produced it was tracking a "
+                    "pocket 7.7 A away from the site it claimed, with 12.2 A of "
+                    "internal inconsistency between structures. It was never a "
+                    "measurement of one site."
                 ),
             },
         },
@@ -881,15 +1236,23 @@ def pocket_scan(
 
 
 @app.local_entrypoint()
-def main(pdb_ids: str = "6OIM,4OBE", ligand_codes: str = "MOV"):
+def main(pdb_ids: str = "6OIM,4OBE", ligand_codes: str = ""):
     """Smoke test: the KRAS holo/apo pair the calibration was built on.
 
     Expected: 6OIM's switch-II pocket recovers the MOV site with high Jaccard
     at one D; 4OBE shows the same site collapsed. If 6OIM comes back with a
     low-overlap site, the prep or the parse is broken, not the biology.
+
+    `ligand_codes` DEFAULTS TO EMPTY on purpose. It used to default to "MOV",
+    which meant `modal run modal_app.py --pdb-ids 6OIM,4OBE` silently passed a
+    ligand code and there was no way to exercise auto-derivation from the CLI at
+    all — the one path most likely to be wrong was the one that could not be
+    tested. Empty means the function derives MOV from 6OIM itself, which is the
+    behaviour that should hold.
     """
+    codes = [c.strip() for c in ligand_codes.split(",") if c.strip()]
     out = pocket_scan.remote(
         pdb_ids=[p.strip() for p in pdb_ids.split(",")],
-        ligand_codes=[c.strip() for c in ligand_codes.split(",")] or None,
+        ligand_codes=codes or None,
     )
     print(json.dumps(out, indent=2))

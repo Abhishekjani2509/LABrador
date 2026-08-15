@@ -83,8 +83,8 @@
     display:grid;
     grid-template-columns:22px 1fr 26px;
     gap:6px;
-    align-items:baseline;
-    padding:2px 12px 2px 12px;
+    align-items:start;
+    padding:2.5px 12px 2.5px 12px;
     cursor:pointer;
     border-left:3px solid transparent;
   }
@@ -92,8 +92,9 @@
     font-size:10.5px;font-weight:700;text-align:center;
     border:1px solid var(--ink-45);line-height:14px;height:15px;
   }
-  .row .nm{font-size:10.5px;letter-spacing:-0.2px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .row .tg{font-size:8.5px;letter-spacing:0.06em;color:var(--ink-45);text-align:right;}
+  .row .nm{font-size:10.5px;letter-spacing:-0.2px;color:var(--ink);line-height:1.35;
+    overflow-wrap:anywhere;}
+  .row .tg{font-size:8.5px;letter-spacing:0.06em;color:var(--ink-45);text-align:right;line-height:1.5;}
   .row:hover{background:var(--ink-12);}
   .row.sel{background:var(--ink);border-left-color:var(--ink);}
   .row.sel .nm,.row.sel .tg{color:var(--bg);}
@@ -388,8 +389,8 @@ const C30 = Math.cos(Math.PI/6);   // 0.8660254
 const S30 = Math.sin(Math.PI/6);   // 0.5
 
 const L   = 52;     // block footprint side, world units
-const HX  = 118;    // screen px between stage columns
-const HXG = 56;     // extra screen px before the detached EVALUATION column
+const HX  = 134;    // screen px between stage columns
+const HXG = 64;     // extra screen px before the detached EVALUATION column
 const VY  = 132;    // screen px between rows within a stage
 
 function P(x, y, z){ return [ (x - y) * C30, (x + y) * S30 - z ]; }
@@ -437,10 +438,10 @@ function el(tag, attrs){
 /* ---------- viewBox bounds ------------------------------------------------ */
 const rowsMax = Math.max(...STAGES.map(s => byStage[s.key].length));
 const VB = {
-  x: -70,
-  y: -172,
-  w: stageX[STAGES[STAGES.length-1].key] + L*C30 + 140,
-  h: (rowsMax-1)*VY + L*S30 + 172 + 40
+  x: -74,
+  y: -162,
+  w: stageX[STAGES[STAGES.length-1].key] + L*C30 + 148,
+  h: (rowsMax-1)*VY + L*S30 + 162 + 32
 };
 
 /* ============================================================================
@@ -625,10 +626,11 @@ DATA.forEach(d => {
     g.appendChild(diamond(T.S[0], T.S[1], 4.6, true));
   }
 
-  /* open-caveat marker */
+  /* open-caveat marker — below the letter, clear of the glyph */
   if (d.caveat){
+    const my = d.apex[1] + 17;
     g.appendChild(el('path', {
-      d:`M ${d.apex[0]} ${d.apex[1]-15} L ${d.apex[0]+4.6} ${d.apex[1]-10.4} L ${d.apex[0]} ${d.apex[1]-5.8} L ${d.apex[0]-4.6} ${d.apex[1]-10.4} Z`,
+      d:`M ${d.apex[0]} ${my-4.4} L ${d.apex[0]+4.4} ${my} L ${d.apex[0]} ${my+4.4} L ${d.apex[0]-4.4} ${my} Z`,
       fill:'none', stroke:'#1a1a1a', 'stroke-width':1.2
     }));
   }
@@ -644,7 +646,7 @@ DATA.forEach(d => {
 
   /* letter code on the top face */
   const label = el('text', {
-    x:d.apex[0], y:d.apex[1] + (d.caveat ? 8.5 : 6.5),
+    x:d.apex[0], y:d.apex[1] + (d.caveat ? 2 : 6.5),
     'text-anchor':'middle',
     'font-size': d.code.length > 1 ? 17 : 21,
     'font-weight':700, 'letter-spacing': d.code.length > 1 ? 0 : 0.5
@@ -753,7 +755,7 @@ const rowEls = {};
       const p = facePath(fs[fk]);
       s.appendChild(el('path',{d:p, fill:'#d7d2ac'}));
       if (FACES[fk].tint>0) s.appendChild(el('path',{d:p, fill:'#1a1a1a','fill-opacity':FACES[fk].tint}));
-      if (STATUS_META[sk].hatch) s.appendChild(el('path',{d:p, fill:`url(#h-${sk}-${fk})`}));
+      if (STATUS_META[sk].hatch) s.appendChild(el('path',{d:p, fill:`url(#${pfx}-${sk}-${fk})`}));
       s.appendChild(el('path',{d:p, fill:'none', stroke:'#1a1a1a',
         'stroke-width':dashed?1:1.4, 'stroke-dasharray':dashed?'4 3':null}));
     }
