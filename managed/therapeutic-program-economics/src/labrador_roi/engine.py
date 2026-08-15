@@ -41,8 +41,8 @@ from labrador_roi.pricing import (
 from labrador_roi.provenance import redact, sha256_digest, utc_now
 from labrador_roi.simulation import SimulationAssumptions, SimulationResult, simulate_program
 
-SCHEMA_VERSION = "1.1.0"
-ENGINE_VERSION = "0.2.0"
+SCHEMA_VERSION = "1.2.0"
+ENGINE_VERSION = "0.3.0"
 
 
 class _FrozenModel(BaseModel):
@@ -97,6 +97,9 @@ class AnalysisSummary(_FrozenModel):
     p50_rnpv: float
     p90_rnpv: float
     probability_positive_rnpv: float
+    peak_annual_net_revenue: float
+    peak_annual_net_revenue_year: int | None
+    peak_annual_net_revenue_p50: float
     peak_cash_at_risk_p50: float
     effective_protected_years: float
     value_lost_per_launch_delay_year: float
@@ -549,6 +552,18 @@ def _cashflow_evidence_status(
             _supported(indication.evidence.get(name)) for name in commercial_fields
         )
     if len(indication_ids) > 1:
+        expansion_input = program.indication(indication_ids[1])
+        interaction_group = expansion_input.population.evidence.get("population_inputs")
+        interaction_fields = ("overlap_with_initial_fraction", "cannibalization_fraction")
+        status["cashflow.expansion.population_interaction"] = all(
+            getattr(expansion_input.population, name) is not None for name in interaction_fields
+        ) and (
+            _supported(interaction_group)
+            or all(
+                _supported(expansion_input.population.evidence.get(name))
+                for name in interaction_fields
+            )
+        )
         expansion_assumptions = program.development.assumptions
         costs = expansion_assumptions.get("expansion_stage_costs", {})
         durations = expansion_assumptions.get("expansion_stage_durations_years", {})
@@ -556,6 +571,8 @@ def _cashflow_evidence_status(
         status["cashflow.expansion.development_path"] = bool(costs) and (
             set(costs) == set(durations) == set(probabilities)
         )
+    if len(program.expansion_indications) > 1:
+        status["cashflow.expansion_scope"] = False
     return status
 
 
@@ -578,6 +595,7 @@ def _cashflow_from_program(
             WarningRecord(
                 code="EXPANSION_SCOPE_LIMIT",
                 field="expansion_indications",
+                severity=WarningSeverity.ERROR,
                 message="Only the first expansion indication is modeled in the two-label MVP.",
             )
         )
@@ -826,6 +844,18 @@ def _cashflow_steps(
             unit=inputs.currency,
         ),
         CalculationStep(
+            step_id="peak_annual_net_revenue",
+            label="Peak annual manufacturer net revenue",
+            formula="max(annual cash-flow ledger net revenue)",
+            inputs={
+                "peak_year": cashflow.peak_annual_net_revenue_year,
+                "annual_rows": len(cashflow.annual_cash_flows),
+            },
+            result=cashflow.peak_annual_net_revenue,
+            unit=f"{inputs.currency}/year",
+            notes=["Derived from the same annual ledger used for NPV."],
+        ),
+        CalculationStep(
             step_id="launch_delay_cost",
             label="Value lost for one year of commercial launch delay",
             formula="base NPV - NPV with all launches delayed one year and patent clock unchanged",
@@ -939,6 +969,8 @@ def analyze_program(
 
     digest = sha256_digest(
         {
+            "schema_version": SCHEMA_VERSION,
+            "engine_version": ENGINE_VERSION,
             "inputs": source_object,
             "seed": seed,
             "simulations": simulations,
@@ -986,6 +1018,9 @@ def analyze_program(
         p50_rnpv=uncertainty.rnpv.p50,
         p90_rnpv=uncertainty.rnpv.p90,
         probability_positive_rnpv=probability_positive,
+        peak_annual_net_revenue=cashflow.peak_annual_net_revenue,
+        peak_annual_net_revenue_year=cashflow.peak_annual_net_revenue_year,
+        peak_annual_net_revenue_p50=uncertainty.peak_annual_net_revenue.p50,
         peak_cash_at_risk_p50=uncertainty.peak_cash_at_risk.p50,
         effective_protected_years=cashflow.effective_protected_years,
         value_lost_per_launch_delay_year=cashflow.value_lost_per_launch_delay_year,

@@ -139,6 +139,9 @@ def assess_comparable(
     """Assess an analogue without allowing a target match to erase a PICO mismatch."""
 
     indication = program.indication(indication_id)
+    explicitly_selected = (
+        not indication.comparator_ids or comparable.comparable_id in indication.comparator_ids
+    )
     route = indication.route or program.route
     components = ComparableMatchComponents(
         therapeutic_area=_match(indication.therapeutic_area, comparable.therapeutic_area),
@@ -172,7 +175,9 @@ def assess_comparable(
         or components.target_or_mechanism == 1
     )
 
-    if core_exact:
+    if not explicitly_selected:
+        tier = ComparableTier.EXCLUDED
+    elif core_exact:
         tier = ComparableTier.PRIMARY
     elif secondary_gate:
         tier = ComparableTier.SECONDARY
@@ -193,12 +198,14 @@ def assess_comparable(
     for field_name, label in labels.items():
         if getattr(components, field_name) < 1:
             reasons.append(f"{label} is not an exact match")
+    if not explicitly_selected:
+        reasons.append("comparable is not in the indication's explicit comparator_ids allowlist")
     if comparable.price.currency != indication.currency:
         reasons.append(
             "price currency differs from indication currency; no FX conversion was supplied"
         )
 
-    usable = tier in {ComparableTier.PRIMARY, ComparableTier.SECONDARY}
+    usable = explicitly_selected and tier in {ComparableTier.PRIMARY, ComparableTier.SECONDARY}
     usable = usable and comparable.price.currency == indication.currency
     return ComparableAssessment(
         comparable=comparable,

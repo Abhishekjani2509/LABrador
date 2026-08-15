@@ -79,9 +79,14 @@ class DistributionSummary(_FrozenModel):
 class SimulationResult(_FrozenModel):
     seed: int
     simulations: int
+    rng_bit_generator: str
+    numpy_version: str
+    draw_order_contract_version: str
+    commercial_driver_correlation: str
     rnpv: DistributionSummary
     protected_net_revenue: DistributionSummary
     post_loe_net_revenue: DistributionSummary
+    peak_annual_net_revenue: DistributionSummary
     peak_cash_at_risk: DistributionSummary
     effective_protected_years: DistributionSummary
 
@@ -111,7 +116,7 @@ def _sample_development_path(
             if not alive:
                 break
             costs[stage.year] = costs.get(stage.year, 0.0) + stage.cost
-            alive = bool(rng.random() <= stage.success_probability)
+            alive = bool(rng.random() < stage.success_probability)
         return alive, costs
 
     initial_success, initial_costs = run(inputs.initial_development_stages, alive=True)
@@ -215,6 +220,7 @@ def simulate_program(
     npvs: list[float] = []
     protected_revenue: list[float] = []
     post_loe_revenue: list[float] = []
+    peak_annual_net_revenue: list[float] = []
     cash_at_risk: list[float] = []
     protected_years: list[float] = []
     for index in range(simulations):
@@ -228,6 +234,7 @@ def simulate_program(
         npvs.append(result.npv)
         protected_revenue.append(result.value_decomposition.protected_net_revenue)
         post_loe_revenue.append(result.value_decomposition.post_loe_net_revenue)
+        peak_annual_net_revenue.append(result.peak_annual_net_revenue)
         cash_at_risk.append(result.peak_cash_at_risk)
         protected_years.append(result.effective_protected_years)
         if progress:
@@ -235,9 +242,14 @@ def simulate_program(
     return SimulationResult(
         seed=seed,
         simulations=simulations,
+        rng_bit_generator=rng.bit_generator.__class__.__name__,
+        numpy_version=np.__version__,
+        draw_order_contract_version="1.0.0",
+        commercial_driver_correlation="one shared draw per driver across indications",
         rnpv=_summary(npvs, probability_positive=True),
         protected_net_revenue=_summary(protected_revenue),
         post_loe_net_revenue=_summary(post_loe_revenue),
+        peak_annual_net_revenue=_summary(peak_annual_net_revenue),
         peak_cash_at_risk=_summary(cash_at_risk),
         effective_protected_years=_summary(protected_years),
     )

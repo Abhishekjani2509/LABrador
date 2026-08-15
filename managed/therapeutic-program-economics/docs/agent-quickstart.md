@@ -10,6 +10,7 @@ labrador validate ./work/inputs/demo_program.json \
 labrador analyze ./work/inputs/demo_program.json \
   --comparables ./work/inputs/demo_comparables.json \
   --simulations 1000 --seed 42 --output ./work/result.json
+labrador replay ./work/result.json
 labrador portfolio ./work/inputs/demo_program.json \
   ./work/inputs/demo_program_b.json \
   --comparables ./work/inputs/demo_comparables.json \
@@ -31,6 +32,20 @@ Agent rules:
    cost-share proxy must remain labeled and non-decision-grade.
 10. Compare portfolio programs only when currency and valuation year match.
 11. Treat `portfolio` ordering as a declared numeric screening sort, never an investment ranking.
+12. Distinguish `MODEL_OUTPUT`, `CITED_REALITY_ANCHOR`, `CONFIGURATION_CHECK`, and
+    `FALSIFICATION_CONTROL`. Do not combine their counts or call passing range checks validation.
+13. Preserve `input_snapshot`, `input_digest`, engine/schema versions, simulation drivers, and
+    internal reconciliation with every quoted result.
+14. Treat a successful `replay` as deterministic consistency of engine-owned fields, not empirical
+    validity. The interpretation presentation envelope is excluded from replay equality.
+15. Report the shared filing/launch/expiry calendar and patient OOP basis explicitly.
+16. Preserve the RNG contract: NumPy `default_rng`/PCG64, shared initial/expansion commercial
+    shocks, sequential stage Bernoulli draws, implementation-dependent draw order, and the locked
+    dependency environment needed for exact replay.
+17. Use `indication.comparator_ids` as an explicit reviewed allowlist when the catalog contains
+    products that must not anchor the indication's price.
 
-Before using external evidence, follow [source-policy.md](source-policy.md). The bundled files are
-interface fixtures only and are always `SYNTHETIC` / `NOT_DECISION_GRADE`.
+Before using external evidence, follow [source-policy.md](source-policy.md). Before quoting an
+analysis or anchor result, follow [interpretability-contract.md](interpretability-contract.md).
+The bundled files are interface fixtures only and are always `SYNTHETIC` /
+`NOT_DECISION_GRADE`.

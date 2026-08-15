@@ -9,7 +9,12 @@ import pytest
 from test_cashflow import program_inputs
 
 from labrador_roi.comparables import ComparableSet
-from labrador_roi.engine import Recommendation, analyze_program
+from labrador_roi.engine import (
+    ENGINE_VERSION,
+    SCHEMA_VERSION,
+    Recommendation,
+    analyze_program,
+)
 from labrador_roi.models import (
     DecisionGrade,
     EvidenceGrade,
@@ -126,8 +131,8 @@ def test_analysis_has_stable_audit_contract_and_decomposition() -> None:
         program_inputs(), simulations=100, seed=1, simulation_assumptions=FIXED_ASSUMPTIONS
     )
 
-    assert result.schema_version == "1.1.0"
-    assert result.engine_version == "0.2.0"
+    assert result.schema_version == SCHEMA_VERSION
+    assert result.engine_version == ENGINE_VERSION
     assert result.run_id.startswith("run_")
     assert result.input_digest.startswith("sha256:")
     assert result.seed == 1
