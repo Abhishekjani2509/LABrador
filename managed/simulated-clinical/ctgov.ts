@@ -105,6 +105,19 @@ function parseStudy(raw: RawStudy): TrialRecord {
   };
 }
 
+/**
+ * One retry on rate-limit/server errors: a demo run fires a dozen searches
+ * concurrently, and a single transient 429/5xx should not kill it.
+ */
+async function fetchWithRetry(url: URL): Promise<Response> {
+  const res = await fetch(url);
+  if (res.ok || (res.status !== 429 && res.status < 500)) {
+    return res;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return await fetch(url);
+}
+
 export async function searchTrials(
   q: TrialQuery
 ): Promise<{ total: number; trials: TrialRecord[] }> {
@@ -127,7 +140,7 @@ export async function searchTrials(
     );
   }
 
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) {
     throw new Error(`ClinicalTrials.gov ${res.status}: ${await res.text()}`);
   }
@@ -147,7 +160,7 @@ export async function searchTrials(
 export async function getTrial(nctId: string): Promise<TrialRecord> {
   const url = new URL(`${API}/${nctId}`);
   url.searchParams.set("fields", FIELDS);
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   if (!res.ok) {
     throw new Error(
       `ClinicalTrials.gov ${res.status} for ${nctId}: ${await res.text()}`
@@ -215,10 +228,15 @@ export function monthsBetween(
   if (!(from && to)) {
     return;
   }
+  // UTC getters, deliberately: date-only ISO strings parse as UTC midnight,
+  // and local getters shift every first-of-month (and every month-precision
+  // date like "2015-06") back a month on machines west of UTC — inflating
+  // velocities ~8% and silently dropping short trials as months=0.
   const a = new Date(from);
   const b = new Date(to);
   const months =
-    (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth());
+    (b.getUTCFullYear() - a.getUTCFullYear()) * 12 +
+    (b.getUTCMonth() - a.getUTCMonth());
   return months > 0 ? months : undefined;
 }
 

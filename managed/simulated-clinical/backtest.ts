@@ -164,12 +164,21 @@ async function backtestTrial(
 async function panelFromIds(
   ids: string[]
 ): Promise<{ condition: string; trial: TrialRecord }[]> {
-  return await Promise.all(
+  // One bad id (404, typo) must not discard the valid rest of the panel.
+  const settled = await Promise.allSettled(
     ids.map(async (id) => {
       const trial = await getTrial(id);
       return { condition: trial.conditions[0] ?? "", trial };
     })
   );
+  for (const [i, s] of settled.entries()) {
+    if (s.status === "rejected") {
+      process.stderr.write(
+        `${ids[i]}  SKIPPED — ${s.reason instanceof Error ? s.reason.message : String(s.reason)}\n`
+      );
+    }
+  }
+  return settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
 }
 
 async function panelFromCondition(
@@ -198,14 +207,24 @@ async function buildPanel(
   argv: string[]
 ): Promise<{ condition: string; trial: TrialRecord }[]> {
   const [flag, conditionArg, sizeArg] = argv;
+  const usage =
+    'usage: backtest.ts [NCT ids...] | --condition "<condition>" [n]';
+  if (flag !== "--condition" && argv.some((a) => a.startsWith("--"))) {
+    throw new Error(usage);
+  }
   if (flag === "--condition") {
     if (!conditionArg) {
-      throw new Error('usage: backtest.ts --condition "<condition>" [n]');
+      throw new Error(usage);
     }
-    return await panelFromCondition(
-      conditionArg,
-      Number(sizeArg ?? DEFAULT_PANEL_SIZE)
-    );
+    const n = Number(sizeArg ?? DEFAULT_PANEL_SIZE);
+    // A NaN size slices to an empty panel and the run looks like a clean
+    // "no usable trials" success (unquoted multi-word conditions land here).
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(
+        `panel size "${sizeArg}" is not a positive integer — ${usage} (quote multi-word conditions)`
+      );
+    }
+    return await panelFromCondition(conditionArg, n);
   }
   if (argv.length > 0) {
     return await panelFromIds(argv);
@@ -223,8 +242,19 @@ async function buildPanel(
 }
 
 const panel = await buildPanel(process.argv.slice(2));
-const results = await Promise.all(
-  panel.map(({ condition, trial }) => backtestTrial(trial, condition))
+// allSettled: one CT.gov failure on one trial's searches must not discard
+// the whole panel's completed rows.
+const results = (
+  await Promise.allSettled(
+    panel.map(({ condition, trial }) => backtestTrial(trial, condition))
+  )
+).map((s, i) =>
+  s.status === "fulfilled"
+    ? s.value
+    : {
+        nctId: panel[i]?.trial.nctId ?? "?",
+        skipped: `search failed: ${s.reason instanceof Error ? s.reason.message : String(s.reason)}`,
+      }
 );
 const rows = results.filter(isRow);
 const skips = results.filter((r): r is Skip => !isRow(r));

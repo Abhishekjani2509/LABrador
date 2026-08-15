@@ -48,19 +48,23 @@ months = requiredN / (sites × velocity × max(prevalence × eligibility, 0.10) 
   (19–47 mo, good unreachable) gets a sites-needed answer instead of a no-op
   relaxation; "none" states all-comers months + sites needed.
 
-## Fixture results (2026-08-15, final model)
+## Fixture results (2026-08-15, after adversarial review round)
 
 | Fixture | Result | Counterfactual |
 |---|---|---|
-| dupi-eoe @2018-01-01 (hero) | **16 mo, 100/100** — leak-free on all axes: N=88 (2018's own phase-3 median), 40 sites, 20 interventional competitors *at the horizon* | none needed |
-| dupi-eoe today | 23 mo, 83/100 | borderline: no relaxation reaches 18; ~95 sites would |
-| dupi-eg today | 27 mo, 70/100 | borderline (~109 sites) |
-| il13-eoe-fibrostenotic | 65 mo, 0/100 | **rescue: broaden 30%→41% → 47 mo** (the solvable-relaxation stage moment) |
-| narrow-marker-asthma | 234 mo, 0/100, ~37 screens/enrollee | none: all-comers 52 mo at 122 sites; N=511 vs 39 competitors is the real constraint |
+| dupi-eoe @2018-01-01 (hero) | **12 mo, 100/100** — leak-free on all axes: N=88 (2018's own phase-3 median), 40 sites, ~20 interventional competitors *at the horizon*, failed-precedents horizon-filtered | none needed |
+| dupi-eoe today | 22 mo, 87/100 | borderline: no relaxation reaches 18; ~85 sites would |
+| dupi-eg today | 25 mo, 77/100 | **"good" tier: broaden 70%→96% → 18 mo** |
+| il13-eoe-fibrostenotic | 63 mo, 0/100 | **"feasible" tier: broaden 30%→40% → 47 mo** |
+| narrow-marker-asthma | 181 mo, 0/100, ~37 screens/enrollee | "feasible" tier: broaden 6%→86% → 47 mo — i.e. abandon the enrichment strategy, which is dupilumab's real severe-asthma story |
 
-Gift finding intact: NCT01458418 ("inability to complete enrollment"),
-NCT02881372 ("lack of recruitment") — real EoE trials dead of what this node
-predicts.
+All three counterfactual tiers (good / feasible / borderline-none) are now
+demonstrated across the fixture set.
+
+Gift finding intact and now horizon-honest: the 2018 run cites only pre-2018
+recruitment deaths (NCT01458418 "inability to complete enrollment",
+NCT01404832 "inadequate recruitment"); NCT02881372 ("lack of recruitment",
+withdrawn 2023) appears only in today-runs.
 
 ## Backtest results and what they mean
 
@@ -100,16 +104,37 @@ window minus each trial's own endpoint window.
    family, so its old "thin precedent" premise was void; it now tests
    adjacent-indication borrowing.
 
+## Adversarial review round (21-agent workflow, same day)
+
+11 confirmed findings, all fixed: percentile() nearest-rank off-by-one (p75
+of a 4-sample pool was the MAX — now linear interpolation); monthsBetween
+mixed UTC parsing with local getters (off-by-one months west of UTC, silent
+trial drops — now getUTC*); **asOf runs leaked post-horizon terminations
+into failedPrecedents** (a 2018 run showed 2019–2023 failures as kill-mode
+fuel — now horizon-filtered); one-page truncation with fetched totals
+discarded (completed page → 300, competition counts scaled by total/page,
+sampling disclosed in `why`); NaN-surviving LLM multiplier and un-validated
+drivers/citedTrials (strict validation, bad samples dropped); one fetch or
+one bad NCT id killing whole demo/backtest runs (allSettled + one retry on
+429/5xx); NaN panel size silently producing an empty "successful" backtest
+(validated, throws usage).
+
 ## Known limitations (ranked)
 
 1. Velocity scale-transfer (above) — the big one, isolated by the backtest.
-2. GOOD_MONTHS=18 may be miscalibrated for registrational N: with the
-   phase-3 floor, almost nothing reaches "good" — real phase 3s enrol in
-   ~30 months. Consider phase-scaled thresholds.
-3. Eligibility multiplier still drifts with corpus changes (search-result
+2. **The Claude eligibility multiplier is an unclosed post-horizon channel
+   in asOf runs**: the model has 2025-era knowledge of the asset, and the
+   criteria text is the registry's CURRENT version. The prompt now pins the
+   horizon and forbids outside knowledge, but that constrains, not proves.
+   The honest phrasing on stage: "every *registry-derived* number is
+   horizon-filtered; the eligibility judgment is a present-day model reading
+   period criteria text."
+3. GOOD_MONTHS=18 may be miscalibrated for registrational N: real phase 3s
+   enrol in ~30 months. Consider phase-scaled thresholds.
+4. Eligibility multiplier still drifts with corpus changes (search-result
    order), just not with sampling dice.
-4. Historical-competition window counts trials missing dates as absent —
-   uniform undercount.
+5. Historical-competition window counts trials missing dates as absent, and
+   page-scaled counts assume the page is representative of the total.
 
 ## Waiting on team input (not blocked on code)
 

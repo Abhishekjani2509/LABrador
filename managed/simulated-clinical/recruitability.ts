@@ -136,7 +136,14 @@ export function percentile(xs: number[], q: number): number | undefined {
     return;
   }
   const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.min(Math.floor(sorted.length * q), sorted.length - 1)];
+  // Linear interpolation between closest ranks. Nearest-rank indexing made
+  // p75 of a 4-sample pool the sample MAXIMUM — precisely the outlier the
+  // interquartile bounds exist to exclude.
+  const idx = q * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const loValue = sorted[lo] ?? 0;
+  const hiValue = sorted[Math.ceil(idx)] ?? loValue;
+  return loValue + (hiValue - loValue) * (idx - lo);
 }
 
 /**
@@ -239,7 +246,8 @@ function sitesFromPrecedent(
  */
 async function assessEligibility(
   thesis: IndicationThesis,
-  precedents: TrialRecord[]
+  precedents: TrialRecord[],
+  asOf?: string
 ): Promise<EligibilityBurden> {
   const withCriteria = precedents
     .filter((t) => t.eligibilityCriteria)
@@ -277,7 +285,7 @@ Rules:
 - Do not double-count the biomarker requirement; it is already applied.
 - Every driver you name must come from criteria text above, not from general knowledge.
 - Cite the NCT ids your reasoning rests on.
-
+${asOf ? `- The evidence horizon is ${asOf}. Reason ONLY from the criteria text above; do not use anything you know about this asset, this indication, or trial outcomes after that date.\n` : ""}
 Reply with ONLY a JSON object:
 {"multiplier": <0..1>, "drivers": ["..."], "citedTrials": ["NCT..."], "reasoning": "<2 sentences>"}`;
 
@@ -301,12 +309,24 @@ Reply with ONLY a JSON object:
         .join("")
         .trim();
       const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-      const parsed = JSON.parse(json) as Partial<EligibilityBurden>;
+      const parsed = JSON.parse(json) as Record<string, unknown>;
+      // Strict validation: LLM JSON deviates in observed ways — a string
+      // multiplier ("0.5-0.7") coerces to NaN and NaN survives min/max
+      // "clamping"; a string `drivers` crashes `.join()` at render time.
+      // A bad sample must throw here so allSettled drops it.
+      const multiplier = Number(parsed.multiplier);
+      if (!Number.isFinite(multiplier)) {
+        throw new Error(`non-numeric multiplier: ${String(parsed.multiplier)}`);
+      }
       return {
-        citedTrials: parsed.citedTrials ?? [],
-        drivers: parsed.drivers ?? [],
-        multiplier: Math.min(Math.max(parsed.multiplier ?? 0.5, 0.01), 1),
-        reasoning: parsed.reasoning ?? "",
+        citedTrials: Array.isArray(parsed.citedTrials)
+          ? parsed.citedTrials.map(String)
+          : [],
+        drivers: Array.isArray(parsed.drivers)
+          ? parsed.drivers.map(String)
+          : [],
+        multiplier: Math.min(Math.max(multiplier, 0.01), 1),
+        reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning : "",
       };
     })
   );
@@ -445,10 +465,11 @@ export async function assessRecruitability(
   const { asOf } = opts;
 
   const [completed, recruiting, stopped, anyStatus] = await Promise.all([
+    // Precedents get the deepest page — velocity/N/sites all derive from it.
     searchTrials({
       asOf,
       condition: thesis.disease.name,
-      pageSize: SEARCH_PAGE_SIZE,
+      pageSize: 300,
       statuses: ["COMPLETED"],
     }),
     searchTrials({
@@ -480,16 +501,34 @@ export async function assessRecruitability(
   // CURRENT), so approximate active-at-horizon as started ≤ asOf < primary
   // completion — same approximation the backtest validated; trials missing
   // either date are not counted (uniform undercount).
+  //
+  // Both counts see only one page while the registry may hold more, so scale
+  // the page's count by total/page — a fetched-then-discarded `total`
+  // silently undercounted big indications (severe asthma: 685 registered vs
+  // a 500 page) and made the competition penalty optimistic.
+  const scaleUp = (pageCount: number, page: TrialRecord[], total: number) =>
+    Math.round(
+      pageCount * (page.length > 0 ? Math.max(total / page.length, 1) : 1)
+    );
   const competingTrials = asOf
-    ? anyStatus.trials.filter(
-        (t) =>
-          t.studyType === "INTERVENTIONAL" &&
-          t.startDate &&
-          t.startDate <= asOf &&
-          t.primaryCompletionDate &&
-          t.primaryCompletionDate > asOf
-      ).length
-    : recruiting.trials.filter((t) => t.studyType === "INTERVENTIONAL").length;
+    ? scaleUp(
+        anyStatus.trials.filter(
+          (t) =>
+            t.studyType === "INTERVENTIONAL" &&
+            t.startDate &&
+            t.startDate <= asOf &&
+            t.primaryCompletionDate &&
+            t.primaryCompletionDate > asOf
+        ).length,
+        anyStatus.trials,
+        anyStatus.total
+      )
+    : scaleUp(
+        recruiting.trials.filter((t) => t.studyType === "INTERVENTIONAL")
+          .length,
+        recruiting.trials,
+        recruiting.total
+      );
 
   // Precedents must be INTERVENTIONAL: the backtest caught observational
   // registries (700 patients at 5 sites) inflating the velocity pool by an
@@ -515,7 +554,7 @@ export async function assessRecruitability(
   const lowVelocity = percentile(vs, 0.25) ?? baseVelocity * 0.5;
   const highVelocity = percentile(vs, 0.75) ?? baseVelocity * 2;
 
-  const eligibility = await assessEligibility(thesis, precedents);
+  const eligibility = await assessEligibility(thesis, precedents, asOf);
 
   const cPenalty = competitionPenalty(competingTrials);
   const p = thesis.biomarkerPopulation.prevalenceInDisease;
@@ -594,8 +633,18 @@ export async function assessRecruitability(
       competingTrials,
       precedentTrials: precedents.slice(0, 10).map((t) => t.nctId),
     },
+    // Status and whyStopped are CURRENT-day registry state, so an asOf run
+    // must also require the trial to have ENDED by the horizon — otherwise a
+    // 2018 retrospective renders 2019–2023 terminations as evidence.
+    // Terminated trials post their stop date as primaryCompletionDate; those
+    // missing it are conservatively excluded from asOf runs.
     failedPrecedents: stopped.trials
-      .filter((t) => t.whyStopped)
+      .filter(
+        (t) =>
+          t.whyStopped &&
+          (!asOf ||
+            (t.primaryCompletionDate && t.primaryCompletionDate <= asOf))
+      )
       .slice(0, 5)
       .map((t) => ({ nctId: t.nctId, whyStopped: t.whyStopped ?? "" })),
     phase3MedianN,
@@ -612,6 +661,6 @@ export async function assessRecruitability(
     sites,
     sitesBasis,
     waterfallDelta: Math.round((score - 0.5) * 24),
-    why: `${requiredN} patients (${powering.basis}) at ${sites} sites (${sitesBasis === "precedent" ? "p75 of at-scale precedents" : sitesBasis}); precedent velocity ${baseVelocity.toFixed(2)} pt/site/mo across ${vs.length} completed trials, narrowed by ${(p * 100).toFixed(0)}% biomarker prevalence and ${(eligibility.multiplier * 100).toFixed(0)}% eligibility pass rate, with ${competingTrials} interventional trials competing for the same patients${asOf ? " at the horizon" : ""}.${floored ? ` Flow-model narrowing (${(p * eligibility.multiplier * 100).toFixed(1)}%) sits below the ${(NARROWING_FLOOR * 100).toFixed(0)}% active-screening floor, so the floor applies — the low-prevalence cost lands as ~${screensPerEnrollee} patients screened per enrollee, not as infinite months.` : ""}`,
+    why: `${requiredN} patients (${powering.basis}) at ${sites} sites (${sitesBasis === "precedent" ? "p75 of at-scale precedents" : sitesBasis}); precedent velocity ${baseVelocity.toFixed(2)} pt/site/mo across ${vs.length} completed trials${completed.total > completed.trials.length ? ` (sampled from ${completed.total} registered)` : ""}, narrowed by ${(p * 100).toFixed(0)}% biomarker prevalence and ${(eligibility.multiplier * 100).toFixed(0)}% eligibility pass rate, with ~${competingTrials} interventional trials competing for the same patients${asOf ? " at the horizon" : ""}.${floored ? ` Flow-model narrowing (${(p * eligibility.multiplier * 100).toFixed(1)}%) sits below the ${(NARROWING_FLOOR * 100).toFixed(0)}% active-screening floor, so the floor applies — the low-prevalence cost lands as ~${screensPerEnrollee} patients screened per enrollee, not as infinite months.` : ""}`,
   };
 }

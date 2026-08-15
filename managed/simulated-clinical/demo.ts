@@ -86,7 +86,9 @@ function render(
   return `${lines.join("\n")}\n`;
 }
 
-const runs = await Promise.all(
+// allSettled: a single transient CT.gov failure on one fixture must not
+// discard the other fixtures' completed work.
+const runs = await Promise.allSettled(
   selected.map(async ({ thesis: raw, whyInSet }) => {
     const thesis = IndicationThesis.parse(raw);
     const result = await assessRecruitability(thesis, { asOf });
@@ -94,6 +96,13 @@ const runs = await Promise.all(
   })
 );
 
-for (const run of runs) {
-  process.stdout.write(run);
+for (const [i, run] of runs.entries()) {
+  if (run.status === "fulfilled") {
+    process.stdout.write(run.value);
+  } else {
+    process.exitCode = 1;
+    process.stderr.write(
+      `\n${selected[i]?.thesis.id ?? "?"}  FAILED — ${run.reason instanceof Error ? run.reason.message : String(run.reason)}\n`
+    );
+  }
 }
