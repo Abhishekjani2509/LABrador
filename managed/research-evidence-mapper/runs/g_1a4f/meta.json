@@ -1,0 +1,43 @@
+{
+  "coverage": {
+    "depth": "deep",
+    "figures_read": false,
+    "figures_skipped_reason": "text was decisive; Figure 2B would only confirm the stimulus split already stated in the Results text",
+    "found": 49,
+    "limits": {
+      "max_papers": 50,
+      "max_queries": 6
+    },
+    "no_quote_discarded": 0,
+    "queries_run": 6,
+    "read": 6,
+    "stop_reason": "queries_exhausted",
+    "truncated": true,
+    "used": 2
+  },
+  "error": null,
+  "generated_at": "2026-08-15T17:30:00Z",
+  "graph_id": "g_1a4f",
+  "question": "can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?",
+  "round": 2,
+  "rounds": [
+    {
+      "ask": "new_question",
+      "depth": "standard",
+      "n": 1,
+      "outcome": "new_evidence",
+      "papers_added": 2,
+      "target": null
+    },
+    {
+      "ask": "test_gap",
+      "depth": "deep",
+      "n": 2,
+      "outcome": "contradicted",
+      "papers_added": 2,
+      "target": "g3"
+    }
+  ],
+  "schema_version": "1.1",
+  "status": "ok"
+}
