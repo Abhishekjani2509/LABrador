@@ -1,5 +1,6 @@
 node_modules/
 .env
+.claude/settings.local.json
 .eve/
 .output/
 *.log
@@ -7,3 +8,17 @@ node_modules/
 
 __pycache__/
 *.pyc
+
+# Agents you build stay untracked by default: fixtures often carry real
+# customer data, and manifest.json carries live deployment IDs. Both sides of
+# an agent are ignored together — its managed/<name>/ dir and its wrapper
+# under agent/tools/ — so a clone always typechecks. When this repo becomes
+# yours, /managed-agent-setup removes this block (and wires auth); or just
+# delete it.
+managed/*
+!managed/.gitkeep
+# simulated-clinical is deliberately visible: fixtures are public CT.gov
+# data and there is no manifest.json with live deployment IDs yet.
+!managed/simulated-clinical
+agent/tools/*
+!agent/tools/workflow.ts
