@@ -34,7 +34,7 @@ two adapters marked above have no owner.
 | Person | Branch | Node (dir under `managed/`) | Merged into main? |
 |---|---|---|---|
 | Abhishek | `abhishek-jani` | `trial-recruitment-forecaster` | ✅ |
-| Rafal | `rafwiewiora/druggability-dossier` | `small-molecule-tractability-review` | ⚠️ main has it, but **1 new commit (`f84bfff`, +4.7k lines) is unmerged — see §5 hazard** |
+| Rafal | `rafwiewiora/druggability-dossier` | `small-molecule-tractability-review` | ✅ (incl. `f84bfff`: 651x figure withdrawn, cryptic/disorder/interface modules added) |
 | Soliman | `msoliman6/literature-graph-mcp` | `research-evidence-mapper` | ✅ |
 | Moamen | `moamen` | `sandbox-capability-probe` | ✅ |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
@@ -62,10 +62,12 @@ are dead — do not create files under them.
   10-target calibration fixtures, evidence-rules CLAUDE.md, pipeline.html
   status board. Precedent + structure-selection stages VERIFIED.
 
-**Soliman — research-evidence-mapper** *(design packet, no code)*
-- SCHEMA.md (request/graph JSON/storage/guarantees), CONTRACT.md
-  (component responsibilities, verified live Paperclip MCP endpoint),
-  BUILD.md (ordering + blocking verification criteria).
+**Soliman — research-evidence-mapper** *(implementation landed 2026-08-15 late)*
+- SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
+  CLAUDE.md, three skills (literature-search, claim-extraction,
+  graph-assembly with deterministic assemble.py), and first run artifacts
+  (`runs/g_1a4f`). Not yet re-reviewed against BUILD.md's verification
+  criteria — owner to update this row.
 
 **Moamen — sandbox-capability-probe** *(done — throwaway, served its purpose)*
 - The only deployed Managed Agent. Proved: bundled scripts execute in the
@@ -93,7 +95,7 @@ are dead — do not create files under them.
       scale (backtest isolates it; candidate √-dilution fix documented in NEXT.md).
 
 **Rafal**
-- [ ] Merge `f84bfff` (see §5 hazard first).
+- [x] `f84bfff` merged (2026-08-15 late, rename-aware).
 - [ ] Falsification sweep has never been executed; dossier assembly never run
       end-to-end; GPU escalation stage blocked on a Modal payment method.
 - [ ] Pocket scanner runs in Rafal's personal Modal workspace — single point
@@ -101,8 +103,9 @@ are dead — do not create files under them.
 - [ ] Pin the `proto-tools` git dependency (unpinned ref = unreproducible image).
 
 **Soliman**
-- [ ] Entire implementation (agent instructions, skills, deterministic
-      assembler, fixtures, wrapper) — BUILD.md has the order.
+- [x] First implementation drop merged (CLAUDE.md, 3 skills, assemble.py,
+      run artifacts). Remaining per BUILD.md: fixtures, wrapper, and the
+      blocking verification criteria — owner to confirm what's left.
 - [ ] Long-lived Paperclip auth (which header the MCP accepts for API keys).
 - [ ] Committed session id in CONTRACT.md:199 — scrub if repo goes public.
 
@@ -127,7 +130,7 @@ are dead — do not create files under them.
       already runnable against it.
 
 **Cyrus**
-- [ ] Rafal's `f84bfff` merge needs rename-aware handling (§5).
+- [x] Rafal's `f84bfff` rename-aware merge (done by the integrator flow).
 - [ ] No orchestrator; router has no registered specialists yet.
 
 ## 5. Unowned work + active hazards
@@ -137,7 +140,7 @@ are dead — do not create files under them.
 | **Adapter A** | mapper `findings[]` → thesis `Evidence[]` (mapping is nearly mechanical; `no_effect` needs a convention) | Soliman + Abhishek |
 | **Adapter B** | forecaster `simulatedMonthsToEnroll` → economics `launch_year` delta + `launch_delay_years` range. ⚠️ The two "obvious" wirings are both wrong: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | Abhishek + Vince |
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics | Cyrus + whoever's free |
-| **HAZARD: rename collision** | Rafal's unmerged `f84bfff` adds files under the OLD `managed/druggability-dossier/` path; merging naively resurrects the dead dir alongside `small-molecule-tractability-review/`. Rebase or path-fix before merge. | Rafal + Cyrus |
+| ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
 
 ## 6. thesis.ts ratification agenda (the blocking conversation)
@@ -180,9 +183,18 @@ nodes' actual contracts:
    cross-node needs to §5.
 
 **Landing work:**
-7. Push to **your own branch**; Cyrus merges to `main`. (Sprint decision,
-   2026-08-15.) Small COORDINATION.md-only updates may go straight to `main`.
-8. After Cyrus merges: everyone pulls, GOTO step 1.
+7. Push to **your own branch**. The **auto-integrator** merges it to `main`:
+   `bun scripts/integrate.ts` sweeps every branch, `merge --no-ff`s anything
+   new, auto-fixes resurrected pre-rename paths, runs typecheck + check, and
+   only pushes if green — a merge-log entry lands in §9 each time. It runs
+   continuously from Abhishek's watcher session (30s polling) and anyone can
+   run it manually. *(Amends the "Cyrus merges by hand" sprint decision —
+   Abhishek's call, 2026-08-15 evening; revert by deleting this step.)*
+8. **Conflicts and red checks are never auto-pushed.** The integrator reports
+   `CONFLICT` / `COLLISION` / `VERIFY-FAILED` and leaves them for a human (or
+   the watching Claude session) to resolve with judgment.
+9. Small COORDINATION.md-only updates may go straight to `main`.
+10. After a merge lands: everyone pulls, GOTO step 1.
 
 ## 8. Verification commands per node
 
@@ -200,3 +212,9 @@ nodes' actual contracts:
 *Facts in this file were verified against the tree at `9003ad3` plus remote
 branch state on 2026-08-15. If you find a stale claim, fixing it here IS the
 process working.*
+
+## 9. Merge log (automated)
+
+Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 resolutions logged here too).
+
+- **2026-08-15 23:55 UTC** — merged `msoliman6/literature-graph-mcp` (0941254, tier-2 rename-location resolution); earlier today: `f84bfff` + `1b39569` same class — typecheck+check green.

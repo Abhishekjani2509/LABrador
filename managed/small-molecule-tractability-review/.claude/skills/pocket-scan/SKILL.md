@@ -25,6 +25,10 @@ Runs inside the Modal CPU image, which carries `fpocket` (conda-forge, 4.2.3),
 binary self-reports `fpocket 4.0` in its banner — cosmetic upstream mismatch,
 not a wrong install.
 
+**`mdpocket` is already installed** — it ships inside the same conda package as
+`fpocket`, so there is nothing to add. It is not an optional extra here; it is
+how a site gets fixed across an ensemble (see below).
+
 ## fpocket detects, PRANK ranks
 
 Keep these jobs separate in your head. fpocket's alpha-sphere *detection* is
@@ -43,6 +47,14 @@ Measured on isolated fixtures:
 | 6OIM switch-II (sotorasib) | 9 | **2** |
 | 2AZ5 SPD304 | 2 | **1** |
 | SPD304 site across 4 apo TNF-alpha trimers | druggability noise | rank 2-3 in all four |
+
+**Read the third row narrowly.** "The SPD304 site" in those apo structures was
+assigned by the residue-number matching heuristic that is now **withdrawn**
+(failure modes below): mdpocket places that matched pocket 7.7 A from the real
+SPD304 site. So that row says PRANK ranks *a* consistently-detected pocket
+highly across apo trimers — it does not say PRANK found the SPD304 site. The two
+holo rows are unaffected, because there the site is defined by the bound ligand
+rather than by matching.
 
 **But do not oversell this — on our own pipeline it has not yet helped, and
 once it hurt.** Two things found on integration:
@@ -77,6 +89,72 @@ does nothing. Use the `chains` column of a dataset (`.ds`) file instead.
 Also: `rescore` emits no `_residues.csv` — P2Rank only lays SAS points over the
 surface in `predict` mode. And skip the `conservation_*` models, which need
 HMMER and MSAs; `default` and `rescore_2024` use structure-derived features only.
+
+## mdpocket: fix the site by construction, not by matching
+
+Across an ensemble, the hard part is not detecting pockets — it is asserting
+that two detected pockets are *the same site*. Matching them after the fact on
+shared residue numbers is the single worst thing this skill has done, and the
+failure modes below record exactly how it broke. mdpocket removes the step:
+you define the site once, as a grid, and apply that one definition to every
+superposed structure.
+
+Two modes, both verified:
+
+```bash
+# mode 1 — exploration: pocket density over the whole set
+micromamba run -n druggability mdpocket --pdb_list list.txt -o PREFIX
+
+# mode 2 — characterization: one fixed site, measured per structure
+micromamba run -n druggability mdpocket --pdb_list list.txt \
+    --selected_pocket sel.pdb -o PREFIX
+```
+
+**Mode 1 (exploration)** emits `PREFIX_dens.dx` and `PREFIX_freq.dx` on a 1.0 A
+grid, plus isosurface PDBs. Use it to find where a pocket is and how often it is
+open.
+
+**Mode 2 (characterization)** emits `PREFIX_descriptors.txt` with **one row per
+snapshot and 41 columns**. This is the mode that makes an ensemble comparable,
+because every row was measured inside the same grid.
+
+Runtime is **0.85 s for five ~3.5k-atom trimers**. Compute is not a factor in
+this decision — use it whenever there is more than one structure.
+
+### What it bought, measured
+
+Fixing the site by construction instead of by post-hoc matching cut the
+across-ensemble CV on the TNF-alpha apo set:
+
+| how the site was established | CV across the ensemble |
+| --- | --- |
+| post-hoc residue-number matching | 27.8% |
+| **site fixed by construction (mode 2)** | **10.2%** |
+
+The matching heuristic inflated the spread **2.7-fold**, and essentially all of
+that came from the single structure that matched a pocket 12 A away from the
+others. The spread we were reporting was mostly the matcher, not the protein.
+
+### KRAS is the richer case, because the pocket only partially collapses
+
+TNF-alpha gives a clean zero (below), which is honest but not very informative.
+KRAS shows what mode 2 is actually for:
+
+| mdpocket characterization | 6OIM holo (ligand stripped) | 4OBE apo |
+| --- | --- | --- |
+| volume | **1152.3 A^3** | **452.1 A^3** |
+| alpha spheres | 500 | 182 |
+| mean local hydrophobic density | **185.8** | **12.6** |
+
+And mode 1 over the same two structures localises *which part* of the site goes
+away: **179 grid points at frequency 1.0** — the nucleotide-adjacent shelf,
+present in both — against **322 points at frequency 0.5** — the cryptic
+switch-II sub-pocket, present only in the ligand-bound conformer. The site does
+not vanish; a specific sub-pocket does, and mdpocket says which one.
+
+(With N=2, "frequency 0.5" is presence-in-one-of-two, not a frequency. It is
+being used here to *localise*, not to quantify how often the pocket is open.
+See failure mode 3.)
 
 ## Procedure
 
@@ -126,18 +204,26 @@ drug-like ligand; report Jaccard against the detected pocket. Strongest, rarely
 available.
 
 **(b) Persistence across the ensemble — the primary signal when nothing is
-bound.** Run every conformer, map pockets between them by residue overlap, and
-rank by *how often a pocket appears*, not by its best score. A pocket found in
-most conformers is credible; one appearing in a single frame is noise. This is
-what the TNF-alpha ensemble showed: over five apo structures the same site held
-volume to +/-16% while druggability swung 650-fold. Persistence and volume are
-the reproducible quantities.
+bound.** Run every conformer and rank by *how often a pocket appears*, not by its
+best score. A pocket found in most conformers is credible; one appearing in a
+single frame is noise. Persistence and volume are the reproducible quantities.
 
-Use **mdpocket** (ships with fpocket) rather than N separate fpocket runs when
-you have a real ensemble — a bioemu sample set or an MD trajectory. It computes
-pocket *density* over the whole set and is built for exactly this, where
-per-frame fpocket calls give you a pile of unaligned results to reconcile
-yourself.
+**Do not establish "the same pocket" by matching residue numbers across
+independently detected pockets.** That step is withdrawn, and it took a headline
+finding down with it — see the failure modes. On any homo-oligomer it cannot
+work even in principle.
+
+Instead: superpose the ensemble, define the site once, and push that one
+definition through every structure with **mdpocket** characterization mode.
+Exploration mode over the same set gives pocket *density*, which is the honest
+form of "how often is it open". Both are covered above. Per-frame fpocket calls
+leave you a pile of unaligned results to reconcile by hand, and the
+reconciliation is the part that breaks.
+
+If for some reason you must match pockets post hoc, **report the matched
+centroid distance across the ensemble**, not an overlap fraction. Two pockets
+sharing residue numbers can be 12 A apart and the overlap score will not tell
+you.
 
 **(c) Site transfer from a structural neighbour.** Foldseek the apo structure,
 find a neighbour that *does* have a drug-like holo entry, superpose, and map its
@@ -199,25 +285,110 @@ silently**. The same site at `-D 2.4` scores 0.346, rank 2 of 14, Jaccard 0.74.
 Sweep. Report the range. A volume above ~1000 A^3 means sites have merged;
 "not detected" at one D and present at another means fragmentation, not absence.
 
-### Druggability is not reproducible across an ensemble; volume is
+### VOID: the 650-fold druggability spread across five apo TNF-alpha trimers
 
-Five apo TNF-alpha trimers, same site:
+Earlier versions of this file reported, in two places, that five apo TNF-alpha
+trimers held volume to +/-16% at "the same site" while druggability swung
+**650-fold** (0.001 in 2ZJC to 0.651 in 1A8M, volumes 206.7–309.2 A^3). **That
+figure is WITHDRAWN — and so is the volume range printed beside it.** Both came
+out of one step: matching pockets across structures on shared residue *numbers*.
 
-| | range | spread |
-| --- | --- | --- |
-| Volume | 206.7–309.2 A^3 | +/-16% |
-| **Druggability** | **0.001–0.651** | **650x** |
+mdpocket over the superposed ensemble showed what that matcher was actually
+tracking:
 
-1A8M alone scores 0.651 and would have you calling the site druggable. The other
-four sit at 0.001–0.008 and would have you calling it dead. Same site, same
-protein, same protocol.
+- the matched pocket's centroid sits **7.7 A** from the SPD304 site it claimed
+  to be measuring;
+- it was not even self-consistent — **1TNF matched a pocket 12.2 A away** from
+  where the other four matched. "The same site" spanned 12 A across five
+  structures;
+- the cause is structural, not a threshold to tune. A 19-residue reference on a
+  homotrimer collapses to only **11 distinct residue numbers**, because the
+  three protomers triplicate them. Throw away chain identity and a C3-symmetric
+  site is **unresolvable in principle**.
 
-**Never build a verdict on a single-structure druggability score.** Volume
-carries the signal; druggability carries the noise.
+The pocket it matched is real, just not the one claimed: an **on-axis cavity
+lined symmetrically by Q61/K98/P117/I118/Y119 from all three chains, 107 A^3 at
+frequency 1.0**. Well-formed, reproducible, and the wrong pocket.
 
-(Honest caveat on that ensemble: 1TNF is the only wild-type apo entry. Two of the
-four others carry K98R, which lines the axial channel, so their numbers are
-contaminated. Report ensemble composition, not just the spread.)
+Do not cite 650x, 651x, +/-16%, or 206.7–309.2 A^3. If you meet them in an older
+dossier, they are void. What replaces them is below.
+
+Note what does *not* change: **never build a verdict on a single-structure
+druggability score**, and volume remains the reproducible number while
+druggability remains a 3-descriptor regression fitted on 21 positives. That
+claim never rested on the 650x figure — it rests on the KRAS holo/apo collapse
+and on the provenance of the score itself.
+
+### What replaces it: the spread was mostly the matcher
+
+Fixing the site by construction rather than by post-hoc matching cut the
+across-ensemble CV from **27.8% to 10.2%** — a **2.7-fold** inflation,
+essentially all of it contributed by the one structure that matched 12 A away.
+
+**A pocket-matching step is itself a measurement, and it needs its own
+controls.** It was never treated as one, which is why a 12 A error survived to
+become a headline number.
+
+### At the true SPD304 site, the honest answer is that there is no pocket
+
+mdpocket returns **0.00 A^3 in four of the five apo structures**. Not a low
+score — nothing.
+
+That is consistent with the physics rather than in tension with it. Place the
+ligand into each *intact* apo trimer and you get **27–29 heavy-atom clashes
+under 2.0 A**, minimum interatomic distance **0.28–0.53 A**, attributed
+**identically in all five** to the third protomer (chain C: S60, Y119, L120,
+G121) plus the Tyr119 triad. SPD304 does not bind this site as a trimer; it
+binds after displacing a subunit. Delete that third chain and every apo
+structure recovers the pocket immediately (281.8–546.0 A^3 — see the
+subunit-removed control below). Both measurements say the same thing: the site
+is pre-formed, and a protomer is standing in it.
+
+The part worth carrying to other targets is the *behaviour*, not the number:
+**mdpocket returned 0.00 rather than silently substituting a nearby pocket.**
+The residue-number matcher, handed the same structures, returned a confident
+value for a cavity 7.7 A away. A refusal instead of a wrong number is the entire
+defensibility gain here.
+
+(Ensemble composition, **corrected**: **four** of the five apo entries differ
+from wild type, not three — 1A8M is R31D, 2ZJC is **both** K98R and R31A, 2E7A
+is K98R, 5TSW is Y56F. Only 1TNF is wild-type at all three positions. And the
+mutation caveat does **not** attach to the SPD304 site: in holo 2AZ5 the nearest
+Lys98 heavy atom is **8.74 A** from ligand `307`, and residue 56 is **7.82 A**.
+Neither is in the 5 A shell — residue 98 does not line the SPD304 site at all.
+The K98R concern is real, but it belongs to the *other* pocket, the on-axis
+cavity above. Report ensemble composition either way.)
+
+### mdpocket's own failure modes, all confirmed by direct test
+
+It is the right tool and it is quiet about being wrong. Five things:
+
+**1. Silent frame dropping — check this before reading any grid.** A missing
+file in the list prints a message and then **exits 0**. The resulting `freq.dx`
+is normalised over the frames that actually ran, so a dropped structure
+**silently inflates every frequency in the grid** — the failure looks like a
+stronger result. The only detector is that `time.txt` carries exactly one line
+per processed frame. **Assert `len(time.txt) == len(list.txt)` before reading
+any grid.** Non-negotiable.
+
+**2. It does not superpose.** Unaligned input exits 0. Two *different proteins*
+in one list also exit 0, with a non-fatal warning. Superposition and site
+definition are the caller's job, and nothing downstream will notice if you skip
+them.
+
+**3. Frequency is quantised at 1/N.** With N=5 the only attainable values are
+{0, 0.2, 0.4, 0.6, 0.8, 1.0}, so a genuine 1-in-5 signal is indistinguishable
+from single-structure noise. **Require N >= 10 structures, or do not report a
+frequency at all** — report presence/absence and say so.
+
+**4. `_all_atom_pdensities.pdb` uses the first structure's topology only.** It
+is meaningless whenever atom counts differ across the ensemble, which is the
+normal case for crystal structures with different disordered regions.
+
+**5. Superposing a homo-oligomer requires searching chain permutations.** For a
+C3 trimer the three cyclic mappings agree within **0.03 A**, while the three
+anticyclic ones give **~22 A** and must be rejected. Take the best mapping; do
+not assume A→A, B→B, C→C.
 
 ### Geometric scoring is blind to cryptic pockets — measured, on KRAS
 
@@ -241,7 +412,14 @@ every time, not once.
 | | KRAS | TNF-alpha |
 | --- | --- | --- |
 | max C-alpha displacement | **8.8 A** | **1.62 A** |
-| what blocks the ligand | backbone — site collapsed | 40/66 clashes from the displaced subunit; all 26 others are Tyr119 **side-chain** atoms. **Zero backbone clashes.** |
+| what blocks the ligand | **side chains, carried in by a collapsing loop** — 12 clashes at 2.0 A, all side-chain (Arg68, Met72, His95). Backbone atoms first appear at 2.5 A. | 40/66 clashes from the displaced subunit; all 26 others are Tyr119 **side-chain** atoms. **Zero backbone clashes.** |
+
+**Both columns show side-chain clashes, so clash composition does not separate
+these mechanisms — classify on C-alpha displacement instead.** KRAS's switch-II
+loop moves 8.8 A and carries its side chains with it, so the atoms sitting *in*
+the site are side-chain even though the *cause* is backbone motion. Keying the
+classification on which atoms clash would label KRAS as side-chain occlusion and
+hand the canonical nanomolar target a micromolar prognosis.
 | ligand free volume, apo | — | 62.1% intact trimer / 85.3% subunit removed / **99.8%** with two Tyr119 rotamers trimmed |
 | mechanism | **backbone collapse** | **steric occlusion** |
 | what would resolve it | dynamics — mixed-solvent MD, bioemu | rotamer sampling; for oligomers, test the subunit-removed state |
@@ -251,8 +429,17 @@ does not. Build the risk signal on geometry.
 
 The subunit-removed control is cheap and decisive for oligomers: delete the third
 chain from each apo TNF-alpha trimer and all five immediately recover the SPD304
-pocket at 281.8–546.0 A^3 against a holo dimer value of 312.5. The site is
-pre-formed in every apo structure; only the subunit stands in it.
+pocket at 281.8–546.0 A^3 against a holo dimer value of 312.5. In the *intact*
+apo trimer the same site measures **0.00 A^3** by mdpocket in four of five — so
+"pre-formed" is a statement about the two-chain state. The site is there; the
+third protomer is standing in it.
+
+The clash attribution is what makes that reading a measurement rather than a
+story, and it repeats across the whole ensemble: placing the ligand into each
+intact apo trimer gives **27–29 heavy-atom clashes under 2.0 A** (minimum
+interatomic distance 0.28–0.53 A), attributed **identically in all five** to
+chain C — S60, Y119, L120, G121 — plus the Tyr119 triad. Five independent
+crystals, one answer.
 
 ### A holo ligand may be a frequent hitter, not a drug
 
@@ -291,6 +478,16 @@ residues with chain IDs, overlap with any annotated or ligand-derived site,
 could not see. Include the method block — tool, version, every D value swept,
 and which PDB entries formed the ensemble.
 
+When the ensemble number came through mdpocket, the method block also carries
+**how the site was established** (grid definition, not residue matching), the
+**number of frames actually processed** against the number submitted, and — if
+any frequency is reported — **N**. A frequency from N < 10 is not reportable as
+a frequency; give presence/absence instead.
+
 Never return a druggability figure without its structure tier, its D value, and
 its ensemble spread beside it. Separated from those, the number is not
 interpretable.
+
+And a volume of **0.00 A^3 is a result, not a failed run.** Report it. It is the
+one output that cannot be an over-claim, and substituting the nearest pocket
+that *does* have volume is how this skill got a headline finding wrong.

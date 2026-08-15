@@ -58,6 +58,51 @@ Also check `standard_relation`: `>` is a **failed** measurement. `EC50 > 10000 n
 means the compound did nothing up to 10 µM. Counting it as an active inflates
 precedent with non-results.
 
+### 2b. CROSS-ACCESSION CHECK — the highest-yield query in this skill
+
+Run this before anything else on the potency claim. For the top compounds by
+potency, ask what else they hit:
+
+```sql
+SELECT accession, standard_type, standard_value, standard_units, pchembl_value, assay_id
+FROM chembl_v.bioactivities_by_accession
+WHERE compound_chembl_id = '<TOP_COMPOUND>' AND pchembl_value IS NOT NULL
+ORDER BY pchembl_value DESC
+```
+
+**If a compound is equipotent against another protein, the measurement may
+belong to that protein's programme, not yours.** Verified on TNF-alpha:
+CHEMBL1288000 registers **Ki 0.074 nM against P01375 (TNF) and Ki 0.07 nM
+against P78536 (ADAM17)** — the same measurement, two accessions. The whole
+top-100 chemotype is the Schering-Plough hydantoin **TACE/ADAM17** series: the
+protease that *sheds* TNF, not TNF.
+
+Combined with the IRAK4 assay, two off-target programmes account for **53.9% of
+all TNF activities and 1,215 of 2,582 compounds**. One query found it.
+
+Both are the same failure mode — **readout protein is not measured protein** —
+and it is the dominant way a bioactivity table lies.
+
+### 2c. Approved-drug rows in a bioactivity table are not precedent
+
+`bioactivities_by_accession` reported **17 compounds at max_phase 4** for
+TNF-alpha. **None of them binds TNF.** Thalidomide and lenalidomide act on
+cereblon; dexamethasone on the glucocorticoid receptor; doramapimod on p38;
+pentoxifylline on PDE; plus hexachlorophene, gentian violet and methylene blue.
+Every one is a TNF *production* readout.
+
+Three of them — digoxin, gentian violet, hexachlorophene — come from a **"qHTS
+assay to identify small molecules that STIMULATE TNF"**. The wrong direction
+entirely. Thalidomide's row is `IC50 > 10000 nM`, a failed measurement.
+
+Meanwhile the one genuine clinical direct binder, **balinatunfib (SAR441566), is
+absent from ChEMBL entirely**. So the table held seventeen false precedents and
+zero true ones.
+
+**Approved status in a bioactivity row means the compound is approved for
+something. It does not mean it binds your target.** Cross-check every one
+against `drugs_by_accession`, which requires a curated direct mechanism.
+
 ### 3. Do the actives collapse to one series or one lab?
 
 Look at the compounds behind the top potencies. A hundred analogues from one
