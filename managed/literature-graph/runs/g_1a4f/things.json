@@ -1,0 +1,53 @@
+[
+  {
+    "aliases": [
+      "IRAK4 inhibitor",
+      "KIC-0101",
+      "PF-06650833"
+    ],
+    "id": "t1",
+    "kind": "small_molecule",
+    "mentions": 1,
+    "name": "IRAK4 inhibition"
+  },
+  {
+    "aliases": [
+      "THP1 NF-kB",
+      "monocyte cytokine release"
+    ],
+    "id": "t2",
+    "kind": "process",
+    "mentions": 1,
+    "name": "myeloid inflammatory signalling"
+  },
+  {
+    "aliases": [
+      "FLS",
+      "RA SF",
+      "fibroblast-like synoviocytes"
+    ],
+    "id": "t3",
+    "kind": "process",
+    "mentions": 1,
+    "name": "synovial fibroblast driven inflammation"
+  },
+  {
+    "aliases": [
+      "ST2825"
+    ],
+    "id": "t4",
+    "kind": "small_molecule",
+    "mentions": 1,
+    "name": "MyD88 dimerization inhibition"
+  },
+  {
+    "aliases": [
+      "TLR MYD88 mediated NF-kB pathway",
+      "myddosome"
+    ],
+    "id": "t5",
+    "kind": "process",
+    "mentions": 1,
+    "name": "TLR/MyD88/NF-kB signalling axis"
+  }
+]

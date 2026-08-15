@@ -69,10 +69,42 @@ Two consequences worth holding onto:
 |---|---|
 | search | `search -s pmc,biorxiv,medrxiv "<query>"` |
 | metadata | `cat /papers/<id>/meta.json` |
-| full text | `cat /papers/<id>/content.lines` (+ `sections/`) |
+| full text | `cat /papers/<id>/content.lines` — line-numbered `L<n>:`, the quote anchors |
+| sections | `ls /papers/<id>/sections/` |
+| **figures** | `ls /papers/<id>/figures/` then `ask-image /papers/<id>/figures/<f> "<q>"` |
+| **supplements** | `ls /papers/<id>/supplements/` then `head`/`cat` |
+| tables | inline in `content.lines`; large ones under `supplements/` |
 
-Fallback if a capability is missing: Europe PMC REST via built-in `web_fetch`
-(egress to `ebi.ac.uk` confirmed working in the sandbox).
+**Figures and supplements are NEVER read automatically.** `content.lines` does not
+contain figure contents — `figures/` holds image files (`.jpg`/`.gif`) and the only
+way into them is an explicit `ask-image` call, one per figure, with
+`--fn describe` or `--fn extract-data`. An agent that does not call `ask-image` has
+not looked at the figures, however much it read. This matters because a figure
+routinely asserts an effect size the body text only hedges at, and because
+dose/timepoint conditions — the `where` field that powers `explain_disagreement` —
+are frequently only in the figure axes or a supplementary table.
+
+**When to read them — settled 2026-08-15.** Figures are read on **`resolve_link` and
+`test_gap` only**, and even then only for papers that already yielded a relevant
+finding from text. On `new_question` and `expand_node` the agent does **not** open
+figures.
+
+The reason is budget, and it is not marginal: the MCP takes one command per call with
+no shell loops, so figures cost one `ask-image` call each. An 8-figure paper is 8
+extra calls; at `deep` (50 papers) that is potentially hundreds, on top of extraction.
+Broad sweeps cannot afford it and targeted asks are exactly where a figure changes the
+answer — `resolve_link` needs the conditions each camp measured under, and `test_gap`
+needs to know whether a pair was actually tested or merely never mentioned.
+
+When figures are skipped, that is **recorded in `coverage`, not silently omitted** —
+so "we did not look" is never indistinguishable from "there was nothing there".
+
+> **Scope, set 2026-08-15: Paperclip is the ONLY source of papers.** The earlier
+> "fallback to Europe PMC REST via `web_fetch`" is **withdrawn**. No `web_fetch`,
+> no direct REST, no other corpus. If Paperclip cannot supply a capability, that is
+> a `coverage` fact to report — `status: "partial"` with a `stop_reason` — not a
+> licence to go around it. A graph built partly from another source silently breaks
+> the guarantee that every quote is verifiable against a Paperclip document id.
 
 ---
 
@@ -89,6 +121,8 @@ what it does not decide**), failure-modes section is the longest part.
 ### `claim-extraction`
 - **In** papers + text · **Out** `findings[]` with verbatim quotes
 - Two modes: abstract-batch (5/pass, broad asks) · full-text-targeted (`resolve_link`, `test_gap`)
+- **Figures: `resolve_link` and `test_gap` only**, and only on papers already yielding
+  a text finding. `ls figures/` then one `ask-image` per figure. Skips go in `coverage`.
 - Failure modes: hedging read as assertion · background citation read as new result · mechanism inferred from co-occurrence · effect sizes lost in normalization · figure captions asserting what the text hedges · Methods conditions not matching Results claims
 
 ### `graph-assembly`
