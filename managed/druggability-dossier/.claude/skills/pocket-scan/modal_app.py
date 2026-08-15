@@ -428,8 +428,19 @@ def _ligand_site(
     )
 
 
-def _prank_rescore(out_dir: Path, work: Path) -> dict[int, int]:
+def _prank_rescore(out_dir: Path, work: Path, protein: Path) -> dict[int, int]:
     """Re-rank fpocket's pockets with PRANK. Returns {fpocket_rank: prank_rank}.
+
+    `protein` is the SAME prepared PDB that was handed to fpocket. It is not
+    optional and it is not cosmetic: `prank rescore` reads the dataset as two
+    whitespace-separated columns, and a bare list of paths is rejected with
+    "Dataset must contain 'protein' and 'prediction' columns!" — non-fatally,
+    which is how this silently returned {} for every structure. The format is
+    taken from p2rank's own shipped test_data/fpocket3.ds:
+
+        PARAM.PREDICTION_METHOD=fpocket
+        HEADER: prediction protein
+        <stem>_out/<stem>_out.pdb   <stem>.pdb
 
     Why this exists: fpocket's DETECTION geometry is sound but its own ranking
     is the known weak link, and the best-recall configuration in the LIGYSIS
@@ -450,23 +461,41 @@ def _prank_rescore(out_dir: Path, work: Path) -> dict[int, int]:
       * `rescore` emits no `_residues.csv`; P2Rank only lays SAS points over the
         surface in `predict` mode.
 
+    The `<protein>_rescored.csv` header, read off a real run rather than assumed:
+
+        name,score,rank,old_rank,change,
+
+    so `old_rank` is fpocket's rank and `rank` is PRANK's. An earlier parser
+    looked for `pocket` and `new_rank`, neither of which P2Rank has ever
+    emitted; it would have returned {} even once the dataset was accepted.
+
     A failure here is non-fatal by design: fpocket's own ranking survives and
     the caller sees prank_rank missing rather than a dead run.
     """
     pdbs = list(out_dir.glob("*_out.pdb"))
-    if not pdbs:
+    if not pdbs or not protein.exists():
         return {}
     ds = work / f"{out_dir.name}_rescore.ds"
-    ds.write_text(f"{pdbs[0]}\n")
+    ds.write_text(
+        "PARAM.PREDICTION_METHOD=fpocket\n"
+        "HEADER: prediction protein\n"
+        f"{pdbs[0]}  {protein}\n"
+    )
     outdir = work / f"{out_dir.name}_prank"
     shutil.rmtree(outdir, ignore_errors=True)
-    proc = subprocess.run(  # noqa: S603
-        [
-            f"{P2RANK_HOME}/prank", "rescore", str(ds),
-            "-o", str(outdir), "-c", "rescore_2024",
-        ],
-        check=False, capture_output=True, timeout=600,
-    )
+    try:
+        proc = subprocess.run(  # noqa: S603
+            [
+                f"{P2RANK_HOME}/prank", "rescore", str(ds),
+                "-o", str(outdir), "-c", "rescore_2024",
+            ],
+            check=False, capture_output=True, timeout=600,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # A missing prank binary, a missing JRE or a timeout must cost the
+        # rescore and nothing else — fpocket's own ranking is the deliverable
+        # and prank_rank is the optional extra.
+        return {}
     if proc.returncode != 0:
         return {}
     csvs = list(outdir.rglob("*_rescored.csv"))
@@ -477,17 +506,22 @@ def _prank_rescore(out_dir: Path, work: Path) -> dict[int, int]:
     if not lines:
         return {}
     hdr = [h.strip().lower() for h in lines[0].split(",")]
-    try:
-        i_old, i_new = hdr.index("pocket"), hdr.index("new_rank")
-    except ValueError:
+    if "rank" not in hdr:
         return {}
+    i_new = hdr.index("rank")
+    # `old_rank` is the authoritative fpocket rank. `name` ("pocket.9") carries
+    # the same number and is the fallback, so a column rename upstream costs the
+    # mapping rather than silently mis-keying it.
+    i_old = hdr.index("old_rank") if "old_rank" in hdr else hdr.index("name")
     for line in lines[1:]:
         parts = [c.strip() for c in line.split(",")]
         if len(parts) <= max(i_old, i_new):
             continue
+        digits = "".join(ch for ch in parts[i_old] if ch.isdigit())
+        if not digits:
+            continue
         try:
-            old = int("".join(ch for ch in parts[i_old] if ch.isdigit()))
-            mapping[old] = int(float(parts[i_new]))
+            mapping[int(digits)] = int(float(parts[i_new]))
         except ValueError:
             continue
     return mapping
@@ -675,7 +709,10 @@ def pocket_scan(
                 capture_output=True,
             )
             pockets = _parse_pockets(out_dir)
-            prank_ranks = _prank_rescore(out_dir, run)
+            # `tgt`, not `prepped`: PRANK must be given the identical file
+            # fpocket read, or its surface and fpocket's alpha spheres are
+            # computed over different atoms.
+            prank_ranks = _prank_rescore(out_dir, run, tgt)
             for p in pockets:
                 p["jaccard_vs_ligand_site"] = (
                     _jaccard(p.get("residues", []), true_site) if true_site else None

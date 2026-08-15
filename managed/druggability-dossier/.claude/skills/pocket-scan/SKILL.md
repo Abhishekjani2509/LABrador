@@ -36,21 +36,31 @@ The best-recall configuration in the LIGYSIS benchmark of 13 predictors is
 DeepPocket at 58% and P2Rank standalone at 52%. Note that even the winner
 recovers only 60% of known sites; there is no method here that finds everything.
 
-Measured on our own structures:
+Measured on isolated fixtures:
 
 | site | fpocket rank | PRANK rank |
 | --- | --- | --- |
-| 6OIM switch-II (sotorasib) | **9** | **2** |
+| 6OIM switch-II (sotorasib) | 9 | **2** |
 | 2AZ5 SPD304 | 2 | **1** |
-| SPD304 site across 4 apo TNF-alpha trimers | druggability noise | **rank 2-3 in all four** |
+| SPD304 site across 4 apo TNF-alpha trimers | druggability noise | rank 2-3 in all four |
 
-That last row is the one that matters: on apo structures where fpocket's
-druggability was indistinguishable from zero, PRANK still put the real site near
-the top. Ranking recovers what scoring loses.
+**But do not oversell this — on our own pipeline it has not yet helped, and
+once it hurt.** Two things found on integration:
 
-`prank_rank` is reported **alongside** fpocket's rank, never replacing it. A
-large gap between the two is itself a finding — it says the ranking is carrying
-the result, so treat the fpocket score with more suspicion than usual.
+- Our fpocket invocation already ranks 6OIM's switch-II pocket **#1**, so there
+  is nothing to promote. The rank-9 figure came from a different invocation
+  producing 11 pockets against our 9. The mechanism is proven; on this
+  structure it has no work to do.
+- At 6OIM D=1.6 PRANK **demotes** the true site, fpocket rank 1 to PRANK rank 3.
+
+So rescoring is not uniformly an improvement. It is a second, independently
+trained opinion over the same geometry — valuable because two methods
+disagreeing is information, not because one is right.
+
+`prank_rank` is reported **alongside** fpocket's rank, never replacing it. Read
+a gap between them as a flag for manual attention, **not** as evidence that
+PRANK found something fpocket missed — on our structures it points the other way
+at least as often.
 
 ### Two P2Rank gotchas, both confirmed by direct test
 
