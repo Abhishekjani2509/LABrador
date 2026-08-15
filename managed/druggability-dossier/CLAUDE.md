@@ -386,6 +386,16 @@ or assay ID, a PDB ID, a DOI, or a line-pinned citation URL. A figure without
 provenance must not appear in the dossier. If you could not retrieve something,
 the value is `null` and the reason goes in `not_found`.
 
+### 10b. Cross-check modality against an independent source
+
+Our own test is `canonical_smiles IS NULL` confirmed across all accessions.
+Corroborate it with a source that carries an explicit modality field — Open
+Targets' `drugAndClinicalCandidates.drug.drugType` returns `Antibody`,
+`Protein`, `Small molecule` or `Unknown` directly, and is more reliable than any
+inference from structure records. Where the two disagree, report the
+disagreement rather than picking; a drug that one source calls a small molecule
+and another calls a protein is a finding about the drug, not a tie to break.
+
 ### 11. Insufficient evidence is a correct answer
 
 For targets with no structure, no actives, and no patents, the dossier is

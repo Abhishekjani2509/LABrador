@@ -92,6 +92,55 @@ There is an accepted way to evaluate *pocket detection*, a partial one for
 So our retrospective `as_of_date` design is not a nice-to-have — it is the
 missing evaluation the field has not built.
 
+## Open Targets — measured by query, release 26.06
+
+I claimed earlier that mechanically enforced modality separation was uncommon.
+**That was wrong and is retracted.** Open Targets does it, and does it
+correctly:
+
+- `Target.tractability` returns **28 independent booleans** across four
+  modalities (SM 8, AB 9, PROTAC 8, other-clinical 3). No score, no rank, no
+  aggregate.
+- The IL-17A / TNF test passes cleanly. `{"modality":"SM","label":"Approved
+  Drug","value":false}` for both, alongside `{"modality":"AB","label":"Approved
+  Drug","value":true}`. Three approved antibodies do not leak into the
+  small-molecule row.
+
+So the trap we built rule 1 around is already handled by the field's most-used
+platform, at least on the clinical-precedence buckets. What survives as ours is
+narrower and needs stating precisely.
+
+**Where it is exploitably weak — all confirmed by query, not inferred:**
+
+| Weakness | Evidence |
+| --- | --- |
+| The structural half is a single frozen source | Both `High-Quality Pocket` and `Med-Quality Pocket` derive from **DrugEBIlity alone**, a legacy EBI dataset with no ongoing releases |
+| …and it fires wrongly on our domain | **TNF scores `SM:High-Quality Pocket = true` AND `Druggable Family = true`** — a secreted trimeric cytokine with zero small-molecule clinical candidates |
+| `Structure with Ligand` conflates two questions | It requires a solved structure *and* a bound small molecule, so it cannot fire for a good apo pocket with no ligand |
+| Silent all-false is indistinguishable from unassessed | **49% of 298 sampled targets have all 8 SM buckets false.** No abstention state exists |
+| No confidence, no provenance, no evidence trail | The API exposes no provenance field at all; "conf" appears only inside bucket *names* |
+| **No versioning — and it looks like there is** | `tractability(version:"24.06")` errors, but the URL param `?version=24.06` returns **HTTP 200 and is silently ignored** — `meta.dataVersion` still reports 26.06. Historical data exists only as 28 FTP parquet dumps |
+| The adjacent numeric field is modality-blind | `Target.prioritisation.maxClinicalStage = 1` (max) for **both IL-17A and TNF**, driven entirely by approved antibodies with no modality qualifier |
+
+**Base rates over 298 targets, useful for calibrating how much a `true` carries:**
+`SM:High-Quality Pocket` fires at **10.4%** (the sharpest structural
+discriminator), `SM:Approved Drug` 16.4%, `SM:Phase 1 Clinical` **0.0%**,
+`PR:Database Ubiquitination` 60.1% (near-noise).
+
+**Two things to use rather than compete with:**
+
+1. `drugAndClinicalCandidates.drug.drugType` is a clean modality label
+   (`Antibody` / `Protein` / `Small molecule` / `Unknown`) and is **more
+   trustworthy than the tractability buckets themselves**. Use it as an
+   independent cross-check on our SMILES-null test.
+2. The 28 booleans across all targets are the **weak validation labels we
+   lack**. Not ground truth, but the only broad labelled set available.
+
+API note for whoever writes the integration: `Target.knownDrugs` no longer
+exists in 26.06, and `Drug.isApproved`, `Drug.maximumClinicalTrialPhase` and
+`Drug.hasBeenWithdrawn` are gone. Use `drugAndClinicalCandidates` and
+`Drug.maximumClinicalStage`.
+
 ## Architecture — we are not alone, and that is good
 
 **canSAR** keeps four axes separate (3D pocket, ligand-based, network
@@ -111,6 +160,13 @@ encode precedent and cannot serve as an independent second axis**. Averaging a
 precedent axis with a scorer trained on precedent double-counts.
 
 ## Where we may genuinely be novel
+
+**Retracted from this list:** mechanically enforced modality separation. Open
+Targets already does it correctly on clinical precedence (see above). Our rule 1
+is still necessary — a dossier that got IL-17A wrong would be wrong — but it is
+table stakes, not a differentiator. What differentiates is that we carry
+*provenance and a potency figure* alongside the modality call, where Open
+Targets carries a bare boolean.
 
 1. **The magnitude of druggability-score irreproducibility.** Detection
    instability is published (~85% pocket identity under mere rotation, ~59%
