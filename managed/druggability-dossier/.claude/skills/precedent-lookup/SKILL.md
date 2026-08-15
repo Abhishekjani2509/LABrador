@@ -34,6 +34,11 @@ names are the most common failure. Run it once per task and read it.
 | `pdb_v` | 177K structures | `structures_by_accession` (with `release_date`), `entry_ligands` (**holo detection**), `entries` (resolution, deposit date) |
 | `chembl_v` | ~24M bioactivities | `bioactivities_by_accession`, `compounds_by_accession`, `drugs_by_accession` (with `first_approval`) |
 
+A fourth is reachable and you need it: the **raw** `chembl.*` tables, same
+`sql -s proteins` connection. `chembl.molecule_dictionary` is the one that
+matters here — it carries `molecule_type` and `structure_type`, the fields no
+`chembl_v` view exposes, and modality classification depends on them entirely.
+
 ## Procedure
 
 ### 1. Identity
@@ -43,39 +48,83 @@ SELECT accession, gene_name, protein_name, organism, sequence_length
 FROM uniprot_v.proteins WHERE accession = '<ACC>'
 ```
 
-### 2. Drugs, then modality — in that order, never skip the second step
+### 2. Drugs with modality — one query, one authoritative field
+
+Modality is **not** inferred. It is read off `chembl.molecule_dictionary`, the
+raw ChEMBL schema, which carries explicit `molecule_type` and `structure_type`
+columns. `sql -s proteins` reaches the raw `chembl.*` tables as well as the
+`chembl_v.*` views, so this is one query, not two:
 
 ```sql
-SELECT d.drug_name, d.max_phase, d.first_approval, d.action_type,
-       d.mechanism_of_action, c.canonical_smiles
+SELECT DISTINCT d.drug_name, d.max_phase, d.first_approval,
+       md.molecule_type, md.structure_type
 FROM chembl_v.drugs_by_accession d
-LEFT JOIN chembl_v.compounds_by_accession c
-       ON c.molregno = d.molregno AND c.accession = d.accession
+JOIN chembl.molecule_dictionary md ON md.molregno = d.molregno
 WHERE d.accession = '<ACC>'
-ORDER BY d.first_approval NULLS LAST
+ORDER BY d.max_phase DESC, d.first_approval NULLS LAST
 ```
 
-`max_phase` 4.0 = approved. A NULL `canonical_smiles` here is a *candidate*
-biologic — **you must then confirm it with the cross-accession check in step 2b
-before believing it.** See failure modes: the naive test produces false biologic
-calls.
+`max_phase` 4.0 = approved. `molecule_type` is the discriminator, and it is the
+only one that has survived testing — see the superseded tests in failure modes.
 
-### 2b. Confirm modality across ALL accessions — mandatory
+The full enum, with counts over the whole `molecule_dictionary` (12 values):
 
-The join in step 2 is scoped to one accession, so a drug with no bioactivity
-record *at that accession* returns NULL whether or not it is a small molecule.
-Re-check every candidate biologic against the whole table:
+| `molecule_type` | rows | modality | where it goes |
+| --- | --- | --- | --- |
+| `Small molecule` | 1,920,259 | `small_molecule` | `target_precedent` |
+| `Protein` | 22,799 | `fusion_protein` or `other` — read the drug | `biologic_precedent` |
+| `Antibody` | 1,032 | `antibody` | `biologic_precedent` |
+| `Oligonucleotide` / `Gene` / `Enzyme` / `Antibody drug conjugate` / `Vaccine component` / `Cell` / `Oligosaccharide` | 260 / 191 / 129 / 109 / 90 / 85 / 81 | `other` | `biologic_precedent` |
+| **`Unknown`** | 404,621 | **modality-unknown** | neither block — see below |
+| **NULL** | 571,492 | **modality-unknown** | neither block |
 
-```sql
-SELECT molregno, compound_name,
-       MAX(CASE WHEN canonical_smiles IS NOT NULL THEN 1 ELSE 0 END) AS has_smiles_anywhere
-FROM chembl_v.compounds_by_accession
-WHERE molregno IN (<molregnos with NULL smiles from step 2>)
-GROUP BY molregno, compound_name
-```
+Verified on the three calibration accessions:
 
-`has_smiles_anywhere = 1` means **small molecule**, and step 2 was wrong about
-it. Only `0` is a genuine biologic.
+| accession | result |
+| --- | --- |
+| P23458 (JAK1) | **11 of 11** approved rows `Small molecule` / `MOL`; 23 rows total, 21 `Small molecule`, 2 `Unknown`/`NONE` (INCB-047986, GLPG-0555) |
+| P01375 (TNF-alpha) | 5 approved: 4 `Antibody`/`SEQ` (infliximab, adalimumab, certolizumab pegol, golimumab) + etanercept `Protein`/`SEQ`. 15 rows total, 2 `Unknown` (ABBV-3373, AZ9773) |
+| Q16552 (IL-17A) | 3 approved, **all `Antibody`/`SEQ`** (secukinumab, ixekizumab, bimekizumab); izokibep `Protein`/`SEQ`; 11 rows total, 2 `Unknown` (M-1095, CJM-112) |
+
+The classes separate cleanly. This is a local field — no external API call is
+needed for the common case.
+
+**`Unknown` is a real value and must not be guessed.** Two TNF-alpha drugs and
+two IL-17A drugs return it. Map `Unknown` (and NULL) to modality-unknown, put it in
+`not_found` with the drug name, and do **not** let it count toward either
+`target_precedent` or `biologic_precedent`. If a call matters for the dossier,
+corroborate it against an independent source with an explicit modality field
+(CLAUDE.md rule 10b) and report both readings rather than picking one.
+
+**`structure_type` is a hint, not the test.** It is `MOL` for small molecules and
+`SEQ` for sequence-based entities, but it goes `NONE` for entries with no
+structure of either kind — and `NONE` appears on genuine antibodies
+(VUNAKIZUMAB, REMTOLUMAB on Q16552 are `Antibody`/`NONE`) as well as on
+`Unknown` rows. Read `molecule_type`; use `structure_type` only to describe why
+a record is thin. AZ9773 is `Unknown`/`SEQ` — sequence-based, so almost
+certainly a biologic, but ChEMBL declines to say and so do you.
+
+### 2b. Collapse salt and parent forms before counting
+
+Salt, hydrate and parent forms are **distinct molregnos**, so deduplicating on
+`molregno` does not deduplicate drugs. Verified on JAK1 (P23458): the 11 approved
+rows carry 11 distinct molregnos but represent **9 real drugs**. Two parents
+appear alongside their own salts —
+
+- FILGOTINIB `1763569` and FILGOTINIB MALEATE `2336138`
+- MOMELOTINIB `617563` and MOMELOTINIB DIHYDROCHLORIDE MONOHYDRATE `3283827`
+
+— while four others appear *only* in salt form (ruxolitinib phosphate,
+tofacitinib citrate, upadacitinib hemihydrate, deuruxolitinib phosphate), so you
+cannot simply drop rows whose name contains a counter-ion.
+
+Collapse by stripping trailing salt/hydrate tokens from `drug_name` —
+`PHOSPHATE`, `CITRATE`, `MALEATE`, `MESYLATE`, `SUCCINATE`, `HEMIHYDRATE`,
+`MONOHYDRATE`, `DIHYDROCHLORIDE`, `HYDROCHLORIDE`, `TOSYLATE`, `FUMARATE`,
+`SODIUM`, `POTASSIUM` — and group on the remaining stem, keeping the earliest
+`first_approval` for the group. If you do not collapse, report the raw count as
+what it is: **11 approved rows for 9 approved drugs on JAK1, an inflation of 2**.
+Never present a row count as a drug count without saying which you did.
 
 ### 3. Compound-level potency
 
@@ -156,55 +205,80 @@ in the schema and carries nothing.
 This is the trap this skill exists to prevent. IL-17A (Q16552) returns eleven
 drugs, three approved:
 
-| drug | max_phase | first_approval | action_type | canonical_smiles |
+| drug | max_phase | first_approval | action_type | molecule_type |
 | --- | --- | --- | --- | --- |
-| SECUKINUMAB | 4.0 | 2015 | INHIBITOR | **NULL** |
-| IXEKIZUMAB | 4.0 | 2016 | INHIBITOR | **NULL** |
-| BIMEKIZUMAB | 4.0 | 2021 | INHIBITOR | **NULL** |
+| SECUKINUMAB | 4.0 | 2015 | INHIBITOR | **Antibody** |
+| IXEKIZUMAB | 4.0 | 2016 | INHIBITOR | **Antibody** |
+| BIMEKIZUMAB | 4.0 | 2021 | INHIBITOR | **Antibody** |
 
 All three are monoclonal antibodies. All three say `INHIBITOR`. Nothing in
-`drugs_by_accession` marks them as biologics. An agent that reports "three
+`drugs_by_accession` itself marks them as biologics. An agent that reports "three
 approved inhibitors" for IL-17A has produced the wrong answer to the only
 question this dossier asks.
 
-**The discriminator is `canonical_smiles`.** Every one of the eleven IL-17A
-drugs joins to a NULL SMILES; the small molecules in
-`compounds_by_accession` carry SMILES of 83–97 characters. A drug with no
-structure is not a small molecule. Apply this test to every drug, always, before
-it enters `target_precedent`.
+**The discriminator is `chembl.molecule_dictionary.molecule_type`** (step 2). On
+Q16552 it returns `Antibody` for all three, and `Small molecule` for none of the
+eleven. Apply that test to every drug, always, before it enters
+`target_precedent`.
 
 A name ending in `-mab` is a useful cross-check but not the test — `IZOKIBEP`
-and `M-1095` are also biologics and neither ends in `-mab`.
+(`Protein`) and `M-1095` (`Unknown`) are also biologics and neither ends in
+`-mab`.
 
-### …but a NULL SMILES alone gives FALSE biologic calls — salt forms
+### SUPERSEDED — the NULL-SMILES test and its cross-accession confirmation
 
-The accession-scoped join returns NULL for any drug lacking a bioactivity record
-*at that accession*, regardless of modality. On EGFR, nine drugs came back with
-no SMILES and **only four are real biologics** (cetuximab, panitumumab,
-necitumumab, amivantamab). The other five are **salt forms of small molecules**
-whose parent compounds sit in the SMILES bucket:
+**Both of these are void. Do not reinstate either.** They are recorded here
+because they were the documented procedure, they look plausible, and a reader who
+does not know they were tried will invent them again.
 
-- osimertinib mesylate, neratinib maleate, mobocertinib succinate,
-  lazertinib mesylate
-- same pattern elsewhere: upadacitinib hemihydrate, filgotinib maleate,
-  deuruxolitinib phosphate, momelotinib dihydrochloride monohydrate
+*The earlier procedure was:* (1) treat a NULL `canonical_smiles` in
+`chembl_v.compounds_by_accession` as a candidate biologic; (2) confirm it with a
+cross-accession query asking whether that molregno has SMILES under **any**
+accession, on the theory that salt forms of small molecules carry no bioactivity
+against the target in hand and would otherwise read as biologics.
 
-Verified: `SALIRASIB` has SMILES under 33 other accessions. So the step-2b
-cross-accession check is not optional — without it, EGFR reports nine approved
-biologics and JAK-family targets invent biologics that do not exist.
+Step 1 is a real signal but it over-fires, exactly as previously documented: on
+EGFR, nine drugs returned no SMILES and only four were real biologics
+(cetuximab, panitumumab, necitumumab, amivantamab) — the rest were salt forms
+(osimertinib mesylate, neratinib maleate, mobocertinib succinate, lazertinib
+mesylate). That part of the finding stands.
 
-The rule happens to hold cleanly on IL-17A and TNF-alpha, where every drug is
-genuinely an antibody or protein. Do not generalise from those two.
+**Step 2 does not work, and it was the part that was supposed to fix step 1.**
+Verified by execution: the confirmation query returns **0 rows for both
+classes**.
 
-**Unresolvable cases:** APG-2575 (lisaftoclax) and JTE-151 have
-`structure_type: NONE` in ChEMBL — no structure recorded either way. Report them
-as modality-unknown rather than forcing a call.
+| molregnos queried | rows returned |
+| --- | --- |
+| JAK1 salt forms — upadacitinib hemihydrate `2832770`, filgotinib maleate `2336138`, deuruxolitinib phosphate `2464813`, momelotinib dihydrochloride monohydrate `3283827` | **0** |
+| TNF-alpha biologics — etanercept `675371`, adalimumab `675482`, infliximab `675617`, certolizumab pegol `675782`, golimumab `675784` | **0** |
+
+Salt forms are absent from `compounds_by_accession` entirely — no bioactivity
+under any accession — and so are antibodies. The output is *identical* for
+approved small molecules and approved antibodies, so `has_smiles_anywhere` can
+never be `1` for the cases it was written to rescue, and the check cannot
+discriminate. It produces false biologic calls on every JAK1 salt form it sees.
+
+The claim that `SALIRASIB` "has SMILES under 33 other accessions" is not a
+counter-example: a compound with broad bioactivity is a case the check never
+needed to rescue.
+
+Use step 2's `molecule_type` instead. It calls all four JAK1 salt forms
+`Small molecule` and all four TNF-alpha antibodies `Antibody`.
+
+**Also superseded:** the previous instruction to read `structure_type: NONE` as
+"unresolvable" (APG-2575, JTE-151). `structure_type` is not the modality field —
+`NONE` appears on drugs whose `molecule_type` is a confident `Antibody`. Decide
+on `molecule_type`, and reserve modality-unknown for `molecule_type = 'Unknown'`.
 
 ### `drugs_by_accession` returns one row per mechanism, not per drug
 
 LAZERTINIB appears three times in the EGFR small-molecule bucket and twice more
 with NULL SMILES. Counting rows overstates drug counts. Deduplicate on
 `molregno` before reporting any total.
+
+**And `molregno` deduplication is not enough** — salt and parent forms are
+*distinct* molregnos, so JAK1 still returns 11 approved rows for 9 approved
+drugs after deduplicating. Collapse salt/parent pairs as well; step 2b says how.
 
 ### Approved biologics and tractable small molecules can coexist
 
@@ -263,10 +337,17 @@ which you mean.
 
 ### SQL returns 200 rows maximum, silently
 
-There is a 200-row cap and a 15s timeout. A well-studied target has far more.
-Aggregate server-side with `COUNT`, `MAX`, `STRING_AGG ... GROUP BY` rather than
-pulling rows and counting them yourself, or use `paperclip export` for large
+There is a 200-row cap and a statement timeout. A well-studied target has far
+more. Aggregate server-side with `COUNT`, `MAX`, `STRING_AGG ... GROUP BY` rather
+than pulling rows and counting them yourself, or use `paperclip export` for large
 result sets. A count derived from a capped result is wrong and looks fine.
+
+**Keep an accession predicate on `compounds_by_accession`, always.** A query
+against it whose only filter was `molregno IN (SELECT ... FROM
+chembl.molecule_dictionary WHERE pref_name IN (...))` was **cancelled by the
+statement timeout at 85s**. Rewriting the same query with the molregnos as
+literals returned in **13 ms**. Resolve molregnos in a separate query and inline
+them; never make the planner scan that view unfiltered.
 
 ### The per-protein document is not the database
 

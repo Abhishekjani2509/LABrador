@@ -54,22 +54,38 @@ Before any precedent claim, classify every approved or clinical drug by
 modality: `small_molecule`, `antibody`, `peptide`, `fusion_protein`, `other`.
 
 Cross-reference databases list approved drugs without distinguishing these.
-IL-17A has two approved antibodies and no viable small molecule. A dossier that
+IL-17A (Q16552) has three approved antibodies — secukinumab 2015, ixekizumab
+2016, bimekizumab 2021 — and zero approved small molecules. A dossier that
 reports "approved drugs exist" for IL-17A is wrong in the way that matters most.
 
 Only `small_molecule` entries count toward `target_precedent`. Biologics go in
 `biologic_precedent`, which exists specifically so a reader can see that the
 target is *validated* but not *small-molecule tractable*.
 
-**A missing chemical structure is not sufficient evidence of a biologic.** Drug
-tables are joined per-target, so a small molecule with no measured activity
-*against this particular target* looks structureless. Verified: nine EGFR drugs
-returned no structure and only four are real biologics — the rest were salt
-forms (osimertinib mesylate, neratinib maleate, lazertinib mesylate…) whose
-parent compounds are plainly small molecules. Always confirm a suspected
-biologic against the compound's record across **all** targets before classifying
-it, and mark anything with no structure recorded anywhere as modality-unknown
-rather than guessing.
+**The test is `chembl.molecule_dictionary.molecule_type`, read per drug.** Join
+`chembl_v.drugs_by_accession` to that raw table on `molregno` and take
+`molecule_type` (and `structure_type` alongside it, as description only). It
+separates the classes cleanly — verified: JAK1 (P23458) returns
+`Small molecule`/`MOL` on **11 of 11** approved rows; TNF-alpha (P01375) returns
+`Antibody`/`SEQ` for infliximab, adalimumab, certolizumab pegol and golimumab and
+`Protein`/`SEQ` for etanercept; IL-17A (Q16552) returns `Antibody`/`SEQ` for all
+three approvals.
+
+`Unknown` is a returned value, not an absence — two TNF-alpha drugs (ABBV-3373,
+AZ9773) and two IL-17A drugs (M-1095, CJM-112) carry it. Map it, and a NULL, to
+modality-unknown, record it in `not_found`, and let it count toward **neither**
+block. Do not guess it in either direction.
+
+**Do not infer modality from a missing chemical structure.** That test is
+superseded and its cross-accession confirmation is void — the confirmation query
+returns 0 rows for approved small molecules and approved antibodies alike, so it
+cannot tell them apart. Details and measurements are in
+`precedent-lookup`'s failure modes. `molecule_type` calls all four JAK1 salt
+forms `Small molecule` and needs no confirmation step.
+
+Salt and parent forms are distinct `molregno`s, so deduplicating on `molregno`
+does not deduplicate drugs: JAK1's 11 approved rows are **9 approved drugs**.
+Collapse salt/parent pairs, or state that the figure is a row count.
 
 ### 2. Never predict what you can look up
 
@@ -148,10 +164,32 @@ fpocket's `-i 15` floor and is discarded silently. The same site at `-D 2.4`
 scores 0.346. **Sweep D over at least {1.6, 2.4} and report the range.** A single
 value is a coin flip.
 
-**Ensemble.** Across five apo TNF-alpha structures of the same site, volume was
-reproducible (206.7–309.2 A^3, +/-16%) while druggability ranged **0.001 to
-0.651 — a 650-fold spread**. One structure would have called the site druggable;
-four would have called it dead.
+**Ensemble.** An earlier version of this rule cited a **650-fold druggability
+spread** across five apo TNF-alpha structures "of the same site". **That figure
+is WITHDRAWN.** It was produced by matching pockets across structures on shared
+residue *numbers*, and mdpocket showed the matcher was tracking a pocket **7.7 A
+away from the site it claimed**, with an internal inconsistency of **12.2 A**
+between structures. A 19-residue reference on a homotrimer collapses to 11
+distinct residue numbers because the three protomers triplicate them, so
+discarding chain identity makes a C3-symmetric site unresolvable in principle.
+The number was never a measurement of one site. Do not cite it.
+
+What survives is the underlying claim, now measured properly. Fixing the site by
+construction (mdpocket characterization mode, one grid definition applied to
+every superposed structure) rather than by post-hoc matching:
+
+| measurement | CV across the ensemble |
+| --- | --- |
+| post-hoc residue matching | 27.8% |
+| site fixed by construction | **10.2%** |
+
+The matching heuristic inflated the spread 2.7-fold, essentially all of it from
+one structure matching a pocket 12 A from the others.
+
+**A pocket-matching step is a measurement, and it needs its own controls.**
+Report the matched centroid distance across the ensemble, not just an overlap
+fraction — two pockets sharing residue numbers can be 12 A apart, and an
+overlap score will not tell you.
 
 **Know what the number you are quoting actually is.** The druggability score in
 shipped fpocket is a **logistic regression on three descriptors** — mean local
@@ -221,8 +259,32 @@ carry very different prognoses**:
 
 | mechanism | signature | what would resolve it | prognosis |
 | --- | --- | --- | --- |
-| **backbone / loop motion** | large C-alpha displacement, backbone clashes | dynamics — mixed-solvent MD, bioemu ensemble | **good** |
-| **side-chain or subunit occlusion** | small C-alpha displacement, side-chain or subunit clashes only | rotamer sampling; for oligomers, test the subunit-removed state | **poor** |
+| **backbone / loop motion** | **large C-alpha displacement** at the site | dynamics — mixed-solvent MD, bioemu ensemble | **good** |
+| **side-chain or subunit occlusion** | small C-alpha displacement; clashes from side chains or from a displaced chain | rotamer sampling; for oligomers, test the subunit-removed state | **poor** |
+
+**Classify on C-alpha displacement, NOT on which atoms clash.** An earlier
+version of this rule said backbone motion shows "backbone clashes". That is
+wrong and it inverts the answer on the canonical case. Measured on KRAS: the
+switch-II loop moves **8.8 A**, yet **zero** of the 12 clashing atoms at 2.0 A
+are backbone — they are Arg68, Met72 and His95 side chains. Backbone atoms only
+appear at 2.5 A.
+
+The physics is straightforward: a loop that swings 8.8 A carries its side chains
+with it, so the atoms sitting *in* the site are side-chain even though the
+*cause* is backbone motion. Keying on clash composition would classify KRAS as
+side-chain occlusion and hand the canonical nanomolar target a micromolar
+prognosis.
+
+Report `n_backbone_contacts` anyway — it is informative, it just must not drive
+the classification.
+
+**Distinguish a displaced chain from a bystander.** A chain only counts as
+displaced if the ligand actually reaches into it. Without that test, a crystal
+contact brushing the ligand gets read as part of the assembly: on TNF-alpha,
+chain D touches the chain-A ligand with 3 atoms against 44 and 39 for the real
+partners, and treating it as a subunit consumed all three apo chains and left
+nothing to displace — producing a confident `loop_or_backbone_motion, cryptic:
+true` on a target that is neither.
 
 That prognosis column is the most decision-relevant thing on this page, and it
 is measured, not assumed. Across the CryptoSite set (Lazou, Kozakov,
@@ -249,13 +311,50 @@ evidence than its confidence value suggests.
 Record which mechanism applies in `tractability.cryptic_mechanism`. "Cryptic"
 alone is not an actionable finding.
 
-**Cofolding cannot find a cryptic pocket, and must never be used as if it
-could.** A cofolding model requires you to name a ligand, and given one it
-predicts a pocket-competent conformation; given none it predicts the closed
-form. So it cannot *enumerate* pockets — it can only confirm a site you already
-hypothesised, and it does so partly because you told it what to open. Boltz-2 is
-an affinity and pose step **downstream** of pocket finding, never a pocket
-finder. AlphaFold3 behaves the same way.
+**Cofolding cannot find a pocket, and must never be used as if it could.** The
+reason is stronger than "you have to name a ligand". It is that the model does
+not read the structure it is given — it recalls where the PDB has put ligands on
+that sequence.
+
+Measured, not argued. When binding sites were destroyed three ways — every side
+chain deleted to glycine, the site packed shut with phenylalanines, the chemistry
+inverted — AlphaFold3, Boltz-1, Chai-1 and RoseTTAFold All-Atom **kept placing
+the ligand in the same position**, in 42-52% of high-confidence cases, at ligand
+pLDDT 70-85. Funnel metadynamics confirms those perturbed systems have
+P(bound) = 0.00. Supporting: pocket localisation is ~90% correct even when the
+pose is wrong; ligand confidence separates prospectively-confirmed non-binders
+from actives at AUC 46-56; and AF3 given ligand SMILES **with no protein at
+all** still gives non-random enrichment on 84% of one standard decoy set.
+
+**A "probe library" does not rescue this.** Cofolding many diverse small probes
+and looking for convergence sounds like mixed-solvent MD with a neural engine,
+but convergence is near-guaranteed on any protein whose site is in the PDB and
+near-meaningless on any protein whose site is not — which is the only case worth
+asking about. Three further reasons it fails: probes cannot be cofolded as a
+mixed box (the model will place three xenons overlapping in one pocket, unaware
+that is impossible), so the competition and occupancy physics that makes real
+MSMD work is absent; classic MSMD probes are MW < 100 by design and are exactly
+the size that will not induce a cryptic opening; and the probes are out of
+distribution in both directions — benzene appears in 22 PDB entries and
+acetonitrile in 43, while glycerol appears in 26,117 and ethylene glycol in
+17,718, but those are cryoprotectant and lattice positions, not hotspots.
+
+Two documented routing failures worth carrying: given a **cryptic-site** ligand,
+AF3 has placed it in the **orthosteric** site instead, with no model putting it
+in the cryptic pocket at all; and in another case it invented a third surface
+site that does not exist. It routes ligands to the most-observed pocket
+regardless of which ligand you named.
+
+**Note also that cofolding runs from SEQUENCE.** Apo and holo structures of the
+same protein usually share a sequence, so a sequence-only cofold cannot
+distinguish them — you would not be testing the collapsed pocket at all. A
+specific structure must be supplied as a template.
+
+So Boltz-2 is an affinity and pose step **downstream** of pocket finding, never a
+pocket finder. Its one real asymmetry is that it is better at *where* than at
+*how* — for genuinely novel complexes, 78.7% get the pocket right and the ligand
+misplaced — which makes it usable as a **chemotype-preference readout for a site
+geometry already found**, and not as a way to find one.
 
 **Generative ensembles degrade on exactly our input.** Sampled ensembles
 recovered **86% of validated cryptic pockets when seeded from holo but only 56%
@@ -283,7 +382,7 @@ Measured against that standard, our two calibration cases separate:
 | | apo ensemble | C-alpha displacement | verdict |
 | --- | --- | --- | --- |
 | KRAS switch-II | absent — druggability 0.000, pocket collapsed | 8.8 A | **cryptic** |
-| TNF-alpha axis | **present in all 5 apo structures**, 206-309 A^3 | 1.62 A | **NOT cryptic** — pre-formed and low-scoring |
+| TNF-alpha axis | site **recovered in all 5 apo structures once the third subunit is removed**, 281.8-546.0 A^3 | 1.62 A | **NOT cryptic** — occluded, not collapsed |
 
 TNF-alpha fails both community criteria. The steric-occlusion physics is real —
 the third subunit and two Tyr119 rotamers genuinely block the ligand — but the
@@ -386,15 +485,27 @@ or assay ID, a PDB ID, a DOI, or a line-pinned citation URL. A figure without
 provenance must not appear in the dossier. If you could not retrieve something,
 the value is `null` and the reason goes in `not_found`.
 
-### 10b. Cross-check modality against an independent source
+### 10b. Cross-check modality only where the local field abstains
 
-Our own test is `canonical_smiles IS NULL` confirmed across all accessions.
-Corroborate it with a source that carries an explicit modality field — Open
-Targets' `drugAndClinicalCandidates.drug.drugType` returns `Antibody`,
-`Protein`, `Small molecule` or `Unknown` directly, and is more reliable than any
-inference from structure records. Where the two disagree, report the
-disagreement rather than picking; a drug that one source calls a small molecule
-and another calls a protein is a finding about the drug, not a tie to break.
+Our test is now `chembl.molecule_dictionary.molecule_type` (rule 1) — a local,
+explicit modality field, not an inference from structure records. It is
+authoritative for `Small molecule`, `Antibody` and `Protein`, and needs no
+corroboration for those.
+
+**Superseded:** this rule previously prescribed an Open Targets lookup as the
+primary cross-check on a `canonical_smiles IS NULL` test. Both the test and the
+mandatory cross-check are void — the SMILES test could not discriminate (rule 1),
+and the cross-check made an external API call for every drug in the common case,
+which the local field now answers.
+
+The lookup remains useful as **optional corroboration for `molecule_type =
+'Unknown'` only**. Open Targets'
+`drugAndClinicalCandidates.drug.drugType` returns `Antibody`, `Protein`,
+`Small molecule` or `Unknown` directly. If it resolves an `Unknown`, report the
+resolution with both sources named; if it also says `Unknown`, the drug stays
+modality-unknown. Where the two disagree, report the disagreement rather than
+picking; a drug that one source calls a small molecule and another calls a
+protein is a finding about the drug, not a tie to break.
 
 ### 11. Insufficient evidence is a correct answer
 
