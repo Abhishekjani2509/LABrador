@@ -121,15 +121,47 @@ def _fetch(pdb_id: str, dest: Path) -> Path:
     So mmCIF is the single source of truth for the whole per-structure pass,
     and the only PDB file in play is the one written for fpocket, which accepts
     nothing else.
+
+    THE BIOLOGICAL ASSEMBLY, NOT THE ASYMMETRIC UNIT.
+
+    The asymmetric unit is a crystallographic artifact. It may hold several
+    copies of the biological unit, or only part of one, and both errors are
+    silent and severe for pocket detection. Measured on our own runs:
+
+      * 9SQX's preferred assembly is a DIMER, but its ASU holds two of them.
+        Scoring all four chains fused them and produced a 3606 A^3 "pocket"
+        that no molecule occupies.
+      * 5HI3, the IL-17A macrocycle structure, has a HEPTAMER as its preferred
+        assembly while the small-molecule site lies in the dimer groove.
+      * 8USS's preferred assembly is a MONOMER, so a site that spans the
+        IL-17A dimer interface is only half present — which is the likely
+        reason it recovered 15 site residues at Jaccard 0.29 while 8DYG
+        managed 0.69.
+
+    So fetch `<ID>-assembly1.cif` first and record what was used. Falling back
+    to the ASU is allowed but must be visible in the output, never silent.
     """
     cif = dest / f"{pdb_id}.cif"
     if cif.exists():
         return cif
+
+    # Preferred biological assembly first.
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            f"https://files.rcsb.org/download/{pdb_id}-assembly1.cif", timeout=60
+        ) as r:
+            cif.write_bytes(r.read())
+        (dest / f"{pdb_id}.source").write_text("assembly1")
+        return cif
+    except urllib.error.HTTPError:
+        pass  # fall through to the asymmetric unit
+
     try:
         with urllib.request.urlopen(  # noqa: S310
             f"https://files.rcsb.org/download/{pdb_id}.cif", timeout=60
         ) as r:
             cif.write_bytes(r.read())
+        (dest / f"{pdb_id}.source").write_text("asymmetric_unit")
     except urllib.error.HTTPError as exc:
         # Never let the raw HTTPError escape: it holds a BufferedReader, which
         # cannot pickle, so Modal reports an opaque SerializationError instead
@@ -556,7 +588,11 @@ def pocket_scan(
                     "stderr": proc.stderr.decode(errors="replace")[-500:],
                 }
 
+        src_marker = work / f"{pid}.source"
         results[pid] = {
+            "structure_source": (
+                src_marker.read_text() if src_marker.exists() else "unknown"
+            ),
             "chains_used": used_chains,
             "missing_residues": missing_res,
             "ligands": ligs,

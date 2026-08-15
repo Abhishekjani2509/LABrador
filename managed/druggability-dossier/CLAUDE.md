@@ -249,6 +249,27 @@ evidence than its confidence value suggests.
 Record which mechanism applies in `tractability.cryptic_mechanism`. "Cryptic"
 alone is not an actionable finding.
 
+**Cofolding cannot find a cryptic pocket, and must never be used as if it
+could.** A cofolding model requires you to name a ligand, and given one it
+predicts a pocket-competent conformation; given none it predicts the closed
+form. So it cannot *enumerate* pockets — it can only confirm a site you already
+hypothesised, and it does so partly because you told it what to open. Boltz-2 is
+an affinity and pose step **downstream** of pocket finding, never a pocket
+finder. AlphaFold3 behaves the same way.
+
+**Generative ensembles degrade on exactly our input.** Sampled ensembles
+recovered **86% of validated cryptic pockets when seeded from holo but only 56%
+from apo** — and apo is our normal case. They also over-populate partially
+unfolded and over-extended conformations. If an ensemble is used, filter frames
+on radius of gyration, SASA and secondary-structure sanity before scoring them,
+or the aggregation is over junk.
+
+The field's own head-to-head is blunter still: across simulation and AI methods,
+most get the *direction* of a mutational effect right, **none reliably predicts
+the absolute probability that a pocket is open**, and all fail for pockets open
+less than 1% of the time. Use the fast methods to triage and say so; do not
+report a sampled open-state population as a measurement.
+
 **But apply the field's definition before calling anything cryptic.** Vajda et
 al. (2018) define a cryptic site as one that forms a pocket in the ligand-bound
 structure but *not* in the unbound structure, and argue for the stringent form:
