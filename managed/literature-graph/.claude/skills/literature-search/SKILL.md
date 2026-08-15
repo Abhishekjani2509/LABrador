@@ -87,6 +87,19 @@ anchors and the citation anchors, and stripping them destroys both.
 The longest section, because this is where runs actually go wrong. Every entry
 below was observed, not imagined.
 
+- **A dead Paperclip and an empty literature are indistinguishable in the
+  output — and this is the most dangerous failure in the system.** If the tool
+  errors, times out or returns nothing because the service is down, and you
+  record that as "found 0", the graph says the science does not exist. Run the
+  canary `search -s pmc "rheumatoid arthritis" -n 1` before the real queries: a
+  healthy corpus cannot return nothing for it. If the canary fails, stop, do not
+  run the planned queries, and hand back `status: "failed"` with
+  `stop_reason: "search_unavailable"` and the tool's verbatim error. Absence is a
+  claim; only make it when the search actually ran.
+- **Distinguish "this query matched nothing" from "the tool failed."** A query
+  returning zero after the canary passed is real evidence of sparsity. A query
+  erroring is not evidence of anything. They must never land in `coverage` the
+  same way.
 - **Page 1 is not the corpus.** One search returning ten papers tells you what
   ranked highest for one phrasing, nothing more. Never conclude absence from a
   single query. Vary phrasing, add sources, then say what you did.

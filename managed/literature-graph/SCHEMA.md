@@ -38,7 +38,7 @@ other by `id`. Nothing nested.
     "truncated": true,           // true = a sample, not the literature
     "no_quote_discarded": 6,     // claims with no verbatim sentence (only removal)
     "limits": { "max_papers": 50, "max_queries": 6 },
-    "stop_reason": "max_papers"  // max_papers|queries_exhausted|no_new_results|time_limit|complete
+    "stop_reason": "max_papers"  // max_papers|queries_exhausted|no_new_results|time_limit|complete|search_unavailable
   },
   "things": [{
     "id": "t1", "name": "antibody 38C2",
