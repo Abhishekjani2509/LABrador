@@ -1,0 +1,251 @@
+{
+  "_note": "Replaces the targets.csv named in README.md — the data is too nested for CSV. Every value here was retrieved from ChEMBL, RCSB, UniProt or a cited publication. Nothing is recalled or estimated. Values that could not be retrieved are the string NOT_FOUND.",
+  "_retrieved": "2026-08-15",
+  "_expected_output": "What a correct dossier must say. This is the grading key for the fixture run.",
+
+  "method_validation": [
+    {
+      "target": "KRAS",
+      "uniprot": "P01116",
+      "chembl_target": "CHEMBL2189121",
+      "distinct_compounds": 3158,
+      "total_activities": 17042,
+      "best_potency_nm": 0.1,
+      "best_potency_assay": "CHEMBL4845550 (KRAS G12D tracer displacement), compound CHEMBL4855757",
+      "approved_small_molecules": [
+        {"name": "Sotorasib", "year": 2021, "chembl": "CHEMBL4535757"},
+        {"name": "Adagrasib", "year": 2022, "chembl": "CHEMBL4594350"}
+      ],
+      "approved_biologics": [],
+      "pdb_total": 531,
+      "pdb_holo_note": "at least 280 of first 300 sampled have a >=300 Da nonpolymer; lower bound, not exact",
+      "holo_exemplar": "6OIM (sotorasib, ligand MOV, released 2019-11-06)",
+      "why_in_set": "Held undruggable ~30 years. The switch-II pocket is INVISIBLE on apo structures (see pocket_calibration.json). Tests that absence of precedent is not read as evidence against tractability.",
+      "expected_output": {
+        "verdict": "small_molecule_tractable",
+        "as_of_2012_12_31": "no approved small molecules, no G12C precedent, computed tractability LOW with cryptic_pocket_risk HIGH — must NOT assert not_tractable",
+        "cryptic_pocket_risk_on_apo": "high"
+      }
+    },
+    {
+      "target": "EGFR",
+      "uniprot": "P00533",
+      "chembl_target": "CHEMBL203",
+      "distinct_compounds": 19118,
+      "total_activities": 58847,
+      "best_potency_nm": 0.01,
+      "best_potency_assay": "CHEMBL683040, compound CHEMBL176582 (top IC50s carry 'Outside typical range' flags and were excluded)",
+      "approved_small_molecules": [{"name": "Gefitinib", "year": 2003, "chembl": "CHEMBL939"}],
+      "approved_biologics": [
+        {"name": "Cetuximab", "year": 2004, "modality": "antibody"},
+        {"name": "Panitumumab", "year": 2006, "modality": "antibody"}
+      ],
+      "pdb_total": 392,
+      "holo_exemplar": "1M17 (erlotinib, 390 Da, released 2002-09-04)",
+      "why_in_set": "Positive control. Classic pre-formed ATP-site kinase, drugged within ~5 years of the first co-crystal. If this is wrong, nothing else matters.",
+      "expected_output": {"verdict": "small_molecule_tractable", "cryptic_pocket_risk_on_apo": "low"}
+    },
+    {
+      "target": "BCL-2",
+      "uniprot": "P10415",
+      "chembl_target": "CHEMBL4860",
+      "distinct_compounds": 4073,
+      "total_activities": 15736,
+      "best_potency_nm": 0.015,
+      "best_potency_assay": "CHEMBL5738376, compound CHEMBL5764611",
+      "approved_small_molecules": [{"name": "Venetoclax", "year": 2016, "chembl": "CHEMBL3137309"}],
+      "approved_biologics": [],
+      "pdb_total": 63,
+      "pdb_holo": 41,
+      "holo_exemplar": "6O0K (venetoclax, 870 Da, released 2019-05-22)",
+      "why_in_set": "PPI groove called undruggable until SAR-by-NMR fragment linking revealed an induced hydrophobic cleft. Tests that target class is not used to over-penalize.",
+      "caveats": [
+        "sub-0.1 nM values sit at the TR-FRET assay floor",
+        "several P10415-mapped PDB entries are actually Bcl-xL constructs (9IGG, 9IGH) — accession mapping is not sufficient, check the entry title"
+      ],
+      "expected_output": {"verdict": "small_molecule_tractable"}
+    },
+    {
+      "target": "MYC",
+      "uniprot": "P01106",
+      "chembl_target": "CHEMBL1250348",
+      "distinct_compounds": 1079,
+      "total_activities": 2768,
+      "best_potency_nm": 0.2,
+      "best_potency_assay": "CHEMBL5029808, compound CHEMBL5089688 — description is only 'Inhibition of c-MYC (unknown origin)', UNCHARACTERIZED",
+      "approved_small_molecules": [],
+      "approved_biologics": [],
+      "pdb_total": 25,
+      "pdb_holo": 0,
+      "pdb_holo_note": "max nonpolymer across ALL 25 entries is 120 Da — there is no drug-like ligand anywhere",
+      "why_in_set": "Intrinsically disordered bHLH-LZ, still undrugged. Originally the true negative control — the research revealed it is ALSO a precedent/structure conflict case: 1,079 compounds with zero holo structures means the actives are indirect or cellular, not direct binders.",
+      "expected_output": {
+        "verdict": "not_tractable",
+        "must_flag": "axis_conflict — substantial reported actives with zero holo structures and no characterized binding assay",
+        "must_not": "be rescued by family precedent"
+      }
+    }
+  ],
+
+  "immunology": [
+    {
+      "target": "TYK2",
+      "uniprot": "P29597",
+      "chembl_target": "CHEMBL3553",
+      "distinct_compounds": 10499,
+      "best_potency_nm": 0.01,
+      "best_potency_assay": "CHEMBL5365708 — TYK2 JH2 575-869 tracer displacement, compound CHEMBL5427107",
+      "approved_small_molecules": [
+        {"name": "Deucravacitinib", "year": 2022, "chembl": "CHEMBL4435170", "mechanism": "TYK2 negative allosteric modulator (JH2 pseudokinase domain)"}
+      ],
+      "approved_biologics": [],
+      "pdb_total": 52,
+      "domain_split": {
+        "JH1_kinase_897_1176": {"entries": 29, "earliest": "3LXN/3LXP 2010-06-02", "holo": "28/29"},
+        "JH2_pseudokinase_575_869": {"entries": 21, "earliest": "3ZON 2013-04-10 (260 Da ligand)", "first_druglike_holo": "4OLI 2014-05-28 (320 Da)", "holo": "18/21"},
+        "other": "1 spans JH2+JH1, 2 are the 1048-1062 fragment, 1 is FERM-through-JH2 (23-583)"
+      },
+      "why_in_set": "The non-obvious pocket. Deucravacitinib binds the pseudokinase JH2 domain, not the ATP site. The allosteric site was structurally enabled ~3 years AFTER the conventional one, and approval followed the first JH2 structure by ~9 years.",
+      "expected_output": {
+        "as_of_2012_12_31": "no allosteric precedent — JH2 structures do not exist yet",
+        "as_of_2015_12_31": "allosteric precedent EXISTS — must not report absence",
+        "note": "best as-of test in the set: it tests a POCKET appearing, not just a drug"
+      }
+    },
+    {
+      "target": "JAK1",
+      "uniprot": "P23458",
+      "chembl_target": "CHEMBL2835",
+      "distinct_compounds": 14342,
+      "best_potency_nm": 0.032,
+      "best_potency_assay": "CHEMBL5736542 LanthaScreen Ki, compound CHEMBL5828027. Top IC50s all flagged 'Outside typical range' — no clean IC50 retrieved.",
+      "approved_small_molecules": [
+        {"name": "Ruxolitinib", "year": 2011, "chembl": "CHEMBL1789941"},
+        {"name": "Upadacitinib", "year": 2019, "note": "JAK1-selective"},
+        {"name": "Abrocitinib", "year": 2021, "note": "JAK1-selective"}
+      ],
+      "approved_biologics": [],
+      "pdb_total": 52,
+      "pdb_holo": 40,
+      "holo_range": "earliest 3EYG 2009-02-03, latest 10PI (povorcitinib) 2026-06-10",
+      "why_in_set": "Immunology positive control. Pre-formed ATP-site kinase, heavily drugged.",
+      "expected_output": {"verdict": "small_molecule_tractable", "cryptic_pocket_risk_on_apo": "low"}
+    },
+    {
+      "target": "IL-17A",
+      "uniprot": "Q16552",
+      "chembl_target": "CHEMBL3390822",
+      "distinct_compounds": 117,
+      "total_activities": 305,
+      "assay_type_note": "100% assay_type B (binding)",
+      "best_potency_nm": 0.79,
+      "best_potency_assay": "CHEMBL5038279 — HDF IL-6 release, CELLULAR readout, compound CHEMBL5091495, MW 619",
+      "approved_small_molecules": [],
+      "approved_biologics": [
+        {"name": "Secukinumab", "year": 2015, "modality": "antibody"},
+        {"name": "Ixekizumab", "year": 2016, "modality": "antibody"},
+        {"name": "Bimekizumab", "year": 2021, "modality": "antibody, IL-17A/F"}
+      ],
+      "biologic_note": "Brodalumab 2017 targets IL-17RA, the receptor, NOT the ligand — do not attribute it to Q16552",
+      "pdb_total": 44,
+      "pdb_holo": 19,
+      "holo_range": "earliest 5HI3 2016-08-31 (macrocycle), latest 9SQX/9SR8 2025-12-17",
+      "clinical_small_molecules": [
+        {"name": "LY3509754", "sponsor": "Lilly", "phase": 1, "outcome": "TERMINATED — drug-induced liver injury, 4 participants with raised transaminases/acute hepatitis despite strong target engagement", "source": "PMID 38294091, Clin Pharmacol Ther 2024"},
+        {"name": "DC-806", "sponsor": "DICE", "phase": "1c PoC psoriasis", "outcome": "adjusted mean PASI reduction 43.7% (800 mg BID) vs 13.3% placebo at Day 29, well tolerated", "source": "NCT05896527"}
+      ],
+      "false_positive_trap": "icotrokinra / JNJ-77242113 is an oral PEPTIDE against IL-23R — not an IL-17A small molecule. Easy false positive.",
+      "why_in_set": "THE TRAP, and the highest-value row in the set. Three approved antibodies all reporting action_type INHIBITOR with NULL canonical_smiles. Verified live: an agent reading drugs_by_accession concludes 'three approved inhibitors' and is wrong.",
+      "expected_output": {
+        "approved_small_molecules": "ZERO — must be stated explicitly",
+        "biologic_precedent": "three approved antibodies, reported separately and never as small-molecule precedent",
+        "nuance_required": "potent small molecules DO exist (0.79 nM) but none approved and one Phase 1 terminated for DILI. Neither 'druggable, 3 approved drugs' nor 'no small molecules exist' is correct.",
+        "signal": "117 distinct compounds vs RORgt's 12,900 despite far greater commercial pull — the gap is itself evidence of difficulty",
+        "structural_note": "the small-molecule/macrocycle site was only elucidated in 2016 (5HI3), ~1 year AFTER the first antibody approval. Precedent and tractability are out of phase."
+      }
+    },
+    {
+      "target": "RORgt / RORC",
+      "uniprot": "P51449",
+      "chembl_target": "CHEMBL1741186",
+      "distinct_compounds": 12900,
+      "best_potency_nm": 0.1,
+      "best_potency_assay": "CHEMBL4623385, compound CHEMBL4635823; best Ki 1.1 nM CHEMBL3598140",
+      "approved_small_molecules": [],
+      "approved_biologics": [],
+      "pdb_total": 162,
+      "pdb_holo": 152,
+      "earliest_holo": "3KYT 2010-03-16",
+      "terminated_programs": [
+        {"program": "VTP-43742", "sponsor": "Vitae/Allergan", "phase": "2a", "outcome": "clear psoriasis efficacy but REVERSIBLE TRANSAMINASE ELEVATIONS in 4 patients at 700 mg — development terminated"},
+        {"program": "TAK-828F", "sponsor": "Takeda", "phase": 1, "outcome": "discontinued on preclinical toxicology and TERATOGENICITY findings"},
+        {"program": "GSK2981278", "outcome": "NOT_FOUND — appears in reviews as a clinical RORgt agent but no specific discontinuation reason retrieved"}
+      ],
+      "class_risk": "RORg1/RORgt cross-reactivity and thymic/T-cell lymphoma risk",
+      "sources": ["https://www.sciencedirect.com/science/article/pii/S2095177923000977", "https://www.tandfonline.com/doi/full/10.1080/13543776.2017.1262350"],
+      "why_in_set": "Tractability != success. 152 holo structures, 12,900 compounds, 0.1 nM potency, ZERO approvals — failure was toxicity, not chemistry. Any agent scoring on pocket quality alone gets this wrong.",
+      "expected_output": {
+        "verdict": "small_molecule_tractable",
+        "must_state": "tractable AND repeatedly failed clinically for tox — these are not in tension, and clinical failure is NOT evidence against druggability",
+        "must_not": "downgrade tractability because programs failed"
+      }
+    }
+  ],
+
+  "slot_5_precedent_structure_conflict": {
+    "recommended": "TNF-alpha",
+    "target": "TNF-alpha",
+    "uniprot": "P01375",
+    "chembl_target": "CHEMBL1825",
+    "distinct_compounds": 2582,
+    "total_activities": 6447,
+    "assay_type_split": {"B": 5830, "F": 617},
+    "THE_CONFLICT": {
+      "dominant_assay": "IRAK4 Monocyte TNFalpha Cell Based Assay",
+      "activities_from_it": 2901,
+      "fraction_of_all_tnf_bioactivity": "~45%",
+      "problem": "that assay measures a DIFFERENT TARGET (IRAK4) with TNF as the cellular readout. Naive precedent retrieval reads thousands of potent TNF actives; almost none are direct binders.",
+      "next_largest": ["THP-1 TNF secretion (321)", "HEK-Blue TNF-induced (312)"]
+    },
+    "best_potency_nm": 0.03,
+    "best_potency_caveat": "Ki 0.03 nM (CHEMBL3640299, assay CHEMBL3705047) description is only 'Inhibition assay using TNF-alpha' — UNCHARACTERIZED",
+    "best_credible_direct_binding": "Kd 1.3 nM (CHEMBL4793441, assay CHEMBL4775686, SPR vs biotinylated TNF-alpha trimer 77-233)",
+    "approved_small_molecules": [],
+    "approved_biologics": [
+      {"name": "Infliximab", "year": 1998, "modality": "antibody"},
+      {"name": "Etanercept", "year": 1998, "modality": "fusion protein"},
+      {"name": "Adalimumab", "year": 2002, "modality": "antibody"},
+      {"name": "Certolizumab pegol", "year": 2008, "modality": "antibody"},
+      {"name": "Golimumab", "year": 2009, "modality": "antibody"}
+    ],
+    "pdb_total": 52,
+    "pdb_holo": 15,
+    "earliest_holo": "2AZ5 2005-11-29, 550 Da ligand SPD304",
+    "structure_caveat": "SPD304 is a bis-electrophilic compound widely regarded as a promiscuous/cytotoxic frequent hitter. There IS a holo structure and it is exactly the misleading kind.",
+    "why_in_set": "Carries THREE failure modes at once: modality trap (5 approved biologics, 0 small molecules), assay artifact (45% of bioactivity is a different target's assay), and misleading structure (holo ligand is a known frequent hitter). Also the second pocket-detection regime — a cavity PRESENT BUT SMALL in the apo trimer, versus KRAS where it is absent.",
+    "backup": "STAT3 (P40763, CHEMBL4026) — 2,370 compounds, best IC50 2.4 nM, only 6 PDB entries and 3 holo, top assays are EMSA/ChIP/reporter. Better if we want thin structural evidence rather than misleading evidence."
+  },
+
+  "slot_6_recent_orphan": {
+    "recommended": "IL-11",
+    "target": "IL-11",
+    "uniprot": "P20809",
+    "chembl_target": "CHEMBL6196073",
+    "chembl_id_note": "very high target ID, i.e. recently created",
+    "total_activities": 15,
+    "distinct_compounds": 15,
+    "assay_provenance": "ALL 15 from a single assay CHEMBL6115567, 'Binding affinity to CAP chip-immobilized IL-11', all assay_type B",
+    "best_potency_nm": 140,
+    "second_best_nm": 2600,
+    "approved_small_molecules": [],
+    "approved_biologics": [],
+    "pdb_total": 8,
+    "why_in_set": "The right shape for insufficient_evidence: JUST enough data to tempt a confident score (a 140 nM Kd exists) while single-assay provenance, 15 compounds, and no clinical program make any confident call unjustified.",
+    "expected_output": {"verdict": "insufficient_evidence", "must_not": "produce a confident tractability number from a 15-compound single-assay screening series"},
+    "OPEN_CAVEAT": "The 'proposed in the last 3 years' framing was NOT independently verified against a primary source. ChEMBL target-ID recency and the 15-activity footprint are retrieved; the timeline is inference. Confirm against the 2024 Nature IL-11/healthspan literature before locking this fixture.",
+    "rejected_alternatives": {
+      "TL1A / TNFSF15 (O95150)": "zero ChEMBL targets, 7 PDB entries all apo-or-DcR3, but Phase 3 antibodies (tulisokibart, duvakitug) give an agent real precedent to latch onto — it would score confidently and arguably be right, which defeats the purpose",
+      "CARD8 (Q9Y2G2)": "zero ChEMBL targets, 5 PDB entries, but the modality is agonism via DPP8/9 inhibition, which confounds the druggability question"
+    }
+  }
+}
