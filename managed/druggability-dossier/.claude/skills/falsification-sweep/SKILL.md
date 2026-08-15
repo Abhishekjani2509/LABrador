@@ -159,6 +159,36 @@ Termination *reasons* are almost never in ChEMBL. VTP-43742's transaminase
 signal and LY3509754's DILI came from papers and trial records. Use Paperclip's
 `/trials/` and `/papers/`, and cite by line-pinned URL.
 
+### Use `grep` for compound names, NOT `search` — verified, and it matters
+
+`search` is semantic and will miss a named compound entirely while returning
+plausible neighbours. Measured:
+
+| query | verb | result |
+| --- | --- | --- |
+| "LY3509754 IL-17A small molecule hepatotoxicity" | `search -s pmc` | **2 hits, neither about LY3509754** — an alisertib/doxorubicin paper and an unrelated RORgt paper |
+| `LY3509754` | `grep /papers/` | **13 papers**, first snippet states the Phase 1 halt for hepatotoxicity |
+| `VTP-43742` | `grep /papers/` | **39 papers**, one listing the whole halted RORgt class |
+
+`grep` is full-text regex over every paper's body, not just abstracts. A drug
+code, an accession, a gene name or a trial ID is an exact string — grep it.
+Reserve `search` for topics.
+
+That VTP-43742 grep also recovered what a database sweep could not: *"GSK2981278,
+PF-06763809, JNJ-61803534, VTP-43742 (Vimirogant), TAK-828F, and AZD0284, were
+halted or put on hold"* — closing a NOT_FOUND that the structured sources left open.
+
+### Papers disagree, and the older one is often stale
+
+The same grep returned PMC10487560 saying VTP-43742 *"is currently being
+evaluated in a phase III clinical trial"* — flatly contradicting the
+termination reported elsewhere. The paper predates the stop.
+
+**Do not resolve this by picking one.** Report both with their dates and let the
+reader see the disagreement. A finding that a claim's support is time-dependent
+is more useful than a confident pick, and silently choosing the convenient
+citation is how a dossier becomes untrustworthy.
+
 ## Output
 
 Populate `falsification`:

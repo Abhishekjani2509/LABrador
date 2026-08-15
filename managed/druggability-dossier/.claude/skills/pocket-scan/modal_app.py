@@ -31,8 +31,6 @@ decides to call it.
 """
 
 import json
-import os
-import re
 import shutil
 import subprocess
 import urllib.request
@@ -42,12 +40,20 @@ import modal
 
 # fpocket from conda-forge; proto-tools for the in-process CPU tools
 # (vina-docking, foldseek-*, pyrosetta-*) that have no Proto Modal app.
+# gemmi (0.7.5) arrives as a proto-tools dependency and is REQUIRED, not
+# optional — the mmCIF parse is the whole input path now. If proto-tools ever
+# stops depending on it this image needs an explicit `gemmi` pin.
 image = (
     modal.Image.micromamba(python_version="3.12")
     .micromamba_install("fpocket", channels=["conda-forge"])
     .apt_install("git")
     .pip_install(
-        "proto-tools[mcp] @ git+https://github.com/evo-design/proto-tools.git"
+        # gemmi is a HARD requirement — mmCIF is the only structure format read.
+        # It also arrives transitively via proto-tools, but pinning it directly
+        # means a proto-tools dependency change cannot fail every structure at
+        # stage "prepare".
+        "gemmi>=0.7",
+        "proto-tools[mcp] @ git+https://github.com/evo-design/proto-tools.git",
     )
 )
 
@@ -88,89 +94,203 @@ COFACTORS = frozenset(
     MYR PLM OLA STE DAO D12 LDA LMT CHD CLR PEE PC1 PGV""".split()
 )
 
-# "REMARK 465     GLY A     0" — the data lines. The five legend lines above
-# them also start with REMARK 465, which is why this is a match and not a slice.
-_MISSING_RES_RE = re.compile(
-    r"^REMARK 465\s+(?:\d+\s+)?([A-Z0-9]{1,3})\s+(\S)\s+(-?\d+[A-Z]?)\s*$"
-)
-
-
-def _is_hydrogen(line: str, name_fallback: bool = False) -> bool:
-    """Element columns 77-78. `name_fallback` is for ATOM records only: in a
-    protein an atom name starting with H is a hydrogen, but in a HETATM it
-    could be HG (mercury), so the fallback must not be used there."""
-    el = line[76:78].strip() if len(line) >= 78 else ""
-    if el:
-        return el in ("H", "D")
-    if not name_fallback:
-        return False
-    return line[12:16].strip().lstrip("0123456789")[:1] in ("H", "D")
+# Legal single-character PDB chain identifiers, in the order they get handed
+# out when an mmCIF chain name will not fit column 22.
+_PDB_CHAIN_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
 
 def _fetch(pdb_id: str, dest: Path) -> Path:
-    path = dest / f"{pdb_id}.pdb"
-    if not path.exists():
-        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-        with urllib.request.urlopen(url, timeout=60) as r:  # noqa: S310
-            path.write_bytes(r.read())
-    return path
+    """Fetch the mmCIF. Always the mmCIF, never the legacy PDB.
+
+    Legacy PDB is not a subset of the truth, it is a lossy encoding of it, and
+    three of its losses bite this module directly:
+
+      * the chemical component ID has three columns. The PDB ran out of 3-char
+        codes, so 2024+ depositions carry five-character comp_ids — 9SQX's
+        ligand is `A1JPS`. Parsed out of columns 18-20 that reads as `A1J`,
+        the ligand is never found, the ligand site comes back empty, and the
+        run silently degrades to "most druggable pocket anywhere", which on
+        9SQX picks a 3606 A^3 merge artifact. That was a real wrong answer on
+        IL-17A, not a hypothetical.
+      * chain IDs have one column, and >99999 atoms cannot be numbered.
+      * RCSB no longer issues it at all for newer entries — verified, 9SQX.pdb
+        is HTTP 404 while 9SQX.cif is 200. Recent structures are exactly where
+        new chemistry lives, so a pdb-first fetcher fails on the most
+        interesting targets.
+
+    So mmCIF is the single source of truth for the whole per-structure pass,
+    and the only PDB file in play is the one written for fpocket, which accepts
+    nothing else.
+    """
+    cif = dest / f"{pdb_id}.cif"
+    if cif.exists():
+        return cif
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            f"https://files.rcsb.org/download/{pdb_id}.cif", timeout=60
+        ) as r:
+            cif.write_bytes(r.read())
+    except urllib.error.HTTPError as exc:
+        # Never let the raw HTTPError escape: it holds a BufferedReader, which
+        # cannot pickle, so Modal reports an opaque SerializationError instead
+        # of the 404 that actually happened.
+        raise RuntimeError(f"{pdb_id}: no CIF at RCSB (HTTP {exc.code})") from None
+    return cif
 
 
-def _prep(
-    src: Path, dest: Path, chains: list[str] | None
-) -> tuple[Path, list[str], list[str]]:
-    """Protein only, altloc A or blank, hydrogens stripped.
+def _load(cif: Path) -> tuple[object, list[str], dict[str, str]]:
+    """Parse the mmCIF ONCE into the object everything else is derived from.
+
+    Returns (structure, missing_residues, chain_renaming).
+
+    Cleaning happens here, not in each consumer, so that the ligand inventory,
+    the ligand contact site and the file handed to fpocket can never disagree
+    about which atoms exist:
+      * hydrogens and deuteriums dropped (element symbol, not a name guess —
+        mmCIF carries `type_symbol`, so HG the mercury is never a hydrogen);
+      * altloc kept at blank or A, then blanked, so nothing downstream sees a
+        partly occupied "A" as a distinct conformer.
+
+    Chain names are forced to be single-character here as well, BEFORE anything
+    reads them. This is the one place the mmCIF -> PDB round trip can silently
+    corrupt a run, and it is worse than "gemmi renames the chain": measured on a
+    2-character chain name, `make_pdb_string()` writes BOTH characters, into
+    columns 21-22, eating the space after resName —
+
+        ATOM      1  N   THRAA  44      -1.396  21.115   8.728
+
+    so column 22 (the chain ID everything downstream slices) ends up holding the
+    SECOND character. Two chains AA and BA would both come back as "A". fpocket
+    reports pocket residues in the chain IDs of the file it was given, so those
+    IDs would not match the site residues derived from the CIF, every Jaccard
+    would be 0.0, and the module would report "no pocket overlapped the ligand
+    site" on a structure where one plainly does. Renaming up front, once, with
+    the map returned, makes the two sides consistent by construction; `_prep`
+    re-reads the written file and asserts it.
+    """
+    import gemmi
+
+    doc = gemmi.cif.read(str(cif))
+    block = doc.sole_block()
+    st = gemmi.make_structure_from_block(block)
+    # `make_structure_from_block` emits one Chain per SUBCHAIN, so an entry with
+    # polymer + ligand + waters under auth chain A comes back as three separate
+    # Chain objects all called "A" — verified on 8DYG, six chains for a dimer.
+    # `read_structure()` merges them and this must too, or the rename map below
+    # would key several chains on one name.
+    st.merge_chain_parts()
+    st.setup_entities()
+    st.remove_hydrogens()
+
+    for chain in st[0]:
+        for res in chain:
+            for i in range(len(res) - 1, -1, -1):
+                if res[i].altloc not in ("\x00", "A"):
+                    del res[i]
+                else:
+                    res[i].altloc = "\x00"
+
+    # Single-character chain IDs, keeping every name that already fits.
+    used = {c.name for c in st[0] if len(c.name) == 1 and c.name != " "}
+    pool = [c for c in _PDB_CHAIN_POOL if c not in used]
+    renamed: dict[str, str] = {}
+    for chain in st[0]:
+        if (len(chain.name) == 1 and chain.name != " ") or chain.name in renamed:
+            continue
+        if not pool:
+            raise RuntimeError(
+                f"{cif.stem}: more chains than PDB chain IDs; cannot write "
+                "an fpocket input without losing chain identity"
+            )
+        renamed[chain.name] = pool.pop(0)
+    for old, new in renamed.items():
+        st.rename_chain(old, new)
+
+    # `_pdbx_unobs_or_zero_occ_residues` is the mmCIF category RCSB generates
+    # REMARK 465 from — verified row-for-row against 6OIM's 16 REMARK 465 lines.
+    missing: list[str] = []
+    tab = block.find(
+        "_pdbx_unobs_or_zero_occ_residues.",
+        ["auth_asym_id", "auth_seq_id", "?PDB_model_num"],
+    )
+    for row in tab:
+        if row.has(2) and row.str(2) not in ("", ".", "?", "1"):
+            continue
+        ch = row.str(0)
+        missing.append(f"{renamed.get(ch, ch)}/{row.str(1)}")
+    return st, missing, renamed
+
+
+def _prep(st, dest: Path, stem: str, chains: list[str] | None) -> tuple[Path, list[str]]:
+    """The fpocket input: polymer only, from the same object as everything else.
 
     Chain selection is per-target and deliberate: KRAS is a monomer, TNF-alpha's
     site sits on the trimer axis and disappears if you keep one chain.
 
-    Missing residues (REMARK 465) are RETURNED, not just counted: a disordered
-    loop is a hole in the surface, and fpocket will happily score the hole. The
-    caller has to be able to see one at the site it is reporting.
+    Polymer means het_flag == 'A', which is exactly what used to be selected by
+    `line.startswith("ATOM")`. Modified residues (MSE and friends) are HETATM in
+    both encodings and are dropped here as they always were.
+
+    The written file's chain IDs are re-read and checked against the chains we
+    think we wrote. fpocket's residue lists are only comparable to the ligand
+    site because those two agree, so this is asserted rather than assumed.
     """
-    kept, seen_chains, missing = [], set(), []
-    for line in src.read_text().splitlines():
-        if line.startswith("REMARK 465"):
-            m = _MISSING_RES_RE.match(line.rstrip())
-            if m:
-                missing.append(f"{m.group(2)}/{m.group(3)}")
+    import gemmi
+
+    sel = gemmi.Structure()
+    sel.name = st.name
+    sel.cell = st.cell
+    sel.spacegroup_hm = st.spacegroup_hm
+    model = gemmi.Model("1")
+    seen_chains = set()
+    for chain in st[0]:
+        if chains and chain.name not in chains:
             continue
-        if not line.startswith("ATOM") or len(line) < 54:
-            continue
-        if line[16] not in (" ", "A"):  # altloc
-            continue
-        if _is_hydrogen(line, name_fallback=True):  # hydrogens and deuteriums
-            continue
-        ch = line[21]
-        if chains and ch not in chains:
-            continue
-        seen_chains.add(ch)
-        # Blank the altloc indicator; nothing downstream should see a partly
-        # occupied "A" and treat it as a distinct conformer.
-        kept.append(line[:16] + " " + line[17:])
-    out = dest / f"{src.stem}_prep.pdb"
-    out.write_text("\n".join(kept) + "\nTER\nEND\n")
-    if chains:
-        missing = [r for r in missing if r.split("/")[0] in chains]
-    return out, sorted(seen_chains), missing
+        keep = gemmi.Chain(chain.name)
+        for res in chain:
+            if res.het_flag != "A" or not len(res):
+                continue
+            keep.add_residue(res)
+        if len(keep):
+            model.add_chain(keep)
+            seen_chains.add(chain.name)
+    sel.add_model(model)
+    sel.setup_entities()
+
+    # Only the coordinate records, as before — no CRYST1, no headers, nothing
+    # for fpocket to have an opinion about.
+    lines = [
+        ln
+        for ln in sel.make_pdb_string().splitlines()
+        if ln.startswith(("ATOM", "TER", "END"))
+    ]
+    out = dest / f"{stem}_prep.pdb"
+    out.write_text("\n".join(lines) + "\n")
+
+    written = {ln[21] for ln in lines if ln.startswith("ATOM") and len(ln) >= 22}
+    if written != seen_chains:
+        raise RuntimeError(
+            f"{stem}: chain IDs changed on PDB write ({sorted(seen_chains)} -> "
+            f"{sorted(written)}); fpocket residues would not map to the "
+            "ligand site"
+        )
+    return out, sorted(seen_chains)
 
 
-def _ligands(src: Path) -> list[dict]:
+def _ligands(st) -> list[dict]:
     """Nonpolymer ligands with heavy-atom counts, so 'holo' can be checked
-    rather than assumed. A PEG or a cryoprotectant is not a holo ligand."""
+    rather than assumed. A PEG or a cryoprotectant is not a holo ligand.
+
+    comp_id comes from the mmCIF, so it is the FULL component ID: `A1JPS`, not
+    the first three characters of it.
+    """
     counts: dict[tuple[str, str, str], int] = {}
-    for line in src.read_text().splitlines():
-        if not line.startswith("HETATM") or len(line) < 54:
-            continue
-        comp = line[17:20].strip()
-        if comp in NON_LIGANDS:
-            continue
-        if line[16] not in (" ", "A"):  # altloc, or one copy counts twice
-            continue
-        if _is_hydrogen(line):
-            continue
-        key = (comp, line[21], line[22:26].strip())
-        counts[key] = counts.get(key, 0) + 1
+    for chain in st[0]:
+        for res in chain:
+            if res.het_flag != "H" or res.name in NON_LIGANDS or not len(res):
+                continue
+            key = (res.name, chain.name, str(res.seqid.num))
+            counts[key] = counts.get(key, 0) + len(res)
     return [
         {
             "comp_id": c,
@@ -187,7 +307,7 @@ def _ligands(src: Path) -> list[dict]:
 
 
 def _ligand_site(
-    src: Path,
+    st,
     comp_id: str,
     chains: list[str] | None = None,
     cutoff: float = 5.0,
@@ -202,43 +322,47 @@ def _ligand_site(
     is meaningless — a pocket found in the A/B dimer can never exceed ~0.44
     against it, so the wrong pocket wins.
 
+    Same structure object as `_prep`, so the chain/resseq labels here are the
+    ones fpocket will hand back.
+
     Returns (residues, "chain/resseq of the copy used").
     """
     copies: dict[tuple[str, str], list] = {}
-    prot: list = []
-    for line in src.read_text().splitlines():
-        if len(line) < 54:
-            continue
-        if line.startswith("HETATM") and line[17:20].strip() == comp_id:
-            if line[16] not in (" ", "A") or _is_hydrogen(line):
-                continue
-            bucket = copies.setdefault((line[21], line[22:26].strip()), [])
-        elif line.startswith("ATOM"):
-            if _is_hydrogen(line, name_fallback=True):
-                continue
-            if chains and line[21] not in chains:
-                continue
-            bucket = prot
-        else:
-            continue
-        bucket.append(
-            (
-                float(line[30:38]),
-                float(line[38:46]),
-                float(line[46:54]),
-                line[21],
-                line[22:26].strip(),
-            )
-        )
+    grid: dict[tuple[int, int, int], list] = {}
+    for chain in st[0]:
+        for res in chain:
+            if res.het_flag == "H" and res.name == comp_id:
+                copies.setdefault((chain.name, str(res.seqid.num)), []).extend(
+                    (a.pos.x, a.pos.y, a.pos.z) for a in res
+                )
+            elif res.het_flag == "A":
+                if chains and chain.name not in chains:
+                    continue
+                tag = f"{chain.name}/{res.seqid.num}"
+                for a in res:
+                    cell = (
+                        int(a.pos.x // cutoff),
+                        int(a.pos.y // cutoff),
+                        int(a.pos.z // cutoff),
+                    )
+                    grid.setdefault(cell, []).append((a.pos.x, a.pos.y, a.pos.z, tag))
     c2 = cutoff * cutoff
+    offsets = [(i, j, k) for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)]
 
     def contacts(lig: list) -> set:
+        # Cell-hashed at the cutoff, so the 27 neighbouring cells hold every
+        # atom that can possibly be within it. Same answer as all-pairs.
         hits = set()
-        for px, py, pz, pch, prs in prot:
-            for lx, ly, lz, _, _ in lig:
-                if (px - lx) ** 2 + (py - ly) ** 2 + (pz - lz) ** 2 <= c2:
-                    hits.add(f"{pch}/{prs}")
-                    break
+        for lx, ly, lz in lig:
+            base = (int(lx // cutoff), int(ly // cutoff), int(lz // cutoff))
+            for di, dj, dk in offsets:
+                for px, py, pz, tag in grid.get(
+                    (base[0] + di, base[1] + dj, base[2] + dk), ()
+                ):
+                    if tag in hits:
+                        continue
+                    if (px - lx) ** 2 + (py - ly) ** 2 + (pz - lz) ** 2 <= c2:
+                        hits.add(tag)
         return hits
 
     # The copy best engaged by the chains we kept. For a single-copy structure
@@ -324,9 +448,36 @@ def pocket_scan(
     results: dict[str, dict] = {}
 
     for pid in pdb_ids:
-        raw = _fetch(pid, work)
-        prepped, used_chains, missing_res = _prep(raw, work, chains.get(pid))
-        ligs = _ligands(raw)
+        # One unfetchable structure must not lose the whole ensemble, and the
+        # reason must survive the trip back: exceptions holding open file
+        # handles cannot pickle, so Modal replaces them with an opaque
+        # SerializationError. Record the failure as data instead.
+        stage = "fetch"
+        try:
+            cif = _fetch(pid, work)
+            st, missing_res, renamed = _load(cif)
+            # Everything below reads the one structure object loaded above, so
+            # chain IDs and residue numbers are the same in the fpocket input,
+            # the ligand list, the ligand site and the missing-residue list.
+            stage = "prepare"
+            want = (
+                sorted({renamed.get(c, c) for c in chains[pid]})
+                if chains.get(pid)
+                else None
+            )
+            prepped, used_chains = _prep(st, work, pid, want)
+            ligs = _ligands(st)
+        except Exception as exc:  # noqa: BLE001
+            results[pid] = {
+                "error": f"{type(exc).__name__}: {exc}",
+                "stage": stage,
+                "tier": "none",
+                "by_clustering": {},
+            }
+            continue
+
+        if want:
+            missing_res = [r for r in missing_res if r.split("/")[0] in want]
         druglike = [lig for lig in ligs if lig["druglike"]]
         cofactors = sorted({lig["comp_id"] for lig in ligs if lig["cofactor"]})
 
@@ -344,7 +495,7 @@ def pocket_scan(
         elif druglike:
             target_comp = druglike[0]["comp_id"]
         true_site, site_copy = (
-            _ligand_site(raw, target_comp, used_chains)
+            _ligand_site(st, target_comp, used_chains)
             if target_comp
             else ([], None)
         )
@@ -422,6 +573,11 @@ def pocket_scan(
             "ligand_site_copy": site_copy,
             "by_clustering": per_d,
         }
+        if renamed:
+            # Only when an mmCIF chain name would not fit a PDB column. Present
+            # so a caller comparing against the deposited entry can see that
+            # the chain IDs in every residue list above are ours, not RCSB's.
+            results[pid]["chain_renamed_from_cif"] = renamed
 
     # Ensemble spread — volume is the reproducible quantity, druggability is not.
     vols, drugs = [], []
@@ -487,6 +643,10 @@ def pocket_scan(
             "druglike_excludes_cofactors": True,
             "ligand_site": "5.0 A heavy-atom shell, single ligand copy, kept chains only",
             "prep": "protein only, altloc A/blank, hydrogens stripped",
+            # Provenance: legacy PDB truncates comp_ids to 3 characters and is
+            # not issued at all for newer entries, so nothing here is derived
+            # from it. The PDB written for fpocket comes out of the mmCIF.
+            "source_format": "mmCIF (files.rcsb.org/download/<ID>.cif), parsed with gemmi",
         },
     }
 

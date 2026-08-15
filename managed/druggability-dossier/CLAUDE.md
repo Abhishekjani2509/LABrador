@@ -17,6 +17,8 @@ You report evidence. You do not decide.
 | `uniprot_accession` | yes | e.g. `P01116`. If given a gene symbol instead, resolve it to an accession first and record both. |
 | `as_of_date` | no | ISO date. When present it is **binding**: every piece of evidence you report must have existed before it. |
 | `disease_context` | no | Free text. Use it only to select relevant clinical precedent, never to adjust a tractability number. |
+| `interaction_to_disrupt` | no | What the molecule is meant to stop — a named partner, an oligomeric state, or a catalytic function. Determines which chains constitute the site. |
+| `mechanism_hypothesis` | no | `orthosteric` \| `allosteric` \| `oligomer_destabilisation` \| `unknown`. See rule 2b — this decides the structural question being asked. |
 
 **Output** — a single JSON object matching the template at the bottom of this
 file. Return the JSON. Nothing else.
@@ -80,6 +82,43 @@ Structure selection order, strictly:
 Record which tier you used in `structure.tier`. Predicting a structure that
 already exists in the PDB is a defect, not a shortcut.
 
+### 2b. The site you block is not always the site the partner binds
+
+Chain selection is not a preparation preference. It is an assertion about which
+interaction you intend to break, and it silently changes the answer: KRAS 4OBE
+gives druggability 0.442 at rank 1 on chain A and 0.257 at rank 6 on chains A+B
+— same structure, same clustering, different verdict. Prepare TNF-alpha as one
+chain and its site does not exist at all, because the site *is* the trimer.
+
+Four mechanisms, all real, all in the fixture set:
+
+| mechanism | example | where the pocket sits | chains needed |
+| --- | --- | --- | --- |
+| orthosteric | BCL-2 + venetoclax | in the BH3 groove — the epitope itself | the binding partner's contact chain |
+| **allosteric** | TYK2 + deucravacitinib | JH2 pseudokinase domain — neither ATP site nor interface | the domain, selected by residue range |
+| **oligomer destabilisation** | TNF-alpha + SPD304 | *inside* the trimer axis; displaces a subunit rather than blocking TNF/TNFR | **all subunits** |
+| adjacent cryptic, state-locking | KRAS switch-II | beside the effector interface; locks the inactive state | the single chain |
+
+A system that only inspects the annotated binding site or the PPI epitope misses
+three of these four.
+
+**So derive chain selection from `mechanism_hypothesis`, and refuse to guess.**
+When no hypothesis is supplied, report pockets for the biological assembly, state
+in `tractability.caveat` that no mechanism was specified, and do not assert which
+pocket is the relevant one.
+
+**Then classify each pocket against the interface — this is measurable, not
+assumed.** When a complex structure containing the partner exists, compute the
+interface residues and report, per pocket:
+
+- overlaps the interface → `orthosteric_candidate`
+- distal from it → `allosteric_candidate`
+- buried within the oligomer → `destabiliser_candidate`
+
+Record it in `tractability.pocket_vs_interface`. A pocket claimed as orthosteric
+that does not touch the interface is a mislabelled hypothesis, and the
+falsification sweep should say so.
+
 ### 3. Geometric pocket scoring is blind to cryptic pockets
 
 This is the most important limitation you carry, and you must declare it every
@@ -114,10 +153,54 @@ reproducible (206.7–309.2 A^3, +/-16%) while druggability ranged **0.001 to
 0.651 — a 650-fold spread**. One structure would have called the site druggable;
 four would have called it dead.
 
+**Know what the number you are quoting actually is.** The druggability score in
+shipped fpocket is a **logistic regression on three descriptors** — mean local
+hydrophobic density, max alpha-sphere distance, polar VDW surface — fitted on
+**21 druggable pockets against 292 others**. The published 2010 nested-logistic
+model is present in the source but commented out, so "the fpocket druggability
+score" in any current binary is not the equation the paper describes. A
+three-parameter fit on 21 positives cannot bear the weight of a verdict. Quote
+it as a weak prior with its provenance attached, never as a probability.
+
+**Require consensus across the ensemble, not a best case.** The published
+criterion (Bekar-Cesaretli et al., JCIM 2025) is that roughly **70% of
+structures must show a strong hot spot** and about **50% must satisfy all
+criteria** before a site counts as druggable — "the ability to occasionally
+access a rare druggable conformation is not sufficient for a protein to be
+druggable in practice." Report the **fraction of the ensemble** meeting the
+threshold in `tractability.ensemble_consensus_fraction`. One good conformer out
+of five is a negative result, not a positive one.
+
 So: **volume is a measurement, druggability is not.** Report
 `top_pocket_volume_a3` with its across-structure spread as the primary geometric
 number. Report druggability as a range across D and across structures, never as
 a single figure, and never let it alone drive a verdict.
+
+**Strip every ligand before scoring — holo scores are otherwise inflated.**
+fpocket excludes the bound ligand when *detecting* a pocket but includes it in
+the SASA term used to *score* one, and both `Score` and `Druggability Score` are
+SASA-derived regressions. Scoring an uncleaned holo structure therefore
+systematically overstates druggability while leaving geometric descriptors
+(volume, alpha-sphere count, flexibility) largely unchanged. Allosteric pockets
+show the strongest inflation.
+
+Two consequences, both binding:
+
+- a holo score and an apo score computed without stripping are **not on the same
+  scale** and must not be compared;
+- this is a documented source of data leakage in models trained on holo
+  structures, so any comparison we publish must state that ligands were stripped.
+
+Our own pipeline already satisfies this — verified, not assumed: the prepared
+6OIM input handed to fpocket contains 1,336 ATOM records and **zero HETATM**
+(no MOV, no GDP) against 277 HETATM in the raw entry, because preparation keeps
+polymer atoms only. So the KRAS holo-versus-apo comparison is between two
+ligand-free structures and stands.
+
+Keep the rule anyway. It is the single easiest way to produce an inflated
+druggability score, it invalidates any comparison made against a source that did
+not strip, and a preparation change that starts admitting HETATM would
+reintroduce it silently.
 
 ### 5. Cryptic risk is a geometric measurement, not a flag on apo
 
@@ -133,15 +216,63 @@ reference exists, superpose and compute:
   subunit the ligand displaces and all 26 remaining are Tyr119 *side-chain*
   atoms, with no backbone clash at all.
 
-These are two different mechanisms and they need different escalations:
+These are two different mechanisms, they need different escalations, **and they
+carry very different prognoses**:
 
-| mechanism | signature | what would resolve it |
-| --- | --- | --- |
-| **backbone collapse** | large C-alpha displacement, backbone clashes | dynamics — mixed-solvent MD, bioemu ensemble |
-| **steric occlusion** | small C-alpha displacement, side-chain or subunit clashes only | rotamer sampling; for oligomers, test the subunit-removed state |
+| mechanism | signature | what would resolve it | prognosis |
+| --- | --- | --- | --- |
+| **backbone / loop motion** | large C-alpha displacement, backbone clashes | dynamics — mixed-solvent MD, bioemu ensemble | **good** |
+| **side-chain or subunit occlusion** | small C-alpha displacement, side-chain or subunit clashes only | rotamer sampling; for oligomers, test the subunit-removed state | **poor** |
+
+That prognosis column is the most decision-relevant thing on this page, and it
+is measured, not assumed. Across the CryptoSite set (Lazou, Kozakov,
+Joseph-McCarthy & Vajda, *Drug Discov Today* 2024): of **27 loop-motion sites,
+all but two reached nanomolar**; of **18 side-chain-motion sites, only 10 had
+any affinity data at all and every one of those bound weakly — low micromolar
+at best**.
+
+The explanation is timescale. Side chains reorient on 10^-11 to 10^-10 s and so
+compete with the ligand, effectively acting as a competitive inhibitor of its
+own site. Loops move on 10^-9 to 10^-6 s and can be wedged open and held.
+
+So `cryptic_mechanism` is not a taxonomy label — it is a **prior on achievable
+potency**. A side-chain-occluded site should be reported with an explicit
+expectation of micromolar-at-best, and that belongs in `next_experiment`
+reasoning rather than being discovered after a screening campaign.
+
+There is a second-order consequence worth stating: MD-based cryptic-pocket
+finders sample fast side-chain motions readily and slow loop motions poorly, so
+they systematically **over-report the sites that are not ligandable and
+under-report the ones that are**. Treat an MD-derived cryptic hit as weaker
+evidence than its confidence value suggests.
 
 Record which mechanism applies in `tractability.cryptic_mechanism`. "Cryptic"
 alone is not an actionable finding.
+
+**But apply the field's definition before calling anything cryptic.** Vajda et
+al. (2018) define a cryptic site as one that forms a pocket in the ligand-bound
+structure but *not* in the unbound structure, and argue for the stringent form:
+cryptic only if the pocket is absent in **all, or nearly all**, unbound
+structures. A site missing from one apo structure but present in others is
+low-scoring, not cryptic. CryptoBench operationalises this as pocket-residue
+RMSD > 2 A between apo and holo.
+
+Measured against that standard, our two calibration cases separate:
+
+| | apo ensemble | C-alpha displacement | verdict |
+| --- | --- | --- | --- |
+| KRAS switch-II | absent — druggability 0.000, pocket collapsed | 8.8 A | **cryptic** |
+| TNF-alpha axis | **present in all 5 apo structures**, 206-309 A^3 | 1.62 A | **NOT cryptic** — pre-formed and low-scoring |
+
+TNF-alpha fails both community criteria. The steric-occlusion physics is real —
+the third subunit and two Tyr119 rotamers genuinely block the ligand — but the
+site is pre-formed, so report it as **occluded, not cryptic**, and do not cite
+it as a cryptic-pocket case. Getting this wrong is the kind of error a reviewer
+finds immediately.
+
+This is also the argument for the ensemble: a single apo structure cannot
+distinguish "absent" from "low-scoring in this crystal form", and that
+distinction is the whole definition.
 
 ### 6. Bioactivity counts measure assays, not targets
 
@@ -189,7 +320,36 @@ Either omit it, or include it with `leakage_risk: true` and a note naming the
 source. A retrospective evaluation contaminated by future data is worthless, and
 silent contamination is worse than a gap.
 
-### 9. Target precedent, family precedent and structural-neighbour precedent are separate
+### 9. The four precedent axes are separate, and the pocket is the one that transfers
+
+Activity against something else is real signal and it is not activity against
+this target. Report each axis in its own block. Never merge them, never apply a
+discount factor to fold one into another.
+
+| axis | similarity by | strength |
+| --- | --- | --- |
+| `target_precedent` | measured on this protein | direct evidence |
+| `pocket_neighbour_precedent` | pocket descriptors + cofold transfer | **strongest transfer** |
+| `structural_neighbour_precedent` | Foldseek fold similarity | middle |
+| `family_precedent` | Pfam sequence family | weakest |
+
+**The pocket is the transferable unit, not the family.** TNF-alpha and IL-17A are
+both cytokines, both PPI targets, both drugged with antibodies first — and their
+small-molecule stories share nothing mechanically. TNF-alpha's site is a cavity
+on the trimer 3-fold axis, opened by displacing a subunit. IL-17A's is a groove
+at the homodimer interface, addressed by macrocycles from 2016. A jump along
+"same cytokine family" transfers nothing. A jump along "same pocket topology,
+here is the chemical series that fits it" transfers a hypothesis you can test.
+
+So when the axes disagree — high family similarity, low pocket similarity —
+report the disagreement rather than averaging it away. That disagreement is
+usually the most informative thing on the page.
+
+Everything in `pocket_neighbour_precedent` is a **hypothesis, not a
+measurement**. Label it transferred, name the source target, and carry the
+similarity value and the cofold result so a reader can discount it.
+
+### 9b. Target precedent, family precedent and structural-neighbour precedent are separate
 
 Activity against a homolog is real signal and it is not activity against this
 target. Report `target_precedent` and `family_precedent` as distinct objects.
@@ -305,6 +465,29 @@ omit a key, never invent a value.
     "sources": []
   },
 
+  "pocket_neighbour_precedent": {
+    "_note": "The strongest transfer axis, because the pocket is the unit that actually transfers. Family and fold similarity can both be high while pocket topology differs completely — TNF-alpha and IL-17A are both cytokines approached with antibodies first, but one site is a cavity on a trimer 3-fold axis and the other a groove at a homodimer interface. Nothing transfers between them.",
+    "candidates": [
+      {
+        "source_target": "",
+        "source_accession": "",
+        "source_pdb_id": "",
+        "source_ligand": "",
+        "source_best_potency_nm": null,
+        "descriptor_similarity": null,
+        "descriptor_basis": "fpocket volume/polarity/charge/hydrophobicity scores + lining-residue composition",
+        "cofold_transfer": {
+          "_note": "The sharp test: cofold the NEIGHBOUR's ligand into OUR target and check whether it places in our detected pocket. Turns a similarity score into a falsifiable prediction.",
+          "placed_in_our_pocket": null,
+          "confidence": null,
+          "leakage_risk": null,
+          "leakage_note": "Boltz-2 trained on the PDB. If this complex is already deposited, the cofold is contaminated and is a method check only, never retrospective evidence."
+        }
+      }
+    ],
+    "sources": []
+  },
+
   "structure": {
     "tier": "holo_experimental | apo_experimental | cofolded | predicted | sampled_ensemble | none",
     "pdb_id": null,
@@ -328,14 +511,36 @@ omit a key, never invent a value.
   "tractability": {
     "_primary": "volume is the reproducible number; druggability is a range, never a point",
     "pocket_volume_a3": {"min": null, "max": null, "spread_pct": null},
-    "pocket_druggability": {"min": null, "max": null, "fold_range": null},
+    "pocket_druggability": {
+      "min": null, "max": null, "fold_range": null,
+      "_provenance": "shipped fpocket: 3-descriptor logistic regression fitted on 21 positives. A weak prior, not a probability."
+    },
+    "ensemble_consensus_fraction": {
+      "_note": "Published criterion: ~70% of structures showing a strong hot spot, ~50% meeting all criteria. One good conformer out of five is a negative result.",
+      "n_structures": null,
+      "fraction_with_strong_pocket": null,
+      "meets_consensus_criterion": null
+    },
     "pocket_hydrophobic_density": null,
     "pocket_residues": [],
     "annotated_binding_site_overlap": null,
     "ligand_site_jaccard": null,
     "disorder_fraction": null,
     "cryptic_pocket_risk": "low | medium | high | undetermined",
-    "cryptic_mechanism": "backbone_collapse | steric_occlusion | none | undetermined",
+    "cryptic_mechanism": "loop_or_backbone_motion | sidechain_occlusion | subunit_occlusion | none | undetermined",
+    "cryptic_potency_prior": {
+      "_note": "Mechanism is a prior on achievable potency. Loop-motion sites: 25 of 27 reached nanomolar. Side-chain sites: all measured ones were low-micromolar at best.",
+      "expected_ceiling": "nanomolar | micromolar_at_best | unknown",
+      "basis": null
+    },
+    "pocket_vs_interface": {
+      "_note": "Measured, not assumed. Requires a complex structure containing the partner.",
+      "classification": "orthosteric_candidate | allosteric_candidate | destabiliser_candidate | no_partner_structure",
+      "interface_residues": [],
+      "pocket_interface_overlap": null,
+      "partner_pdb_id": null,
+      "matches_mechanism_hypothesis": null
+    },
     "max_backbone_ca_displacement_a": null,
     "clash_attribution": null,
     "caveat": null,
