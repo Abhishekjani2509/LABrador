@@ -1,5 +1,9 @@
 # LABrador
 
+> **Working on this repo?** Read [`COORDINATION.md`](./COORDINATION.md) first
+> on every pull of `main` — it holds the team state (done / pending / unowned /
+> hazards) and the process for landing work.
+
 LABrador is a hackathon workspace for stress-testing therapeutic program
 hypotheses. Its components examine four different questions: whether the
 literature supports the mechanism, whether the target is tractable with a small
