@@ -103,8 +103,9 @@ are dead — do not create files under them.
 - [ ] Pin the `proto-tools` git dependency (unpinned ref = unreproducible image).
 
 **Soliman**
-- [ ] Entire implementation (agent instructions, skills, deterministic
-      assembler, fixtures, wrapper) — BUILD.md has the order.
+- [x] First implementation drop merged (CLAUDE.md, 3 skills, assemble.py,
+      run artifacts). Remaining per BUILD.md: fixtures, wrapper, and the
+      blocking verification criteria — owner to confirm what's left.
 - [ ] Long-lived Paperclip auth (which header the MCP accepts for API keys).
 - [ ] Committed session id in CONTRACT.md:199 — scrub if repo goes public.
 
@@ -129,7 +130,7 @@ are dead — do not create files under them.
       already runnable against it.
 
 **Cyrus**
-- [ ] Rafal's `f84bfff` merge needs rename-aware handling (§5).
+- [x] Rafal's `f84bfff` rename-aware merge (done by the integrator flow).
 - [ ] No orchestrator; router has no registered specialists yet.
 
 ## 5. Unowned work + active hazards
