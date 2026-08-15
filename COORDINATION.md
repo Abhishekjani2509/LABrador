@@ -180,9 +180,18 @@ nodes' actual contracts:
    cross-node needs to §5.
 
 **Landing work:**
-7. Push to **your own branch**; Cyrus merges to `main`. (Sprint decision,
-   2026-08-15.) Small COORDINATION.md-only updates may go straight to `main`.
-8. After Cyrus merges: everyone pulls, GOTO step 1.
+7. Push to **your own branch**. The **auto-integrator** merges it to `main`:
+   `bun scripts/integrate.ts` sweeps every branch, `merge --no-ff`s anything
+   new, auto-fixes resurrected pre-rename paths, runs typecheck + check, and
+   only pushes if green — a merge-log entry lands in §9 each time. It runs
+   continuously from Abhishek's watcher session (30s polling) and anyone can
+   run it manually. *(Amends the "Cyrus merges by hand" sprint decision —
+   Abhishek's call, 2026-08-15 evening; revert by deleting this step.)*
+8. **Conflicts and red checks are never auto-pushed.** The integrator reports
+   `CONFLICT` / `COLLISION` / `VERIFY-FAILED` and leaves them for a human (or
+   the watching Claude session) to resolve with judgment.
+9. Small COORDINATION.md-only updates may go straight to `main`.
+10. After a merge lands: everyone pulls, GOTO step 1.
 
 ## 8. Verification commands per node
 
