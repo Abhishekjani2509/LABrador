@@ -5,13 +5,16 @@ rounds. Contract is `SCHEMA.md`.
 
 ## External surface
 
-> **Voided 2026-08-15.** Every "Paperclip MCP" reference below and in earlier
-> discussion is wrong — Paperclip ships no MCP server. It is a Python CLI the
-> sandbox installs and shells out to. `CONTRACT.md` §2 is the current word.
+> **Correction, 2026-08-15.** A previous revision of this file claimed Paperclip
+> ships no MCP server and told you to pip-install the CLI into the sandbox.
+> **That was wrong — ignore it.** The hosted MCP is real and verified:
+> `https://paperclip.gxl.ai/mcp`, remote streamable HTTP, one passthrough tool.
+> "Paperclip MCP" below is correct as originally written. `CONTRACT.md` §2 has
+> the endpoint, auth and tool schema.
 
 | need | how |
 |---|---|
-| search + full text | **Paperclip CLI**, pip-installed into the sandbox — no MCP |
+| search + full text | **Paperclip MCP** (only MCP) — `https://paperclip.gxl.ai/mcp` |
 | state across rounds | **memory store** — platform feature, `/mnt/memory/`, no infra |
 | search fallback / metadata | `web_fetch` (built in) |
 | scoring, dedup, gaps | `bash` + python in the container |
@@ -87,18 +90,17 @@ Six facts, each independently checked:
 - ~~Bundled skill scripts may not be executable in the sandbox.~~ **Settled: they
   are.** `probe.py` shipped, was found at `/workspace/skills/env-probe/probe.py`,
   and ran. Scoring stays in `assemble.py`.
-- ~~Paperclip transport unknown.~~ **Settled, but not to either branch we
-  planned for.** It is a CLI, not an MCP server of any transport. The sandbox
-  installs it from the wheel and runs it directly, so there is no
-  `manifest.mcp_servers` entry and no host-side `tools.ts` relay. See
-  `CONTRACT.md` §2.
-- **The wheel URL is a trap.** `pip install https://paperclip.gxl.ai/paperclip.whl`
-  fails with "not a valid wheel filename" — a PEP 427 naming problem that reads
-  like a network error. Download first, rename from the archive's `.dist-info`.
-- **Auth is the last open gate.** The sandbox reaches Paperclip and runs the CLI
-  but has no credentials; `search` returns `Not authenticated`. Needs an API key
-  minted from paperclip.gxl.ai, carried as a vault `environment_variable`
-  credential scoped to that host.
+- ~~Paperclip transport unknown.~~ **Settled: remote streamable HTTP.** It takes
+  the `manifest.mcp_servers` branch — one entry, `permission: "always_allow"`,
+  key in a vault. No `tools.ts` relay, no sandbox install.
+- **The MCP exposes one tool, not a typed surface.** `paperclip({command: string})`
+  is a passthrough to the CLI. `literature-search` therefore constructs command
+  strings; budget for CLI-flag errors surfacing as tool errors, and note that
+  hosted MCP is stateless, so any repo-scoped call must name its repo every time.
+- **Auth is the last open gate.** `Authorization: Bearer <token>` is proven to
+  work. Which header the endpoint accepts for a *long-lived API key* is untested —
+  the CLI uses `X-API-Key`, but that is the CLI's REST path, not necessarily the
+  MCP's. Needs a key minted from paperclip.gxl.ai to settle.
 - **`bun run console <name>` does not attach memory**; only `--once` and the eve
   wrapper do. Test memory through `--once`, never the Console session.
 - **`read_write` memory + web content = injection surface.** Papers are
