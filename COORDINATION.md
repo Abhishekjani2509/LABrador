@@ -34,7 +34,7 @@ two adapters marked above have no owner.
 | Person | Branch | Node (dir under `managed/`) | Merged into main? |
 |---|---|---|---|
 | Abhishek | `abhishek-jani` | `trial-recruitment-forecaster` | ✅ |
-| Rafal | `rafwiewiora/druggability-dossier` | `small-molecule-tractability-review` | ⚠️ main has it, but **1 new commit (`f84bfff`, +4.7k lines) is unmerged — see §5 hazard** |
+| Rafal | `rafwiewiora/druggability-dossier` | `small-molecule-tractability-review` | ✅ (incl. `f84bfff`: 651x figure withdrawn, cryptic/disorder/interface modules added) |
 | Soliman | `msoliman6/literature-graph-mcp` | `research-evidence-mapper` | ✅ |
 | Moamen | `moamen` | `sandbox-capability-probe` | ✅ |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
@@ -62,10 +62,12 @@ are dead — do not create files under them.
   10-target calibration fixtures, evidence-rules CLAUDE.md, pipeline.html
   status board. Precedent + structure-selection stages VERIFIED.
 
-**Soliman — research-evidence-mapper** *(design packet, no code)*
-- SCHEMA.md (request/graph JSON/storage/guarantees), CONTRACT.md
-  (component responsibilities, verified live Paperclip MCP endpoint),
-  BUILD.md (ordering + blocking verification criteria).
+**Soliman — research-evidence-mapper** *(implementation landed 2026-08-15 late)*
+- SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
+  CLAUDE.md, three skills (literature-search, claim-extraction,
+  graph-assembly with deterministic assemble.py), and first run artifacts
+  (`runs/g_1a4f`). Not yet re-reviewed against BUILD.md's verification
+  criteria — owner to update this row.
 
 **Moamen — sandbox-capability-probe** *(done — throwaway, served its purpose)*
 - The only deployed Managed Agent. Proved: bundled scripts execute in the
@@ -93,7 +95,7 @@ are dead — do not create files under them.
       scale (backtest isolates it; candidate √-dilution fix documented in NEXT.md).
 
 **Rafal**
-- [ ] Merge `f84bfff` (see §5 hazard first).
+- [x] `f84bfff` merged (2026-08-15 late, rename-aware).
 - [ ] Falsification sweep has never been executed; dossier assembly never run
       end-to-end; GPU escalation stage blocked on a Modal payment method.
 - [ ] Pocket scanner runs in Rafal's personal Modal workspace — single point
@@ -137,7 +139,7 @@ are dead — do not create files under them.
 | **Adapter A** | mapper `findings[]` → thesis `Evidence[]` (mapping is nearly mechanical; `no_effect` needs a convention) | Soliman + Abhishek |
 | **Adapter B** | forecaster `simulatedMonthsToEnroll` → economics `launch_year` delta + `launch_delay_years` range. ⚠️ The two "obvious" wirings are both wrong: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | Abhishek + Vince |
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics | Cyrus + whoever's free |
-| **HAZARD: rename collision** | Rafal's unmerged `f84bfff` adds files under the OLD `managed/druggability-dossier/` path; merging naively resurrects the dead dir alongside `small-molecule-tractability-review/`. Rebase or path-fix before merge. | Rafal + Cyrus |
+| ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
 
 ## 6. thesis.ts ratification agenda (the blocking conversation)
