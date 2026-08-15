@@ -212,3 +212,9 @@ nodes' actual contracts:
 *Facts in this file were verified against the tree at `9003ad3` plus remote
 branch state on 2026-08-15. If you find a stale claim, fixing it here IS the
 process working.*
+
+## 9. Merge log (automated)
+
+Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 resolutions logged here too).
+
+- **2026-08-15 23:55 UTC** — merged `msoliman6/literature-graph-mcp` (0941254, tier-2 rename-location resolution); earlier today: `f84bfff` + `1b39569` same class — typecheck+check green.
