@@ -444,13 +444,13 @@
   },
   {
     "basis": "primary",
-    "changed_in_round": 1,
+    "changed_in_round": 2,
     "confidence": {
-      "agreement": 0.5,
-      "evidence_quality": 0.6,
+      "agreement": 0.6667,
+      "evidence_quality": 0.575,
       "independence": 1.0,
       "label": "medium",
-      "overall": 0.64
+      "overall": 0.6967
     },
     "from": "t3",
     "how": "increases",
@@ -463,6 +463,7 @@
     "to": "t11",
     "why": "conditions differ: {braf v600e-driven melanoma, mouse} vs {b16f0 melanoma, gulo ko mice}",
     "yes": [
+      "f1_1",
       "f6"
     ]
   },

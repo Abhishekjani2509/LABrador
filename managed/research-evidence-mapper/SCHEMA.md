@@ -23,6 +23,9 @@ other by `id`. Nothing nested.
   "round": 2,                    // how many search passes have run
   "status": "ok",                // ok | empty | partial | failed — see note 6
   "generated_at": "2026-08-15T14:20:00Z",
+  "error": null,                 // one-line plain-text cause when status != ok.
+                                 // Prefixed "PAPERCLIP UNAVAILABLE: " when the
+                                 // corpus could not be reached at all.
 
 
   "delta": {
@@ -48,20 +51,50 @@ other by `id`. Nothing nested.
     "truncated": true,           // true = a sample, not the literature
     "no_quote_discarded": 6,
     "duplicates_dropped": 0,
-    "interventions_without_target": ["t6"],
-    "interventions_without_target_count": 1,     // claims with no verbatim sentence (only removal)
+    "figures_read": 1,           // ask-image calls; 0 on new_question/expand_node
+
+    // Reported, never enforced — a shortfall is visible instead of silent.
+    "interventions_without_target": ["t6"],      // no edge to a protein/gene
+    "interventions_without_target_count": 1,
+    "proteins_without_accession": ["t9"],        // identity a consumer cannot key on
+    "proteins_without_accession_count": 1,
+    "has_disease_node": true,    // false = a consumer must parse the question
+    "confidence_profile": {      // a scale nobody uses carries nothing
+      "n": 38, "min": 0.35, "max": 0.9,
+      "below_0_65": 4,
+      "hedged_but_confident": ["f12"]   // hedged:true AND confidence > 0.65 —
+                                        // the finding's own two fields disagree
+    },
+
     "limits": { "max_papers": 50, "max_queries": 6 },
     "stop_reason": "max_papers"  // max_papers|queries_exhausted|no_new_results|time_limit|complete|search_unavailable
   },
   "things": [{
-    "id": "t1", "name": "antibody 38C2",
-    "kind": "protein",           // protein|small_molecule|gene|disease|process|method
-    "aliases": ["38C2"],         // surface forms merged here
-    "mentions": 14               // papers mentioning it — node size
+    "id": "t1", "name": "IRAK4",
+    "kind": "gene",              // protein|small_molecule|gene|disease|process|method
+    "aliases": ["IRAK-4"],       // surface forms merged here
+    "mentions": 14,              // papers mentioning it — node size
+    "round": 1,                  // round this node entered the graph
+
+    // Identity. Required on every protein/gene node; omit on diseases,
+    // processes, methods and small molecules. Resolve with
+    // `search -s proteins "<name> human"` — and resolve from the QUOTE, not
+    // the label: "IL-6" gives P05231 (the ligand) while receptor-blockade
+    // evidence is P08887, a different molecule. Species is part of identity;
+    // IRAK4 also matches Q1RMT8 (bovine) and Q8R4K2 (mouse).
+    "uniprot_accession": "Q9NWZ3",
+    "gene_symbol": "IRAK4",
+    "resolved_by": "f7 quote names the kinase directly",
+    "ambiguity": [],             // rejected candidates + why. NON-EMPTY MEANS
+                                 // this node is never used as a merge key.
+    "merged_from": [             // provenance; a merge is otherwise irreversible
+      { "name": "interleukin-1 receptor-associated kinase 4", "via": "accession" }
+    ]
   }],
 
   "papers": [{
     "id": "p2", "title": "...", "year": 2021, "journal": "...", "doi": "10.1038/...",
+    "pmid": "34423919",          // carried for dedup: doi > pmid > title+year
     "first_author": "Rader",     // drives the independence score
     "study_type": "test_tube",   // meta_analysis|clinical_trial|human_cohort|animal|test_tube|computational|review
     "is_preprint": false, "retracted": false,

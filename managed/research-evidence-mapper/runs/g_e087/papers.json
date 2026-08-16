@@ -245,5 +245,18 @@
     "study_type": "clinical_trial",
     "title": "High Dose Parenteral Ascorbate Inhibited Pancreatic Cancer Growth and Metastasis: Mechanisms and a Phase I/IIa study",
     "year": 2017
+  },
+  {
+    "doi": "10.3389/fonc.2014.00227",
+    "first_author": "Sascha Venturelli",
+    "id": "p20",
+    "is_preprint": false,
+    "journal": "Frontiers in Oncology",
+    "pmid": "25202679",
+    "retracted": false,
+    "round": 2,
+    "study_type": "test_tube",
+    "title": "Epigenetic Impacts of Ascorbate on Human Metastatic Melanoma Cells",
+    "year": 2014
   }
 ]

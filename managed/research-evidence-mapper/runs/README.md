@@ -6,7 +6,8 @@ develop against instead of a hand-made one.
 
 ## `g_e087` — the disputed fixture
 
-`fixtures/q-disputed.txt`, one round, `depth: standard`.
+`fixtures/q-disputed.txt`, **two rounds**, `depth: standard`. Round 2 was a
+`resolve_link` on `L21`, the disagreed link.
 
 | | |
 |---|---|
@@ -16,6 +17,7 @@ develop against instead of a hand-made one.
 | `how` verbs | `activates`, `increases`, `decreases`, `suppresses`, `drives` — all in the closed set |
 | `state: "disagreed"` links | 1 |
 | findings carry `round` / `flags` | yes |
+| rounds | 2 — `r1.json` and `r2.json`, one file each |
 
 The disagreed link is the one worth looking at:
 
@@ -30,6 +32,30 @@ model: **Gulo-knockout mice cannot synthesise vitamin C**, which is the actual
 reason the results differ. All three quotes behind it were spot-checked by
 re-resolving each paper **by DOI** — not by the id the agent used — and every
 quote appears verbatim in what the DOI returns.
+
+## Round 2 — what `delta` looks like in practice
+
+```jsonc
+"delta": { "round": 2, "links_changed": ["L21"],
+           "findings_added": ["f1_1","f2_1"], "papers_added": ["p20"],
+           "links_added": [], "things_added": [], "gaps_added": [], "gaps_resolved": [] }
+```
+
+```
+L21  Vitamin C --increases--> melanoma metastasis
+     state disagreed -> disagreed | confidence 0.64 -> 0.70
+```
+
+Worth reading closely. `resolve_link` moved **its target and nothing else** —
+`links_added` and `things_added` are both empty, two findings from one new paper
+landed on `L21`. Confidence rose while the state stayed `disagreed`: new
+corroborating evidence strengthens the link without erasing the conflict, and
+the boundary condition is unchanged because the new paper did not dissolve it.
+
+`links_changed` is the field a consumer watches to learn that a
+previously-settled relationship has been reopened and rescored. Note the delta
+is one link, two findings and one paper against a 51KB full graph — which is the
+argument for keeping the reply complete and the delta derived.
 
 ## What this replaces
 

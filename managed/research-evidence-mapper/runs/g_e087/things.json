@@ -32,14 +32,22 @@
       "Asc",
       "IVC",
       "L-ascorbic acid 2-phosphate sesquimagnesium (APM)",
+      "VitC",
       "ascorbate",
       "ascorbic acid",
       "pharmacological ascorbate",
+      "sodium ascorbate",
       "vitamin C"
     ],
     "id": "t3",
     "kind": "small_molecule",
-    "mentions": 1,
+    "mentions": 2,
+    "merged_from": [
+      {
+        "name": "Vitamin C",
+        "via": "name"
+      }
+    ],
     "name": "Vitamin C"
   },
   {
@@ -122,13 +130,20 @@
   },
   {
     "aliases": [
+      "B16FO melanoma metastasis",
       "distant metastasis by melanoma cells",
       "malignant melanoma metastasis",
       "melanoma metastatic spread"
     ],
     "id": "t11",
     "kind": "process",
-    "mentions": 1,
+    "mentions": 2,
+    "merged_from": [
+      {
+        "name": "melanoma metastasis",
+        "via": "name"
+      }
+    ],
     "name": "melanoma metastasis"
   },
   {

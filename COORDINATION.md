@@ -339,6 +339,21 @@ are dead — do not create files under them.
       OWN round, which is correct incrementally and for a full-graph write.
       Verified: three rounds accumulate, one file per round, re-issue rejoins at
       round 4 with nothing lost.
+- [x] **SCHEMA.md had drifted behind the implementation — 11 undocumented
+      fields, caught by review, now zero.** Not only the UniProt ones that were
+      spotted: `things.uniprot_accession/gene_symbol/resolved_by/merged_from`,
+      `papers.pmid`, top-level `error`, and five coverage keys
+      (`figures_read`, `proteins_without_accession`(+count), `has_disease_node`,
+      `confidence_profile`). Verified mechanically by diffing every key of a
+      real emitted graph against the document rather than reading it — the same
+      check now reports NONE missing.
+- [x] **Round-2 artifact committed, `links_changed` exercised.**
+      `resolve_link` on the disagreed link L21 moved **its target and nothing
+      else** — `links_added` and `things_added` both empty, two findings from
+      one new paper. Confidence 0.64 → 0.70 with the state staying `disagreed`:
+      corroborating evidence strengthens a link without erasing the conflict.
+      Also confirms `resolve_link` now moves its target, which it did not before
+      the node-granularity fix.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block

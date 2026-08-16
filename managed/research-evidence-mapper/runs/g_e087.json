@@ -5,11 +5,11 @@
       "hedged_but_confident": [],
       "max": 0.9,
       "min": 0.6,
-      "n": 42
+      "n": 44
     },
     "depth": "standard",
-    "figures_read": 0,
-    "found": 98,
+    "figures_read": 2,
+    "found": 71,
     "has_disease_node": true,
     "interventions_without_target": [
       "t2",
@@ -27,10 +27,27 @@
     "no_quote_discarded": 0,
     "proteins_without_accession": [],
     "proteins_without_accession_count": 0,
-    "read": 19,
-    "stop_reason": "queries_exhausted",
+    "read": 7,
+    "stop_reason": "no_new_results",
     "truncated": true,
-    "used": 19
+    "used": 2
+  },
+  "delta": {
+    "findings_added": [
+      "f1_1",
+      "f2_1"
+    ],
+    "gaps_added": [],
+    "gaps_resolved": [],
+    "links_added": [],
+    "links_changed": [
+      "L21"
+    ],
+    "papers_added": [
+      "p20"
+    ],
+    "round": 2,
+    "things_added": []
   },
   "error": null,
   "findings": [
@@ -343,6 +360,24 @@
       "where": "select trial, human"
     },
     {
+      "confidence": 0.7,
+      "flags": [
+        "quote_spans_citation"
+      ],
+      "from": "t3",
+      "hedged": false,
+      "how": "increases",
+      "id": "f2_1",
+      "is_own_result": false,
+      "paper": "p20",
+      "quote": "In B16, melanoma-bearing mice spontaneous lung metastasis is inhibited by sodium ascorbate supplementation in drinking water in mice fed a restricted diet (low in tyrosine and phenylalanine) ( 10 ).",
+      "round": 2,
+      "says": "no",
+      "section": "discussion",
+      "to": "t11",
+      "where": "b16 melanoma mouse, restricted diet"
+    },
+    {
       "confidence": 0.9,
       "flags": [],
       "from": "t3",
@@ -355,6 +390,22 @@
       "round": 1,
       "says": "yes",
       "section": "abstract",
+      "to": "t11",
+      "where": "braf v600e-driven melanoma, mouse"
+    },
+    {
+      "confidence": 0.75,
+      "flags": [],
+      "from": "t3",
+      "hedged": false,
+      "how": "increases",
+      "id": "f1_1",
+      "is_own_result": true,
+      "paper": "p3",
+      "quote": "The increase in metastases was 1.6–2-fold and was similar with both doses for all four compounds.",
+      "round": 2,
+      "says": "yes",
+      "section": "results",
       "to": "t11",
       "where": "braf v600e-driven melanoma, mouse"
     },
@@ -1415,7 +1466,7 @@
       "searched_in_round": null
     }
   ],
-  "generated_at": "2026-08-16T05:00:00Z",
+  "generated_at": "2026-08-16T05:30:00Z",
   "graph_id": "g_e087",
   "links": [
     {
@@ -1863,13 +1914,13 @@
     },
     {
       "basis": "primary",
-      "changed_in_round": 1,
+      "changed_in_round": 2,
       "confidence": {
-        "agreement": 0.5,
-        "evidence_quality": 0.6,
+        "agreement": 0.6667,
+        "evidence_quality": 0.575,
         "independence": 1.0,
         "label": "medium",
-        "overall": 0.64
+        "overall": 0.6967
       },
       "from": "t3",
       "how": "increases",
@@ -1882,6 +1933,7 @@
       "to": "t11",
       "why": "conditions differ: {braf v600e-driven melanoma, mouse} vs {b16f0 melanoma, gulo ko mice}",
       "yes": [
+        "f1_1",
         "f6"
       ]
     },
@@ -2485,10 +2537,23 @@
       "study_type": "clinical_trial",
       "title": "High Dose Parenteral Ascorbate Inhibited Pancreatic Cancer Growth and Metastasis: Mechanisms and a Phase I/IIa study",
       "year": 2017
+    },
+    {
+      "doi": "10.3389/fonc.2014.00227",
+      "first_author": "Sascha Venturelli",
+      "id": "p20",
+      "is_preprint": false,
+      "journal": "Frontiers in Oncology",
+      "pmid": "25202679",
+      "retracted": false,
+      "round": 2,
+      "study_type": "test_tube",
+      "title": "Epigenetic Impacts of Ascorbate on Human Metastatic Melanoma Cells",
+      "year": 2014
     }
   ],
   "question": "Do antioxidant supplements (N-acetylcysteine, vitamin E, vitamin C) accelerate or suppress cancer progression and metastasis?",
-  "round": 1,
+  "round": 2,
   "rounds": [
     {
       "ask": "new_question",
@@ -2497,6 +2562,14 @@
       "outcome": "new_evidence",
       "papers_added": 19,
       "target": null
+    },
+    {
+      "ask": "resolve_link",
+      "depth": "standard",
+      "n": 2,
+      "outcome": "new_evidence",
+      "papers_added": 2,
+      "target": "L21"
     }
   ],
   "schema_version": "1.1",
@@ -2535,14 +2608,22 @@
         "Asc",
         "IVC",
         "L-ascorbic acid 2-phosphate sesquimagnesium (APM)",
+        "VitC",
         "ascorbate",
         "ascorbic acid",
         "pharmacological ascorbate",
+        "sodium ascorbate",
         "vitamin C"
       ],
       "id": "t3",
       "kind": "small_molecule",
-      "mentions": 1,
+      "mentions": 2,
+      "merged_from": [
+        {
+          "name": "Vitamin C",
+          "via": "name"
+        }
+      ],
       "name": "Vitamin C"
     },
     {
@@ -2625,13 +2706,20 @@
     },
     {
       "aliases": [
+        "B16FO melanoma metastasis",
         "distant metastasis by melanoma cells",
         "malignant melanoma metastasis",
         "melanoma metastatic spread"
       ],
       "id": "t11",
       "kind": "process",
-      "mentions": 1,
+      "mentions": 2,
+      "merged_from": [
+        {
+          "name": "melanoma metastasis",
+          "via": "name"
+        }
+      ],
       "name": "melanoma metastasis"
     },
     {
