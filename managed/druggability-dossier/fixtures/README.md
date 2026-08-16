@@ -8,6 +8,21 @@ system got before it broke.
 Data for every target lives in `targets.json` with an `expected_output` block
 that serves as the grading key.
 
+**The classifier behind every `pdb_holo` / `pdb_apo` / `pdb_undetermined` figure
+in this directory is checkable from this checkout**, as of 2026-08-15:
+
+```bash
+python3 ../.claude/skills/structure-select/tests/test_v2.py
+```
+
+Offline, stdlib-only, no Paperclip call. It prints the classifier's measured
+accuracy — 259/262 on the original ground truth, 277/280 combined, 61/70 blind
+with **0 false positives** — and `tests/version_diff.py` beside it will tell you
+whether any two classifier versions actually disagree on a verdict. Until
+2026-08-15 those harnesses existed only in session scratch, so the figures this
+key rests on could not be checked by anyone reading the repo. Treat any fixture
+number whose generating code is not in the checkout the same way.
+
 ## Files
 
 | File | Status | Contents |
@@ -214,6 +229,23 @@ re-confirmed 2026-08-15, now under a fifth independent rule, with all 25 entries
 strict apo. Intrinsically disordered. Best potency 0.2 nM from an assay described
 only as "Inhibition of c-MYC (unknown origin)".
 
+> **The 1,079 vs 1,249 disagreement is SETTLED, at 1,079.** `precedent-lookup`'s
+> sweep table reported 1,249 compounds and flagged the pair as unreconciled. Both
+> figures are correct measurements of *different quantities*: with the
+> `n_target_components = 1` predicate MYC has **1,079 compounds / 1,249
+> activities**; without it, **1,249 compounds / 1,675 activities**, because
+> P01106 maps to seven ChEMBL targets including two PROTAC ternary complexes.
+> The activity arithmetic closes exactly (1,249 + 426 = 1,675). This repo's
+> authoritative definition mandates the predicate, so **1,079 is the compound
+> count**.
+>
+> What made it look irreconcilable is a **numeric collision**: 1,249 is
+> simultaneously the *unfiltered compound* count and the *filtered activity*
+> count. Two different measurements landing on the same integer read exactly like
+> one figure filed under two names. When two numbers disagree, check they are the
+> same quantity before calling one wrong — and when they agree, check the same
+> thing, because a coincidence looks just like a corroboration.
+
 **Tests:** that reported actives with no holo structure read as conflict, not
 precedent; that an uncharacterised assay is rejected however good the number.
 **Expect:** `not_tractable`, `axis_conflict` populated, not rescued by family
@@ -329,12 +361,30 @@ Three things follow, and all three matter for grading:
 - **A lookup failure is not a chemistry miss.** Failures carry `lookup_failed`
   into `holo_call(...)["undetermined"]` and must never render as apo.
 
-**Only six targets are regenerated** — TNF-α, JAK1, TYK2, MYC, IL-11, STAT3
-(plus CD20 as a control). KRAS, EGFR, BCL-2, IL-17A and RORγt still carry the
-superseded MW-window values and are flagged `_NOT_REGENERATED_2026_08_15` in
-place. Paperclip's SQL backend failed partway through. Which half is which is
-recorded in `_structure_regeneration_2026_08_15`, because a half-regenerated key
-is only dangerous when nobody can tell.
+**Seven targets are regenerated** — TNF-α, JAK1, TYK2, MYC, IL-11, STAT3 and
+**BCL-2** (plus CD20 as a control). **Four** still carry the superseded
+MW-window values and are flagged `_NOT_REGENERATED_2026_08_15` in place: KRAS,
+EGFR, IL-17A and RORγt. Which half is which is recorded in
+`_structure_regeneration_2026_08_15`, because a half-regenerated key is only
+dangerous when nobody can tell.
+
+> **Corrected 2026-08-15.** This paragraph previously said six regenerated and
+> listed BCL-2 among the five stale ones, as did the `targets.json` index block.
+> Both were wrong and they contradicted the BCL-2 record itself, which carries
+> `pdb_holo_measured`, a three-entry history and a *measured* degrader block.
+> Only four targets ever carried the `_NOT_REGENERATED_2026_08_15` flag. The
+> index disagreed with the territory, which is precisely the failure the index
+> exists to prevent — so when you regenerate a target, fix the index in the same
+> edit.
+
+**And "Paperclip's SQL backend failed partway through" was the wrong diagnosis.**
+The backend was healthy. `cli_cwd` in the Paperclip *client* config was set to
+`/papers/`, and the CLI `cd`s into it before every command — making each `sql`
+call a ~15 ms no-op that prints `vsh: cd: /papers/: Permission denied` **on
+stdout with exit code 0**. Nothing about it looks like a failure to a caller
+checking the exit status. Isolate with `PAPERCLIP_CONFIG_DIR` before
+re-measuring rather than resetting the shared config; the shared one has been
+observed being re-poisoned minutes after a reset.
 
 If you re-measure: the backend silently served a **moving row cap** — the same
 query returned 200 rows at one moment and exactly 10 at another, well-formed and
