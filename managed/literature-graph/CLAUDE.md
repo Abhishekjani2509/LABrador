@@ -216,11 +216,17 @@ A healthy corpus returns `Found 1 papers [s_...]`. Anything else — an error, a
 auth failure, a timeout, an empty result on *that* query — means Paperclip is
 not serving, because that query cannot legitimately return nothing.
 
-**2. If the canary fails, stop.** Do not run the planned queries. Do not fall
-back to another source; there is no other source. Return immediately with:
+**2. If the canary fails, STOP.** Do not run the planned queries. Do not fall
+back to another source; there is no other source. Do not attempt to answer the
+question from anything you already know — you have no corpus, so you have no
+answer. Do not return a graph that looks ordinary but is empty. Return
+immediately with:
 
 - `status: "failed"`
-- `error` — the tool's own message, verbatim, one line. Not your summary of it.
+- `error` — **must begin with the literal string `PAPERCLIP UNAVAILABLE: `**,
+  followed by the tool's own message verbatim, one line. Not your summary of
+  it. The prefix exists so a human skimming the JSON, and a caller grepping it,
+  both see the cause immediately instead of inferring it from `coverage`.
 - `coverage.stop_reason: "search_unavailable"`
 - `coverage.found: 0`, `read: 0`, `used: 0`
 - every list empty, and for an extending ask, the prior graph **unchanged** in
