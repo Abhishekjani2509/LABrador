@@ -1,6 +1,8 @@
 node_modules/
 .env
 .claude/settings.local.json
+# Claude Code agent worktrees (nested biome roots break `bun run check`)
+.claude/worktrees/
 .eve/
 .output/
 *.log
