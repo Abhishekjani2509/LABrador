@@ -310,8 +310,8 @@ def test_the_brief_report_is_the_default_and_is_much_shorter(
     assert brief == to_markdown(slate, detail="brief")
     assert len(brief) < len(to_markdown(slate, detail="full")) / 2
     # The corroboration is what got dropped, not the idea or its refutation.
-    assert "Killed by" in brief
-    assert "Next experiment" in brief
+    assert "What would kill it" in brief
+    assert "The experiment that would settle it" in brief
     assert "Source sentences" not in brief
     # ...and a reader is told detail was withheld, rather than left to assume
     # the short report is the whole record.
@@ -328,7 +328,7 @@ def test_the_brief_report_keeps_every_warning_the_full_one_has(
     assert "not** evidence of absence" in brief
     # Per-hypothesis caveats survive too -- they carry the same warning down to
     # the individual claim.
-    assert "**Caveats**" in brief
+    assert "caveat" in brief.lower()
 
 
 def test_an_unknown_detail_level_is_an_error(graph: KnowledgeGraph) -> None:

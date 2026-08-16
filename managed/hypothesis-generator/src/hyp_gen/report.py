@@ -70,20 +70,35 @@ _SCORE_LABELS = [
     ("support", "support"),
     ("novelty", "novelty"),
     ("testability", "testability"),
-    ("contradiction_risk", "risk"),
+    ("contradiction_risk", "contradiction risk"),
 ]
 
 
-def _scores_inline(hypothesis: Hypothesis) -> str:
-    """The same numbers as ``_scores_block`` on one line, without the meters."""
+def _scores_sentence(hypothesis: Hypothesis) -> str:
+    """The same numbers as ``_scores_block``, but as one English sentence."""
     parts = [
         f"{label} {hypothesis.scores[key]:.2f}"
         for key, label in _SCORE_LABELS
         if key in hypothesis.scores
     ]
+    if not parts:
+        return ""
+    listed = ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
     if hypothesis.rank_score is not None:
-        parts.append(f"**rank {hypothesis.rank_score:.2f}**")
-    return " · ".join(parts)
+        return f"It ranks **{hypothesis.rank_score:.2f}** overall, on {listed}."
+    return f"It scores {listed}."
+
+
+def _an(noun: str) -> str:
+    return f"an {noun}" if noun[:1] in "aeiou" else f"a {noun}"
+
+
+_COUNT_WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven",
+                "eight", "nine")
+
+
+def _count_word(n: int) -> str:
+    return _COUNT_WORDS[n] if 0 <= n < len(_COUNT_WORDS) else str(n)
 
 
 def _chain(hypothesis: Hypothesis) -> str:
@@ -142,26 +157,41 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
     out.append(f"## {position}. {title}")
     out.append("")
 
-    badges = [f"`{hypothesis.motif}`", f"{hypothesis.hops} hop(s)"]
-    if hypothesis.verification:
-        badges.append(f"**{hypothesis.verification.verdict.upper()}**")
-    if hypothesis.verdict:
-        badges.append(hypothesis.verdict.replace("_", " "))
-    badges.extend(_failure_badges(hypothesis))
-    out.append(" · ".join(badges))
-    out.append("")
-    out.append(_scores_inline(hypothesis))
-    out.append("")
-
-    chain = _chain(hypothesis)
-    if chain:
-        out.append(f"**Chain.** {chain}")
+    # A failed hypothesis leads with the failure, before any prose makes it
+    # sound alive.
+    badges = _failure_badges(hypothesis)
+    if badges:
+        out.append(" · ".join(badges))
         out.append("")
+
+    # One paragraph that says what kind of idea this is, how it fared, and how
+    # it scored — the sentence a colleague would say out loud before showing
+    # you the details.
+    motif = _an(hypothesis.motif.replace("_", " "))
+    hops = f"{hypothesis.hops} hop{'s' if hypothesis.hops != 1 else ''}"
+    intro = f"This is {motif} over {hops}"
+    chain = _chain(hypothesis)
+    intro += f": {chain}." if chain else "."
+    judged: list[str] = []
+    if hypothesis.verification:
+        judged.append(
+            f"Verification judged it **{hypothesis.verification.verdict.upper()}**"
+        )
+    if hypothesis.verdict:
+        clause = f"the critics read it as {hypothesis.verdict.replace('_', ' ')}"
+        judged.append(clause if judged else clause[0].upper() + clause[1:])
+    if judged:
+        intro += " " + ", and ".join(judged) + "."
+    scores = _scores_sentence(hypothesis)
+    if scores:
+        intro += " " + scores
+    out.append(intro)
+    out.append("")
 
     if art:
-        out.append(f"**Killed by.** {art.falsifier}")
+        out.append(f"What would kill it: {art.falsifier}")
         out.append("")
-        out.append(f"**Next experiment.** {art.decisive_experiment}")
+        out.append(f"The experiment that would settle it: {art.decisive_experiment}")
         out.append("")
 
     # One objection, not all of them: the critics are ordered so the first lens
@@ -169,9 +199,10 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
     # corroboration is what brief mode is allowed to drop.
     if hypothesis.critiques:
         critique = hypothesis.critiques[0]
+        verdict = critique.verdict.replace("_", " ")
         out.append(
-            f"**Biggest objection — {critique.lens or 'general'} "
-            f"({critique.verdict}).**"
+            f"The strongest objection comes from the {critique.lens or 'general'} "
+            f"critic, which read the hypothesis as {verdict}:"
         )
         out.append("")
         out.append(f"> {critique.strongest_objection}")
@@ -188,16 +219,23 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
         )
         out.append("")
 
+    # Caveats are already full sentences written to be read; run them together
+    # as a paragraph rather than bulleting them apart.
     if hypothesis.caveats:
-        out.append("**Caveats**")
-        out.extend(f"- {c}" for c in hypothesis.caveats)
+        count = len(hypothesis.caveats)
+        lead = (
+            "One caveat travels with this hypothesis. "
+            if count == 1
+            else f"{_count_word(count).capitalize()} caveats travel with this hypothesis. "
+        )
+        out.append(lead + " ".join(hypothesis.caveats))
         out.append("")
 
     # Warnings are detail; errors mean the hypothesis is invalid, and that
     # travels at every detail level.
     errors = [i for i in hypothesis.issues if i.severity == "error"]
     if errors:
-        out.append("**Validation**")
+        out.append("Validation rejected it:")
         out.extend(f"- ❌ `{i.code}` {i.detail}" for i in errors)
         out.append("")
 
@@ -354,23 +392,43 @@ def _header(slate: Slate, detail: str) -> list[str]:
         for v in ("verified", "qualified", "unverified", "rejected")
     )
     if detail == "brief":
-        # Four lines instead of ten. The truncation flag stays inline rather
-        # than moving to a footnote: it is the number that decides how much any
-        # novelty score below is worth.
+        # A short narrative instead of stat lines. The truncation flag stays in
+        # the same sentence as the read counts: it is the fact that decides how
+        # much any novelty score below is worth.
+        outcomes = ", ".join(
+            f"{slate.counts.get(f'verification_{v}', 0)} {v}"
+            for v in ("verified", "qualified", "unverified", "rejected")
+            if slate.counts.get(f"verification_{v}", 0)
+        )
+        n = len(slate.hypotheses)
+        produced = (
+            f"This run produced {_count_word(n)} "
+            f"hypothes{'is' if n == 1 else 'es'}"
+            + (f" ({outcomes})" if outcomes else "")
+            + f" in {slate.counts.get('model_calls', 0)} model calls, "
+            f"working from a graph of {slate.counts.get('things', 0)} things, "
+            f"{slate.counts.get('links', 0)} links and "
+            f"{slate.counts.get('findings', 0)} findings."
+        )
+        read = (
+            f" The underlying search read {cov.get('read')} of its "
+            f"{cov.get('found')} results"
+            + (
+                ", so the graph is a **truncated sample** of the literature, "
+                "not the literature"
+                if cov.get("truncated")
+                else ""
+            )
+            + "."
+        )
         return [
             f"# Hypotheses — {slate.graph_id} (round {slate.round})",
             "",
-            f"**{slate.question}**" if slate.question else "",
+            f"The question this slate answers: **{slate.question}**"
+            if slate.question
+            else "",
             "",
-            f"{len(slate.hypotheses)} hypotheses · {verification} · "
-            f"{slate.counts.get('model_calls', 0)} model calls",
-            "",
-            f"Graph: {slate.counts.get('things', 0)} things, "
-            f"{slate.counts.get('links', 0)} links, "
-            f"{slate.counts.get('findings', 0)} findings. "
-            f"Read {cov.get('read')} of {cov.get('found')} results"
-            + (" (**truncated**)" if cov.get("truncated") else "")
-            + ".",
+            produced + read,
             "",
         ]
     return [
