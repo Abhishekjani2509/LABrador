@@ -301,6 +301,19 @@ are dead — do not create files under them.
       recompute (`links`/`gaps`), because a link's confidence legitimately moves
       when new evidence arrives — `links_changed` reports that movement, and
       appending a derived score would persist one already known to be wrong.
+- [x] **Typed reference graph committed (`g_e087`), and the misleading one
+      removed.** 31 things / 19 papers / 42 findings / 37 links, produced by the
+      deployed agent from `fixtures/q-disputed.txt`: disease node present,
+      UniProt accessions (BACH1 O14867, GST-pi P09211), all `how` verbs inside
+      the closed set including `suppresses`, findings carrying `round` and
+      `flags`, and one `state: "disagreed"` link with its boundary condition.
+      `g_1a4f` is **deleted**, not kept alongside — it was hand-assembled before
+      deployment, carried no disease entity, accessions or typed nodes, and was
+      the source of the seven `ASSUMED` overrides reported downstream. A stale
+      reference artifact is worse than none, because it looks authoritative.
+      `runs/README.md` documents what the artifact is and its one caveat: it
+      predates the `delta` block, which for a round-1 graph is just "everything
+      added", so a round-2 artifact would be needed to exercise `links_changed`.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
