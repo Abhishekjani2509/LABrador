@@ -356,6 +356,12 @@ acted on.
   sentence from the fetched text — not paraphrased, not cleaned up, not
   stitched from two sentences. If it does not string-match, drop it and count it
   in `no_quote_discarded`. Everything else in the system rests on this.
+- **Nothing is filtered by score, so use the whole scale.** `findings.confidence`
+  is your estimate of how firmly the paper states the claim, and it is never
+  used to drop anything. Stage 2 explores the LOW-confidence findings for novel
+  directions, so a 0.35 speculation is a different kind of lead, not a worse
+  one. A hedged finding belongs at 0.65 or below; `hedged: true` with high
+  confidence is a contradiction and assembly reports it.
 - **Nothing is filtered by score.** Low-confidence, hedged and single-source
   findings all stay in — a hedged claim marks an emerging area, a lone claim is
   a gap candidate. The caller sets its own threshold. The *only* removal is a
