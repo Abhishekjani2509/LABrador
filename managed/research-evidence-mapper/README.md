@@ -8,9 +8,12 @@ quote** from text it actually fetched, and returns the whole graph as JSON —
 nodes, evidence, scored relationships, and the places where the literature has
 a hole in it.
 
-**Status: working prototype, not deployed.** The pipeline has run end to end
-against real papers in a local session. It has not run in the cloud sandbox.
-See [Status and gaps](#status-and-gaps) before relying on it.
+**Status: deployed and verified.** `agent_015feTqKz3Bmtec2RaWaE2sW` v3 runs on
+the Claude Developer Platform with three skills, a memory store, and the
+Paperclip MCP attached. It has produced a real graph end to end in the cloud
+sandbox — 23 findings, every one quote-verified, none discarded. Two of its
+four ask types have never executed, and `fixtures/` is not written. See
+[Status and gaps](#status-and-gaps) before relying on it.
 
 ---
 
@@ -296,12 +299,15 @@ same `stop_reason`. And a `test_gap` that could not query never sets
 | | |
 |---|---|
 | Sandbox affordances (bundled scripts, python3, `/mnt/memory`, egress) | verified via the `spike` agent |
-| `new_question` | run against real papers |
-| `test_gap` | run against real papers; overturned a round-1 answer |
+| `new_question` | ✅ run against real papers, locally and deployed |
+| `test_gap` | ✅ run against real papers; overturned a round-1 answer |
 | `expand_node`, `resolve_link` | **never executed** |
 | Figure reading (`ask-image`) | **never executed** |
-| Deployment | **never run** — `manifest.json` does not exist yet |
-| Long-lived API key auth against the MCP | **untested** |
+| Deployment | ✅ live — `agent_015feTqKz3Bmtec2RaWaE2sW` v3 |
+| Raw-JSON output contract | ✅ enforced and checked mechanically |
+| Paperclip liveness canary | ✅ fired and passed in production |
+| Long-lived API key auth against the MCP | **untested** — vault holds a session token that expires |
+| Findings idempotency on a retried round | **known bug** — appends without dedupe, inflates agreement/independence |
 
 `resolve_link` is the likeliest to break first: it is the ask that biases
 queries toward the under-represented side *and* reads figures, and neither path
