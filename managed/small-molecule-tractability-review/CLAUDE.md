@@ -416,78 +416,148 @@ evidence of poor tractability.** It is an absence of measurement. Set
 and state in `tractability.caveat` that geometric scoring cannot see cryptic
 sites.
 
-### 4. Volume at D=1.6 is the computed axis's primary number. Druggability is a reported range that carries nothing.
+### 4. Druggability is a WITHIN-STRUCTURE quantity. Report it as a rank among that structure's pockets. Never compare a druggability value across structures.
 
-**This rule was re-prioritised on 2026-08-15 by an evaluation over 15 targets, 67
-structures and 134 measurements** (`druggability_eval/RESULTS_TABLE.txt`,
-`all_rows.csv`). The previous ordering — sweep D, report druggability as a range,
-report volume beside it — is not deleted; it is demoted. Every measured finding
-below is additive to rules 4 and 4b, not a replacement for them.
+**The rule, in one line:**
 
-**4.0 — the demotion, and the measurement behind it.**
+> **Druggability is reportable, and only ever as a within-structure comparison.**
 
-fpocket's druggability score does not separate druggable targets from hard ones.
+**Re-derived on 2026-08-15 at the source, superseding the framing this rule
+carried earlier the same day.** The earlier framing said the score "does not
+separate druggable targets from hard ones" and demoted it on an AUC. That
+conclusion was **wrong as stated** — not because the score works, but because
+every cross-target AUC we computed was **an operation the quantity does not
+support**. We were re-deriving fpocket's own normalisation and reporting it as a
+measurement of the score. What follows replaces the reasoning; the demotion of
+the *cross-structure* use survives it and is now on firmer ground.
 
-| | |
-| --- | --- |
-| target-level AUC at D=1.6 | **0.720**, bootstrap 95% CI **0.44–0.94** — the interval includes chance, P(AUC≤0.5) = 0.071 |
-| target-level AUC at D=2.4 | **0.520**, CI 0.18–0.86 — chance |
-| the label-free test | on **37 holo structures with a drug-like ligand physically bound and the scored pocket anchored to that ligand** (`site_pocket_selected_by = ligand_site_jaccard`), spanning all 10 known-druggable targets — certain positives by construction — the median score is **0.320**, **25 of 37** fall below 0.5, and **15 of 37 (41%)** fall below 0.1 |
+**4.0 — what the number actually is, read out of fpocket's source.**
 
-Named cases, because a rate is easy to discount and a case is not: EGFR **6LUD
-with osimertinib bound scores 0.013**. JAK1's median is **0.009** across nine
-approved drugs. RORgt **6C1P is 0.009 at rank 55 of 60**. TYK2 **6NZP with
-deucravacitinib is 0.169**. BCL-2 **6QGK is 0.025**. NLRP3 runs **0.001–0.018**
-across seven holo crystals including one carrying a clinical compound.
+`pocket.c:736-756` computes the dominant term of the druggability score as
 
-**The inversion is confirmed at target level.** MYC — zero holo structures,
-canonical undruggable — has a D=2.4 median of **0.75**, above KRAS (0.54), BCL-2
-(0.52), JAK1 (0.49), EGFR (0.44) and NLRP3 (0.12).
+    mean_loc_hyd_dens_norm = (mlhd - mlhd_min) / (mlhd_max - mlhd_min)
 
-**And the clustering parameter does about 1.5x more work than the biology.**
-Within-structure |D=2.4 − D=1.6| on the same site in the same crystal (n=67):
-median **0.229**, max **0.955**, 43% move by more than 0.3. The between-group
-difference of medians at D=1.6 is only **0.154**. The parameter also flips the
-verdict — AUC 0.72 at D=1.6 collapses to 0.52 at D=2.4 — and D=2.4 is *not*
-uniformly the better choice: IRAK4 2O8Y goes **0.791 → 0.001**.
+where `mlhd_min` and `mlhd_max` are accumulated **over the current structure's
+own pocket list**, whenever `n_pockets > 1`. `pscoring.c:325` feeds that into the
+logistic. The hardcoded PDB-wide constants at `pocket.c:780` —
+`(mlhd - 8.23) / (24.20 - 8.23)` — are the **single-pocket branch and never
+fire**: our structures carry **4 to 324** pockets each.
 
-**There is also a mechanistic reason, independent of the statistics.**
-fpocket's `drug_score_pocket` leans on `mean_loc_hyd_dens_norm`, which is
-**min-max normalised across the other pockets of the same structure**.
-Druggability is therefore a property of a pocket *relative to the population
-detected beside it*, not a property of the pocket. That is why mdpocket cannot
-report one at all — a fixed grid has a population of one, so the quantity is
-undefined by construction, and applying fpocket's single-pocket fallback
-constants saturates it at 1.000. A score whose value depends on what else
-happened to be detected in the same crystal cannot bear a verdict.
+So the score answers **"how does this pocket rank against the others in this
+structure"**. It never answered "how druggable is this pocket in absolute terms",
+and no amount of careful anchoring makes it answer that.
+
+**The proof, on one protein, same site.**
+
+| | RORgt 4NB6 | RORgt 6C1P |
+| --- | --- | --- |
+| site MLHD | **30.722** | **19.0** |
+| that structure's MLHD maximum | 30.722 — *the site is the maximum* | 52.767 |
+| normalises to | **1.0** | **0.36** |
+| druggability | **0.827** | **0.009** |
+
+Same protein, same orthosteric site, comparable absolute hydrophobic density.
+**The 90-fold gap comes entirely from which other pockets happened to co-exist in
+the file.** That is the whole finding, and everything below is a consequence.
+
+**What it resolves — four things, all previously open.**
+
+1. **The demotion was wrong as stated.** Not "the score does not work" but
+   **"we evaluated it with an operation it does not support"**. AUC 0.720
+   (CI 0.44–0.94) at D=1.6 and 0.520 at D=2.4 are not measurements of the score;
+   they are measurements of how the normalisation happened to fall across 15
+   unrelated files.
+2. **It explains the 651-fold retraction retroactively, and names the root
+   cause.** Pooling a within-structure-normalised value across five TNF-alpha
+   structures is *exactly* the operation that manufactures a meaningless spread.
+   The off-site residue-number matcher compounded it; **the pooling alone was
+   sufficient.** Same root cause as this rule, finally named. (The retraction
+   itself stands — see 4b and the ensemble note below.)
+3. **It explains why P2Rank rescoring helped** on three targets and at n=70.
+   Rescoring is *also* a within-structure reordering — the one operation this
+   family of quantities supports. See 4d.
+4. **It disqualifies the replacement.** See 4a: volume fails the same
+   disqualifying test **2.4x worse** than the thing it was promoted over.
+
+**Two consequences that must never be forgotten.**
+
+- **Max-over-pockets measures pocket count.** r(n_pockets, max druggability) =
+  **0.702** at D=1.6. That is what `max_druggability_no_ligand_site` computes,
+  and it contaminated **70% of the hard class** in the calibration set. That
+  path must **never** produce a reportable value. This is also the cleanest
+  reading of the MYC inversion — MYC, zero holo structures and canonical
+  undruggable, carries a D=2.4 median of **0.75**, above KRAS (0.54), BCL-2
+  (0.52), JAK1 (0.49), EGFR (0.44) and NLRP3 (0.12). MYC's value was taken by
+  max-over-pockets because nothing anchored it. The inversion reproduces, and
+  what it demonstrates is that **the cross-target comparison is meaningless**,
+  not that MYC is druggable.
+- **The clustering parameter still moves the number more than the biology did.**
+  Within-structure |D=2.4 − D=1.6| on the same site in the same crystal (n=67):
+  median **0.229**, max **0.955**, 43% move by more than 0.3, against a
+  between-group difference of medians of **0.154** at D=1.6. IRAK4 2O8Y goes
+  **0.791 → 0.001**. Changing D changes the pocket population, which changes the
+  normalisation — this is the same mechanism, not a separate defect. Sweep D and
+  read both.
+
+**And the design could not have established the negative anyway.** Exact
+permutation over all 3,003 label assignments: the observed AUC of 0.720 gives
+**p = 0.103**, and the minimum AUC this design can call significant is **0.760**.
+"The interval includes chance" was the **expected** result for a *good* score at
+n=10 against n=5. A non-significant AUC from an underpowered design is not
+evidence of a null. See `falsification-sweep` check 10b.
 
 **So, binding:**
 
-1. **`pocket_volume_a3` at D=1.6 is the computed axis's primary number** — see
-   4a. D=1.6 specifically: at D=2.4 volumes exceed 1000 Å³ and sites merge with
-   neighbouring cavities.
-2. **Druggability is reported, never load-bearing.** It may **not** carry a
-   `not_tractable` or `insufficient_evidence` verdict on its own, in any
-   combination of `verdict_basis`. State the measured **41% false-negative rate**
-   wherever you rely on the score, so the next reader knows why it is being
-   discounted — `tractability.pocket_druggability._false_negative_rate` carries
-   it in the output and `load_bearing` is fixed at `false`.
-3. **Every verdict that leaned on a low druggability score is flagged for
-   re-examination.** The failure is systematic across 10 druggable targets, not a
-   handful of outliers, so any historic `not_tractable` or `insufficient_evidence`
-   reached on a low score is unsupported until re-measured on volume. When a run
-   in front of you has a low druggability beside a high volume, populate
-   `tractability.caveat` with the disagreement rather than picking a side.
-4. **Do not substitute persistence.** See 4c. It is the obvious wrong fix.
-5. **PRANK rank is a site-finding aid, never a quality value.** See 4d.
+1. **Report the site pocket's RANK among that structure's pockets, and the
+   pocket count.** `tractability.site_pocket_rank` carries `fpocket`, `prank`,
+   `n_pockets` and `structure_pdb_id`. **"rank 1 of 30 in 6OIM" is the claim.**
+   The druggability value may sit beside it; the rank is what is asserted.
+2. **NEVER compare a druggability value across structures or targets.** Not to a
+   threshold, not to another target, not pooled into a min/max, not sorted, not
+   colour-scaled. **A spread of druggability across an ensemble measures
+   nothing.** `pocket_druggability.min`/`max`/`fold_range` remain in the template
+   because consumers read them and because a *within-structure* range across the
+   D sweep is legitimate — but a range pooled across structures is not a
+   measurement, and `_comparability` must say which one you built.
+3. **Druggability is still never load-bearing.** It may not carry a
+   `not_tractable` or `insufficient_evidence` verdict, in any combination of
+   `verdict_basis`. `load_bearing` is fixed at `false`, and
+   `_false_negative_rate` states the direction and the named cases rather than a
+   percentage — the 41% figure's denominator is under audit (4a).
+4. **Volume is an absolute physical quantity and MAY be compared across
+   structures** — with its clustering sensitivity travelling with it. The
+   210/240 Å³ guide stays **retracted and may not be revived** (4a).
+5. **Do not substitute persistence.** See 4c. It is the obvious wrong fix.
+6. **PRANK rank is a second within-structure ordering, legitimate on the same
+   footing as fpocket's own rank.** See 4d.
 
 **4a — THE VOLUME SEPARATION IS RETRACTED. Do not use it, do not revive it. 2026-08-15.**
 
 This rule previously stated that pocket volume at D=1.6 separated all 15
 calibration targets perfectly at AUC 1.000, and gave a guide of 240 Å³ and above
-for druggable, 210 Å³ and below for hard. **That result is retracted**, because the calibration anchors do not measure the
-proteins they are attributed to, and because a full residue-level audit found
-the evaluation could not have decided the question as posed.
+for druggable, 210 Å³ and below for hard. **That result is retracted for two
+reasons, and the second is the deeper one:**
+
+1. **The calibration anchors do not measure the proteins they are attributed
+   to** — the residue-level audit below.
+2. **The comparison was ill-posed.** Volume was promoted specifically because
+   druggability failed a disqualifying test: does the clustering knob move the
+   number more than the biology does? Volume fails that test **worse**.
+
+| | within-structure swing across clustering | between-group difference of medians | ratio |
+| --- | --- | --- | --- |
+| druggability | 0.229 | 0.154 | **1.49** |
+| **volume** | **492 Å³** | **139 Å³** | **3.53** |
+
+**Volume fails the disqualifying test 2.4x worse than the thing it replaced.**
+And the **35 Å³** margin between the two groups — the gap between the 207 and 242
+edges that became the guide — is **14x smaller** than what the clustering knob
+alone moves volume by. A boundary narrower than the parameter's own noise is not
+a boundary.
+
+The first reason retracts the anchors. The second says a re-anchored set would
+not rescue the guide either, which is why the guide **may not be revived** rather
+than merely awaiting re-measurement.
 
 **What was found — four of five hard anchors compromised, and one druggable
 anchor through the path we call trustworthy:**
@@ -539,17 +609,26 @@ ranked highest across the whole assembly — partners, receptors, fusions, nucle
 acid. Every one of the fifteen was measured before `chains` and `site_residues`
 existed.
 
-**Until a re-anchored calibration set exists: report `pocket_volume_a3` as a
-measurement and let it carry no verdict.** Do not compare it to 210 or 240 Å³.
-Do not describe volume as separating druggable from hard. A volume is a number
-about a cavity in a structure you scored, and nothing more, until the set behind
-it has been rebuilt with chain selection asserted.
+**Report `pocket_volume_a3` as a measurement and let it carry no verdict.** Do
+not compare it to 210 or 240 Å³. Do not describe volume as separating druggable
+from hard. A volume is a number about a cavity in a structure you scored, and
+nothing more.
 
-**What is NOT affected.** The demotion of the druggability score in the rest of
-rule 4 stands on its own evidence and is, if anything, stronger: MYC's D=2.4
-median of 0.75 was independently reproduced and beats **7 of 10** druggable
-targets, not 5. Druggability remains `load_bearing: false`. The clustering sweep,
-rule 4b, rule 4c and rule 4d are unchanged.
+**What volume DOES have that druggability does not: it is an absolute physical
+quantity, so comparing it across structures is a legitimate operation.** That is
+the whole difference between the two, and it is why volume stays the reported
+computed-axis number even after this retraction. Carry its clustering sensitivity
+with it every time — the 492 Å³ swing above is a property of the measurement, not
+a caveat you may drop once you have said it once.
+
+**What is NOT affected.** Rule 4's treatment of druggability stands and is
+sharper than before: the score is a **within-structure rank**, reported as
+`site_pocket_rank` with `n_pockets`, `load_bearing: false`, never compared across
+structures. MYC's D=2.4 median of 0.75 reproduces independently and beats **7 of
+10** druggable targets — which rule 4 now reads as a demonstration that the
+cross-target comparison is meaningless, taken through
+`max_druggability_no_ligand_site`, whose r with pocket count is 0.702. The
+clustering sweep, rule 4b, rule 4c and rule 4d are unchanged.
 
 **One caution for whoever rebuilds this.** A filter that looks safe and is not:
 `polymer_entities.uniprot_accession` types a chimera as a single entity, so
@@ -559,8 +638,9 @@ a purity filter. Verify at sequence level, which is how all three of these were
 caught.
 
 **The rest of rule 4, and rule 4b, are unchanged in substance and still
-mandatory** — the sweep is what *measures* the 0.229 median swing that demoted
-the score. Rules **4c** (persistence) and **4d** (PRANK) are new and sit after 4b.
+mandatory** — the sweep is what *measures* the 0.229 median swing, and under rule
+4.0 that swing is the normalisation moving as the pocket population changes.
+Rules **4c** (persistence) and **4d** (PRANK) sit after 4b.
 
 **Clustering.** There is no correct fixed `-D`. Pinning `-D 1.6` (tuned on KRAS)
 gives TNF-alpha druggability **0.002 at the site of a co-crystallised 570 Da
@@ -572,7 +652,13 @@ value is a coin flip.
 
 **Ensemble.** An earlier version of this rule cited a **650-fold druggability
 spread** across five apo TNF-alpha structures "of the same site". **That figure
-is WITHDRAWN.** It was produced by matching pockets across structures on shared
+is WITHDRAWN, and rule 4.0 now names its root cause.** Pooling a
+within-structure-normalised quantity across five structures is exactly the
+operation that manufactures a meaningless spread — **the pooling alone was
+sufficient to produce 651x**, with no matcher error required. The off-site
+matcher described below compounded it and is a real, separate defect; it is not
+the reason the number was meaningless. Both retractions stand. It was produced by
+matching pockets across structures on shared
 residue *numbers*, and mdpocket showed the matcher was tracking a pocket **7.7 A
 away from the site it claimed**, with an internal inconsistency of **12.2 A**
 between structures. A 19-residue reference on a homotrimer collapses to 11
@@ -659,6 +745,13 @@ and do not pool across structures whose assemblies differ in whether the site is
 even present.** A pooled volume above ~1000 A^3 means sites have merged and the
 druggability beside it is a merge artifact.
 
+**Note under rule 4.0 that the 930x figure needed no assembly difference to
+appear.** A druggability range pooled across three structures is not a
+measurement whatever the assemblies do, because the quantity is normalised inside
+each file. The assembly finding is real and belongs to **volume**, which is the
+number that pooling is legitimate for. Read the passage above as a volume
+control; do not read it as licensing a pooled druggability range that passes it.
+
 **A pocket-matching step is a measurement, and it needs its own controls.**
 Report the matched centroid distance across the ensemble, not just an overlap
 fraction — two pockets sharing residue numbers can be 12 A apart, and an
@@ -679,6 +772,31 @@ carrying them must be reported per structure, never pooled into one spread.
 Say which route established the site in `tractability.site_hypothesis_basis`
 (holo ligand site, persistence across the ensemble, or not established).
 
+**The ligand-free routes are not interchangeable — measured on TNF-alpha, n=1
+target.** An anchor-agreement test put four ligand-free site definitions against
+the known SPD304 site. Only one found it:
+
+| ligand-free definition | centroid distance to SPD304 site | shared residues |
+| --- | --- | --- |
+| **transferred homolog** (CD40LG 3LKJ) | **0.00 Å**, Jaccard **0.615** | — |
+| TNFR2 epitope | 14.1 Å | **zero** |
+| symmetry axis | 22.4 Å | — |
+| annotated function | 20.5 Å | — |
+
+And the axis itself does not disambiguate: TNF's C3 axis carries **five** distinct
+on-axis cavities, with **no ligand-free rule to pick among them**. The runner-up
+sits **7.86 Å** from SPD304 — independently reproducing the 7.7 Å figure in the
+withdrawn-matcher retraction, from a completely different direction.
+
+**Read it as: `transferred_homolog_site` is the strongest ligand-free anchor we
+have measured, and "on the symmetry axis" is not a site.** This is **one target**
+— do not generalise the ranking. Where it bears, it bears on which route you
+record in `site_hypothesis_basis` and on how much a symmetry-axis or
+annotated-function anchor is worth when it is the only one you have. It does not
+retract the separate TNF finding that the symmetry-axis *label* co-occurs with
+`ligand_site` on 2AZ5 rank 5 — a label agreeing with the ligand where the ligand
+exists is a different claim from a definition finding the site where it does not.
+
 **Know what the number you are quoting actually is.** The druggability score in
 shipped fpocket is a **logistic regression on three descriptors** — mean local
 hydrophobic density, max alpha-sphere distance, polar VDW surface — fitted on
@@ -687,6 +805,13 @@ model is present in the source but commented out, so "the fpocket druggability
 score" in any current binary is not the equation the paper describes. A
 three-parameter fit on 21 positives cannot bear the weight of a verdict. Quote
 it as a weak prior with its provenance attached, never as a probability.
+
+**And the dominant descriptor is normalised inside the structure** — `pocket.c`
+`set_normalized_descriptors`, lines 736-756, min and max taken over the current
+structure's own pocket list whenever `n_pockets > 1`, which is always here (4 to
+324 pockets per structure). `pscoring.c:325` feeds it to the logistic. So the
+provenance you attach is not just "21 positives"; it is **"a rank against the
+other pockets in this file"**. Rule 4.0.
 
 **Require consensus across the ensemble, not a best case.** The published
 criterion (Bekar-Cesaretli et al., JCIM 2025) is that roughly **70% of
@@ -712,13 +837,18 @@ measured runs are in the second case, so they report `n_measurements` and leave
 `n_structures` and `meets_consensus_criterion` null rather than claim a
 criterion they cannot evaluate.
 
-So: **volume is a measurement, druggability is not.** Report
+So: **volume is comparable across structures, druggability is not.** Report
 `tractability.pocket_volume_a3` with its across-structure spread, and carry the
-D=1.6 figure separately in `pocket_volume_a3.primary_d1_6_a3` — that is the
-number rule 4a promoted, and a spread pooled over both D values is not it.
-Report druggability as a range across D and across structures, never as a single
-figure, and **never let it drive a verdict at all** — not alone, and not as the
-computed half of `verdict_basis: both`.
+D=1.6 figure separately in `pocket_volume_a3.primary_d1_6_a3` — a spread pooled
+over both D values is not it. Report druggability as a **rank among that
+structure's pockets, with the pocket count** (`tractability.site_pocket_rank`),
+and **never let it drive a verdict at all** — not alone, and not as the computed
+half of `verdict_basis: both`.
+
+(The `pocket_druggability` min/max/fold_range block stays populated for
+consumers that read it, and `_comparability` must state whether the range is
+within one structure across the D sweep — legitimate — or pooled across
+structures — not a measurement. Rule 4.0 clause 2.)
 
 (The key name `top_pocket_volume_a3` appeared in an earlier version of this
 sentence. It is not and never was a template key. The key is
@@ -796,6 +926,15 @@ is inverted, AUC 0.25**, worse than chance in the systematic direction. The
 reason is structural: on a target with no ligand to anchor to, the top-ranked
 pocket is top-ranked by construction, so "rank 1" carries no information about
 quality. It finds sites. It says nothing about whether they are good.
+
+**Rule 4.0 explains why this one worked when the cross-target evaluations did
+not.** Rescoring is a **within-structure reordering** — the operation this whole
+family of quantities supports — so PRANK rank sits on **exactly the same footing
+as fpocket's own rank** and is legitimate on it. That is not a promotion: it is
+the observation that the n=70 result and the AUC 0.25 result are consistent, and
+that the first was measured with a supported operation and the second was not.
+**Two within-structure orderings, reported side by side, disagreeing where they
+disagree.** Keep the KRAS demotion visible for the same reason.
 
 ### 5. Cryptic risk is a geometric measurement, not a flag on apo
 
@@ -927,9 +1066,11 @@ geometry already found**, and not as a way to find one.
 **Read this section knowing what happened to it on 2026-08-15.** Four of this
 project's headline computational claims have now been re-measured with a real n,
 and **three of the four were overturned or narrowed**: the 651-fold TNF-alpha
-druggability spread (withdrawn — a pocket-matching artifact), the fpocket
-druggability score itself (demoted — AUC 0.720 with a CI that includes chance,
-41% false negatives on pockets with a drug bound), cofolding confidence as
+druggability spread (withdrawn — pooling a within-structure quantity across
+structures, compounded by a pocket-matching artifact; rule 4.0), the fpocket
+druggability score itself (**restricted to a within-structure rank** — the
+earlier demotion-on-AUC framing was itself an unsupported cross-structure
+operation, rule 4.0), cofolding confidence as
 "anti-diagnostic" (overturned — the signal is present on 5 of 5, it is just too
 small to act on), and the Boltz-2 affinity head's 1.97-log bias (overturned —
 +0.32 log over 23 pairs, CI including zero). Only the ESMFold caution survived, and it
@@ -1309,11 +1450,14 @@ confident score on an unstudied target is the worst output you can return.
 
 **But a low druggability score is not one of the routes to this verdict, and
 never was.** Rule 4.0: druggability may not carry `not_tractable` or
-`insufficient_evidence` on its own, because 41% of pockets with a drug
-physically bound score below 0.1. A negative verdict on computed grounds needs
-the D=1.6 volume behind it, and if the volume is absent the honest output is
-`insufficient_evidence` **with the reason named as an unmeasured volume**, not as
-a poor pocket. The validator enforces this as `DRUGGABILITY_LOAD_BEARING`.
+`insufficient_evidence` on its own. The reason is now structural rather than
+statistical — **a druggability value compared against a threshold is a
+cross-structure comparison, and the quantity does not support one.** RORgt scores
+0.827 in 4NB6 and 0.009 in 6C1P at the same site, on the pocket population alone.
+A negative verdict on computed grounds needs the D=1.6 volume behind it, and if
+the volume is absent the honest output is `insufficient_evidence` **with the
+reason named as an unmeasured volume**, not as a poor pocket. The validator
+enforces this as `DRUGGABILITY_LOAD_BEARING`.
 
 ### 12. Predictions need a positive control first
 
@@ -1609,26 +1753,29 @@ omit a key, never invent a value.
   },
 
   "tractability": {
-    "_primary": "pocket_volume_a3.primary_d1_6_a3 is the computed-axis number REPORTED, but it carries no verdict: the AUC 1.000 separation is SUSPENDED (rule 4a, 2026-08-15) because three of five hard anchors measured the wrong protein. Do not compare it to 210 or 240 A^3. druggability remains load-bearing on nothing.",
+    "_primary": "TWO DIFFERENT KINDS OF NUMBER. pocket_volume_a3.primary_d1_6_a3 is an ABSOLUTE physical quantity and may be compared across structures, but carries no verdict: the AUC 1.000 separation is RETRACTED (rule 4a) and volume fails the clustering-sensitivity test worse than druggability did (492 A^3 swing against a 139 A^3 between-group difference, ratio 3.53 vs 1.49). Do not compare it to 210 or 240 A^3. pocket_druggability is a WITHIN-STRUCTURE quantity by construction (fpocket pocket.c:736-756 min-max normalises the dominant descriptor over the current structure's own pocket list; the single-pocket fallback at pocket.c:780 never fires at 4-324 pockets). Its reportable form is site_pocket_rank: rank among that structure's pockets, plus the count, plus which structure. NEVER compare a druggability VALUE across structures or targets.",
     "pocket_volume_a3": {
       "min": null, "max": null, "spread_pct": null,
       "clustering_d": null,
       "primary_d1_6_a3": null,
       "site_pocket_selected_by": null,
-      "_primary_note": "primary_d1_6_a3 is the site volume at D=1.6 ONLY, not the pooled min/max. D=1.6 specifically: at D=2.4 volumes exceed 1000 A^3 and sites merge with neighbouring cavities. THE 210/240 A^3 GUIDE IS WITHDRAWN, NOT MERELY UNCALIBRATED - see rule 4a. It was fitted on 15 anchors of which at least three (MYC, IL-11, KRAS) did not measure the target protein, and correcting MYC moves it 187.9 -> 325.7 A^3, across the whole band. Report the volume; do not classify with it."
+      "_primary_note": "primary_d1_6_a3 is the site volume at D=1.6 ONLY, not the pooled min/max. D=1.6 specifically: at D=2.4 volumes exceed 1000 A^3 and sites merge with neighbouring cavities. Volume IS an absolute physical quantity and MAY be compared across structures - that is what distinguishes it from druggability - but its clustering sensitivity travels with it every time. THE 210/240 A^3 GUIDE IS WITHDRAWN AND MAY NOT BE REVIVED - see rule 4a. Two reasons: the anchors did not measure the target protein (MYC 187.9 -> 325.7 A^3 on correction, across the whole band), AND the comparison was ill-posed - volume swings 492 A^3 within a structure across clustering against a 139 A^3 between-group difference of medians (ratio 3.53, versus druggability's 1.49), so volume fails the disqualifying test 2.4x worse than the thing it replaced, and the 35 A^3 margin between groups is 14x smaller than what the clustering knob alone moves volume by. Report the volume; do not classify with it."
     },
     "pocket_druggability": {
       "min": null, "max": null, "fold_range": null,
       "site_pocket_selected_by": null,
       "load_bearing": false,
-      "_provenance": "shipped fpocket: 3-descriptor logistic regression fitted on 21 positives. A weak prior, not a probability. mean_loc_hyd_dens_norm is min-max normalised across the OTHER pockets of the same structure, so this is a property of a pocket relative to its detected population, not of the pocket.",
-      "_false_negative_rate": "REPORTED, NEVER LOAD-BEARING. Measured over 15 targets / 67 structures / 134 measurements: on 37 holo structures with a drug-like ligand bound and the pocket anchored to it, median 0.320, 25/37 below 0.5, 15/37 (41%) below 0.1. Target-level AUC 0.720 (95% CI 0.44-0.94, includes chance) at D=1.6 and 0.520 at D=2.4. It may not carry a not_tractable or insufficient_evidence verdict on its own."
+      "_comparability": "WITHIN-STRUCTURE ONLY. State here whether this min/max is a range within ONE structure across the D sweep (legitimate) or pooled ACROSS structures (NOT a measurement - a spread of druggability across an ensemble measures nothing). The reportable quantity is tractability.site_pocket_rank.",
+      "_provenance": "shipped fpocket: 3-descriptor logistic regression fitted on 21 positives. A weak prior, not a probability. The dominant descriptor mean_loc_hyd_dens_norm is min-max normalised over the CURRENT STRUCTURE'S OWN pocket list (pocket.c:736-756, n_pockets > 1); the hardcoded (mlhd-8.23)/(24.20-8.23) at pocket.c:780 is the single-pocket branch and never fires here (4-324 pockets per structure). pscoring.c:325 feeds it to the logistic. So the score answers 'how does this pocket rank against the others in this structure', never 'how druggable is this pocket'.",
+      "_false_negative_rate": "REPORTED, NEVER LOAD-BEARING, and NEVER COMPARED ACROSS STRUCTURES. The demonstration: RORgt 4NB6 site MLHD 30.722 IS that structure's maximum, normalises to 1.0, druggability 0.827; RORgt 6C1P site MLHD 19.0 against a structure maximum of 52.767, normalises to 0.36, druggability 0.009. Same protein, same orthosteric site, comparable absolute hydrophobic density - the 90-fold gap is entirely which other pockets co-exist in the file. Low values on holo structures with a drug bound are common (JAK1 median 0.009 across nine approved drugs; TYK2 6NZP with deucravacitinib 0.169; BCL-2 6QGK 0.025; NLRP3 0.001-0.018 across seven holo crystals). The 41% figure once quoted here rests on a denominator UNDER AUDIT and on a cross-structure pooling this rule now forbids; state the direction and the named cases, not the percentage. Druggability may not carry a not_tractable or insufficient_evidence verdict on its own.",
+      "_do_not_max": "max-over-pockets measures pocket count: r(n_pockets, max druggability) = 0.702 at D=1.6, and that path contaminated 70% of the hard class of the retracted calibration set. site_pocket_selected_by = max_druggability_no_ligand_site must never produce a reportable value."
     },
     "site_pocket_rank": {
-      "_note": "PRANK rank is a SITE-FINDING aid reported beside fpocket rank, never a quality value. n=70 ligand-anchored: promotes 79%, demotes 1% (6OIM D=1.6, the one KRAS negative, kept visible). Median rank 5 -> 1, top-3 recall 37% -> 91%. As a druggability classifier its rank is INVERTED, AUC 0.25.",
+      "_note": "THE REPORTABLE FORM OF DRUGGABILITY. 'rank 1 of 30 in 6OIM' is the claim; the value may sit beside it, the rank is what is asserted. fpocket rank and PRANK rank are TWO WITHIN-STRUCTURE ORDERINGS on the same footing - report both, never replace one with the other, and report a disagreement as a disagreement. PRANK at n=70 ligand-anchored: promotes 79%, demotes 1% (6OIM D=1.6, the one KRAS negative, kept visible). Median rank 5 -> 1, top-3 recall 37% -> 91%. As a CROSS-target druggability classifier its rank is INVERTED, AUC 0.25 - which is the same finding, measured with an operation neither ordering supports.",
       "fpocket": null,
       "prank": null,
-      "n_pockets": null
+      "n_pockets": null,
+      "structure_pdb_id": null
     },
     "ensemble_consensus_fraction": {
       "_note": "Published criterion: ~70% of structures showing a strong hot spot, ~50% meeting all criteria. One good conformer out of five is a negative result.",
