@@ -1,0 +1,240 @@
+{
+  "_note": {
+    "what_this_is": "A curated lookup table mapping protein-complex and pathway names to UniProt accessions. It is NOT an inference engine and complex_resolve.py must never treat it as one. Membership of a complex is a claim about experiment, not something derivable from a name.",
+    "curated": "Every entry is added by hand. Nothing here is generated, predicted, or inferred from string similarity. If a complex is not in this file, the resolver returns empty with a reason -- absence is a correct answer and a guessed membership list is a fabrication that reads exactly like a retrieved one.",
+    "source_required": "Every entry and every component carries `source`: a citable reference for the membership claim, and where possible a structure that shows the subunits together. A component whose source cannot be produced is removed from the table, not left unsourced.",
+    "sources_are_not_verified_by_the_tool": "The resolver verifies ACCESSIONS against Paperclip at run time. It does not and cannot verify citations. The citation is the curator's warrant; a reader who doubts a membership claim must check the reference, not the tool output.",
+    "absent_complex_returns_empty": "No fuzzy fallback, no nearest-neighbour substitution, no 'probably means'. A name with no exact entry returns either a PROPOSAL (partial match, requires human confirmation, never an answer) or an empty result with a reason.",
+    "pathway_is_not_a_complex": "Entries with kind 'pathway' name a signalling route, not a physical assembly. They carry `candidates`, never `components`, and can never resolve to one complex or one accession. This distinction is the point of the file: 'TLR/IL-1R signaling' is in here precisely so that it fails loudly rather than quietly resolving to whichever receptor happens to be listed first.",
+    "accessions_retrieved_not_recalled": "All accessions below were returned by `paperclip sql -s proteins` against uniprot_v.proteins on 2026-08-15, filtered to organism = 'Homo sapiens'. None was written from memory.",
+    "not_retrieved": [
+      "IL1RAP (IL-1 receptor accessory protein) -- the query timed out on three attempts and no accession was returned. It is therefore ABSENT from this table. A repeated timeout is a failed retrieval, not evidence the protein is missing from UniProt; do not read its absence here as a biological claim, and do not fill it in from memory."
+    ],
+    "organism": "All entries are human (Homo sapiens). Orthologues are not interchangeable and must be curated as separate entries.",
+    "schema": {
+      "kind": "complex | pathway",
+      "complex": "carries `components` -- proteins with evidence of co-assembly",
+      "pathway": "carries `candidates` -- proteins on the route, with no principled way to pick one",
+      "role": "function within the assembly where a source states it; null where it does not",
+      "membership": "core (present in the cited structure/assembly) | receptor_proximal (associates at the receptor, outside the cited core) | proposed (reported as a component but not in the cited structure)"
+    }
+  },
+  "schema_version": "1.0",
+  "retrieved_at": "2026-08-15",
+  "retrieval_tool": "paperclip sql -s proteins (uniprot_v.proteins)",
+  "entries": [
+    {
+      "id": "myddosome",
+      "name": "Myddosome",
+      "kind": "complex",
+      "organism": "Homo sapiens",
+      "aliases": [
+        "MyD88 signalosome",
+        "Myddosome complex",
+        "MyD88 signalosome complex",
+        "MyD88-IRAK4-IRAK2 complex",
+        "MyD88 IRAK4 IRAK2 complex"
+      ],
+      "source": {
+        "citation": "Lin SC, Lo YC, Wu H. Helical assembly in the MyD88-IRAK4-IRAK2 complex in TLR/IL-1R signalling. Nature 2010;465:885-890.",
+        "doi": "10.1038/nature09121",
+        "structure": "PDB 3MOP",
+        "note": "Crystal structure of the death-domain assembly: 6 MyD88, 4 IRAK4, 4 IRAK2. This is the membership evidence for the three core subunits; it does not contain IRAK1."
+      },
+      "components": [
+        {
+          "gene_symbol": "MYD88",
+          "accession": "Q99836",
+          "protein_name": "Myeloid differentiation primary response protein MyD88",
+          "role": "adaptor",
+          "membership": "core",
+          "source": "Lin et al., Nature 2010 (PDB 3MOP) -- 6 copies in the assembled death-domain helix",
+          "note": "The nucleating adaptor. Bridges the receptor TIR domain to the IRAK kinases; the interaction a PPI-disruption strategy would target sits here."
+        },
+        {
+          "gene_symbol": "IRAK4",
+          "accession": "Q9NWZ3",
+          "protein_name": "Interleukin-1 receptor-associated kinase 4",
+          "role": "kinase",
+          "membership": "core",
+          "source": "Lin et al., Nature 2010 (PDB 3MOP) -- 4 copies; catalytic activity per Motshwene et al., J Biol Chem 2009;284:25404-25411 (doi:10.1074/jbc.M109.022392)",
+          "note": "Catalytically active Ser/Thr kinase AND a scaffold. Both functions are real and a small molecule that blocks the ATP site does not necessarily block the scaffolding role."
+        },
+        {
+          "gene_symbol": "IRAK1",
+          "accession": "P51617",
+          "protein_name": "Interleukin-1 receptor-associated kinase 1",
+          "role": "kinase",
+          "membership": "proposed",
+          "source": "Motshwene PG et al., J Biol Chem 2009;284:25404-25411 (doi:10.1074/jbc.M109.022392); Gay NJ et al., Nat Rev Immunol 2014;14:546-558 (doi:10.1038/nri3713)",
+          "note": "Catalytically active, recruited to and phosphorylated by IRAK4, but NOT present in the 3MOP structure -- IRAK2 occupies that position there. Membership is 'proposed' for that reason. IRAK1 and IRAK2 are reported as alternative occupants of the same layer rather than as simultaneous subunits; do not report a stoichiometry that includes both."
+        },
+        {
+          "gene_symbol": "IRAK2",
+          "accession": "O43187",
+          "protein_name": "Interleukin-1 receptor-associated kinase-like 2",
+          "role": "pseudokinase",
+          "membership": "core",
+          "source": "Lin et al., Nature 2010 (PDB 3MOP) -- 4 copies; pseudokinase assignment per Janssens S, Beyaert R. Mol Cell 2003;11:293-302",
+          "note": "Catalytically inactive. It is in the complex as a scaffold, so an ATP-competitive small molecule has no mechanism against it -- relevant to which subunit a tractability review can actually address."
+        },
+        {
+          "gene_symbol": "TIRAP",
+          "accession": "P58753",
+          "protein_name": "Toll/interleukin-1 receptor domain-containing adapter protein",
+          "role": "bridging adaptor",
+          "membership": "receptor_proximal",
+          "source": "Gay NJ, Symmons MF, Gangloff M, Bryant CE. Assembly and localization of Toll-like receptor signalling complexes. Nat Rev Immunol 2014;14:546-558 (doi:10.1038/nri3713)",
+          "note": "Also called Mal. Recruits MyD88 to TLR2 and TLR4 at the membrane. It is not a subunit of the 3MOP death-domain core, which is why membership is 'receptor_proximal' and not 'core'. Counting it as a Myddosome subunit overstates the structural evidence."
+        }
+      ]
+    },
+    {
+      "id": "tlr_il1r_signaling",
+      "name": "TLR/IL-1R signaling",
+      "kind": "pathway",
+      "organism": "Homo sapiens",
+      "aliases": [
+        "TLR/IL-1R signalling",
+        "TLR IL-1R signaling",
+        "TLR/IL-1R signaling pathway",
+        "Toll-like receptor/IL-1 receptor signaling",
+        "TIR signalling"
+      ],
+      "not_a_complex_because": "This names a signalling ROUTE, not a physical assembly. The route is entered through any of several receptors -- TLR4 and IL1R1 among them -- which do not co-assemble with each other and are not interchangeable. Nothing in the name selects one, and no rule can: TLR4 and IL1R1 are equally consistent with the phrase. Picking either would be a fabrication dressed as a resolution.",
+      "what_to_do_instead": "Return the full candidate list flagged as a pathway and hand the choice back. If an upstream evidence graph is the source, issue an expand_node / re-query for the specific receptor rather than choosing here. A resolved single accession is NOT an acceptable output for this entry under any circumstances.",
+      "source": {
+        "citation": "O'Neill LAJ, Bowie AG. The family of five: TIR-domain-containing adaptors in Toll-like receptor signalling. Nat Rev Immunol 2007;7:353-364.",
+        "doi": "10.1038/nri2079",
+        "note": "Cited for the shape of the pathway -- multiple receptors converging on shared TIR adaptors -- which is the reason this entry cannot collapse to one protein."
+      },
+      "candidates": [
+        {
+          "gene_symbol": "TLR4",
+          "accession": "O00206",
+          "protein_name": "Toll-like receptor 4",
+          "role": "receptor (entry point)",
+          "source": "O'Neill & Bowie, Nat Rev Immunol 2007",
+          "note": "One of several possible receptors. Listed first by accession sort order, which carries no meaning -- do not read list position as preference."
+        },
+        {
+          "gene_symbol": "TLR2",
+          "accession": "O60603",
+          "protein_name": "Toll-like receptor 2",
+          "role": "receptor (entry point)",
+          "source": "O'Neill & Bowie, Nat Rev Immunol 2007",
+          "note": "Included to make the point that the receptor set is open, not a choice between two."
+        },
+        {
+          "gene_symbol": "IL1R1",
+          "accession": "P14778",
+          "protein_name": "Interleukin-1 receptor type 1",
+          "role": "receptor (entry point)",
+          "source": "O'Neill & Bowie, Nat Rev Immunol 2007",
+          "note": "The IL-1R arm. Equally consistent with the phrase as TLR4; this is the ambiguity, not a tie to break."
+        },
+        {
+          "gene_symbol": "TIRAP",
+          "accession": "P58753",
+          "protein_name": "Toll/interleukin-1 receptor domain-containing adapter protein",
+          "role": "bridging adaptor",
+          "source": "Gay NJ et al., Nat Rev Immunol 2014;14:546-558",
+          "note": "Shared transducer, TLR2/TLR4 arm only -- not used by IL1R1, so its presence does not disambiguate the receptor either."
+        },
+        {
+          "gene_symbol": "MYD88",
+          "accession": "Q99836",
+          "protein_name": "Myeloid differentiation primary response protein MyD88",
+          "role": "adaptor (shared transducer)",
+          "source": "O'Neill & Bowie, Nat Rev Immunol 2007",
+          "note": "Common to both arms. Being downstream of every candidate receptor, it identifies the pathway but does not identify which receptor the evidence meant."
+        },
+        {
+          "gene_symbol": "IRAK4",
+          "accession": "Q9NWZ3",
+          "protein_name": "Interleukin-1 receptor-associated kinase 4",
+          "role": "kinase (shared transducer)",
+          "source": "Motshwene PG et al., J Biol Chem 2009;284:25404-25411",
+          "note": "Shared node downstream of both arms."
+        }
+      ]
+    },
+    {
+      "id": "tlr_myd88_nfkb_axis",
+      "name": "TLR/MyD88/NF-kB signalling axis",
+      "kind": "pathway",
+      "organism": "Homo sapiens",
+      "aliases": [
+        "TLR/MyD88/NF-kB signaling axis",
+        "TLR MYD88 mediated NF-kB pathway",
+        "TLR/MyD88/NF-kappaB axis",
+        "TLR MyD88 NF-kB axis"
+      ],
+      "not_a_complex_because": "Three-way axis names naming a receptor family, one adaptor, and a transcription factor that is itself a family of dimers. Two of the three ends are unresolvable: 'TLR' is a family of at least ten human receptors, and 'NF-kB' is a dimer drawn from a set of subunits (RELA and NFKB1 among them), not a single protein. Only the MyD88 waypoint resolves, and one resolved waypoint out of three does not make the phrase a complex.",
+      "what_to_do_instead": "Return the candidate list flagged as a pathway. The one unambiguous member (MYD88, Q99836) may be reported as such, but reporting it as THE resolution of the axis silently discards the TLR and NF-kB ends of the phrase.",
+      "source": {
+        "citation": "Gay NJ, Symmons MF, Gangloff M, Bryant CE. Assembly and localization of Toll-like receptor signalling complexes. Nat Rev Immunol 2014;14:546-558.",
+        "doi": "10.1038/nri3713",
+        "note": "Cited for the receptor-to-adaptor-to-transcription-factor route. Membership of NF-kB dimers is a separate claim with a separate source and is not asserted here."
+      },
+      "candidates": [
+        {
+          "gene_symbol": "TLR4",
+          "accession": "O00206",
+          "protein_name": "Toll-like receptor 4",
+          "role": "receptor (family member; 'TLR' does not select one)",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "Representative only. The phrase says 'TLR', which is a family."
+        },
+        {
+          "gene_symbol": "TLR2",
+          "accession": "O60603",
+          "protein_name": "Toll-like receptor 2",
+          "role": "receptor (family member; 'TLR' does not select one)",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "Representative only."
+        },
+        {
+          "gene_symbol": "MYD88",
+          "accession": "Q99836",
+          "protein_name": "Myeloid differentiation primary response protein MyD88",
+          "role": "adaptor",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "The one unambiguous member of this phrase. Unambiguous is not the same as sufficient."
+        },
+        {
+          "gene_symbol": "IRAK4",
+          "accession": "Q9NWZ3",
+          "protein_name": "Interleukin-1 receptor-associated kinase 4",
+          "role": "kinase",
+          "source": "Motshwene PG et al., J Biol Chem 2009;284:25404-25411",
+          "note": "Implied waypoint between MyD88 and NF-kB; not named in the phrase."
+        },
+        {
+          "gene_symbol": "TRAF6",
+          "accession": "Q9Y4K3",
+          "protein_name": "TNF receptor-associated factor 6",
+          "role": "E3 ubiquitin ligase (downstream transducer)",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "Implied waypoint; not named in the phrase."
+        },
+        {
+          "gene_symbol": "NFKB1",
+          "accession": "P19838",
+          "protein_name": "Nuclear factor NF-kappa-B p105 subunit",
+          "role": "transcription factor subunit ('NF-kB' is a dimer, not a protein)",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "A candidate subunit of the NF-kB end of the axis. Reporting this accession as 'NF-kB' is the error this entry exists to prevent."
+        },
+        {
+          "gene_symbol": "RELA",
+          "accession": "Q04206",
+          "protein_name": "Transcription factor p65",
+          "role": "transcription factor subunit ('NF-kB' is a dimer, not a protein)",
+          "source": "Gay et al., Nat Rev Immunol 2014",
+          "note": "The other commonly meant subunit. Which dimer is meant is not stated by the phrase."
+        }
+      ]
+    }
+  ]
+}

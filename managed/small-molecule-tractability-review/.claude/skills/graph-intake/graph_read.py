@@ -6,6 +6,10 @@ each link's `basis`, and — where the verb is unrecognised — an adjudication
 packet carrying every deterministic signal the graph offers. Reading a mechanism
 out of a quote is judgment and stays with the agent; see SKILL.md.
 
+Also proposes gene-symbol candidates found inside thing names, because a real
+upstream graph can carry its proteins only there. Those are PROPOSALS for
+UniProt verification, never nominations.
+
 Nothing here decides tractability, ranks targets, or picks an accession.
 
 Usage:
@@ -65,6 +69,69 @@ DOWNSTREAM_TERMS = [
 DIRECT_CONTEXTS = ["biochemical", "cell-free", "cell free", "purified", "in vitro binding"]
 
 NS_WORD = re.compile(r"[^a-z0-9]+")
+
+# --- Second nomination route: symbols buried in entity names -----------------
+#
+# The kind-based route needs a `protein` or `gene` node. A real upstream graph
+# may have none: "IRAK4 inhibition" is typed `small_molecule` because it names an
+# intervention, and the protein exists only as a substring of that name.
+#
+# This route PROPOSES ONLY. A regex cannot know that a token is a gene, so every
+# symbol below is emitted for verification against uniprot_v.proteins (SKILL.md
+# step 4) and nothing here enters `nominations`. The script stays stdlib-only and
+# offline by construction -- it must not call paperclip.
+
+# One token, 2-10 chars, alphanumeric with internal hyphens.
+SYMBOL_SHAPE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$")
+
+# Compound codes are symbol-shaped (ST2825, PF-06650833, KIC-0101). No human gene
+# symbol carries a run of four digits, so that run separates the two.
+COMPOUND_CODE = re.compile(r"\d{4,}")
+
+# Separators that join DISTINCT symbols. Hyphen is NOT one of them: NF-kB, IL-6
+# and IRAK-4 are single symbols that happen to carry a hyphen.
+SYMBOL_SEPARATORS = re.compile(r"[/,+&]")
+
+TRIM = " \t\"'()[]{}.,;:!?"
+
+# The action word sitting next to a symbol seeds `interaction_to_disrupt`:
+# "MyD88 dimerization inhibition" implies disrupting a dimerization interface,
+# "IRAK4 inhibition" implies catalytic function. Carried verbatim -- turning it
+# into a mechanism is the agent's call, not this script's.
+ACTION_WORDS = {
+    "inhibition", "inhibitor", "inhibitors", "inhibiting", "inhibited",
+    "blockade", "blocking", "blocker", "block",
+    "knockdown", "knockout", "silencing", "depletion", "ablation", "deletion",
+    "degradation", "degrader", "degrading",
+    "agonism", "agonist", "antagonism", "antagonist",
+    "dimerization", "dimerisation", "oligomerization", "oligomerisation",
+    "activation", "activator", "stabilization", "stabilisation",
+    "engagement", "occupancy", "disruption", "suppression", "modulation",
+    "deficiency", "loss",
+}
+
+# Stop-list: symbol-SHAPED tokens that are never gene symbols -- disease and
+# tissue abbreviations, cell lines, reagents, assays, clinical endpoints, plus
+# the action vocabulary itself. Matched case-insensitively, so an extractor that
+# writes AXIS or SIGNALLING in caps still proposes nothing.
+#
+# Deliberately NOT here: TNF, TLR, IL-6 and friends. They are real symbols; the
+# UniProt lookup, not this set, decides whether they resolve.
+NOT_SYMBOLS = {
+    "ra", "oa", "sle", "ibd", "copd", "gvhd", "as", "ms", "cd",
+    "acr20", "acr50", "acr70", "das28", "pasi", "sdai", "cdai", "rct",
+    "fls", "sf", "sfs", "pbmc", "pbmcs", "thp1", "thp", "hek", "hek293",
+    "hela", "jurkat", "u937", "k562", "cho", "mcf7", "a549", "raw264",
+    "bmdm", "huvec", "ipsc",
+    "lps", "pma", "cfa", "atp", "adp", "gtp", "dmso", "pbs", "fbs",
+    "dna", "rna", "mrna", "sirna", "shrna", "crispr", "cas9",
+    "ic50", "ec50", "kd", "ki", "elisa", "facs", "pcr", "qpcr", "nmr",
+    "hplc", "lcms", "msd", "spr", "itc", "auc", "cmax",
+    "wt", "ko", "usa", "uk", "eu", "fda", "ema", "nih",
+    "axis", "pathway", "signalling", "signaling", "inflammation", "disease",
+    "protein", "kinase", "receptor", "complex", "cells", "cell",
+}
+NOT_SYMBOLS |= ACTION_WORDS
 
 
 def index(graph):
@@ -285,10 +352,193 @@ def nominate(graph, idx):
     return nominated, rejected, adjudicate
 
 
+def symbol_shaped(token):
+    """Shape test only. Says nothing about whether the token names a gene."""
+    if not (2 <= len(token) <= 10):
+        return False
+    if not SYMBOL_SHAPE.match(token):
+        return False
+    if COMPOUND_CODE.search(token):
+        return False
+    # Two capitals is the floor. One is ordinary prose capitalisation (Rho,
+    # Toll-like, Matrigel); symbols carry their case (MyD88, NF-kB, IRAK4).
+    if sum(1 for c in token if c.isupper()) < 2:
+        return False
+    return token.lower() not in NOT_SYMBOLS
+
+
+def symbol_key(symbol):
+    """Dedupe key only. IRAK-4 and IRAK4 are one candidate; the spelling the
+    extractor used is kept verbatim on every mention."""
+    return symbol.upper().replace("-", "")
+
+
+def query_forms(symbol):
+    """Spellings to put in the SQL `IN` list, in order. Not a rewrite of the
+    symbol -- each form is a separate lookup that may return nothing."""
+    forms = []
+    for form in (symbol, symbol.upper(), symbol.upper().replace("-", "")):
+        if form not in forms:
+            forms.append(form)
+    return forms
+
+
+def action_near(tokens, i):
+    """The action word adjacent to tokens[i], as (text, position).
+
+    Suffix first ("MyD88 dimerization inhibition"), then prefix, optionally
+    across "of" ("knockdown of MYD88"). Contiguous runs only, so an action word
+    elsewhere in the phrase is not attached to this symbol.
+    """
+    after = []
+    j = i + 1
+    while j < len(tokens) and tokens[j].strip(TRIM).lower() in ACTION_WORDS:
+        after.append(tokens[j].strip(TRIM))
+        j += 1
+    if after:
+        return " ".join(after), "suffix"
+
+    j = i - 1
+    if j >= 0 and tokens[j].strip(TRIM).lower() == "of":
+        j -= 1
+    before = []
+    while j >= 0 and tokens[j].strip(TRIM).lower() in ACTION_WORDS:
+        before.insert(0, tokens[j].strip(TRIM))
+        j -= 1
+    if before:
+        return " ".join(before), "prefix"
+    return None, None
+
+
+def scan_phrase(phrase):
+    """Every symbol in one verbatim string, with its adjacent action word.
+
+    A multi-symbol phrase returns EVERY symbol. "TLR/MyD88/NF-kB signalling
+    axis" is three candidates; collapsing it to one is the failure this route
+    exists to avoid.
+    """
+    tokens = phrase.split()
+    hits, seen = [], set()
+    for i, token in enumerate(tokens):
+        for part in SYMBOL_SEPARATORS.split(token):
+            part = part.strip(TRIM)
+            if not symbol_shaped(part) or symbol_key(part) in seen:
+                continue
+            seen.add(symbol_key(part))
+            action, position = action_near(tokens, i)
+            hits.append({"symbol": part, "action": action,
+                         "action_position": position})
+
+    spellings = [h["symbol"] for h in hits]
+    for hit in hits:
+        hit["co_occurring_symbols"] = [
+            s for s in spellings if symbol_key(s) != symbol_key(hit["symbol"])
+        ]
+    return hits
+
+
+def thing_symbols(thing):
+    """Scan `name` and every alias, whatever the thing's `kind`. Kind is exactly
+    what this route cannot trust -- the target may be typed small_molecule."""
+    fields = [("name", thing.get("name"))]
+    fields += [("aliases[%d]" % n, a)
+               for n, a in enumerate(thing.get("aliases") or [])]
+
+    found, order = {}, []
+    for field, phrase in fields:
+        if not phrase:
+            continue
+        for hit in scan_phrase(phrase):
+            mention = {
+                "as_written": hit["symbol"],
+                "field": field,
+                # Whole-field means the extractor gave the symbol; parsed-out
+                # means this regex inferred it from a longer phrase.
+                "whole_field": hit["symbol"] == phrase.strip(TRIM),
+                "phrase": phrase,
+                "action": hit["action"],
+                "action_position": hit["action_position"],
+                "co_occurring_symbols": hit["co_occurring_symbols"],
+            }
+            key = symbol_key(hit["symbol"])
+            if key not in found:
+                found[key] = {"symbol": hit["symbol"], "mentions": []}
+                order.append(key)
+            found[key]["mentions"].append(mention)
+    return [found[k] for k in order]
+
+
+def symbol_candidates(idx, nominated_ids, only=None):
+    """Symbols proposed from entity names, for UniProt verification.
+
+    Never a nomination and never asserted. A candidate that resolves to no row
+    is the lookup answering -- "NF-kB" names a complex, not a gene, so it is
+    EXPECTED to fail and that failure is the result, not an error.
+    """
+    candidates = []
+    for thing in idx["things"].values():
+        if only and thing["id"] != only:
+            continue
+        for entry in thing_symbols(thing):
+            mentions = entry["mentions"]
+            # An action word is the point of this route, so a mention carrying
+            # one leads even if a bare mention came first.
+            lead = next((m for m in mentions if m["action"]), mentions[0])
+            co = []
+            for m in mentions:
+                for s in m["co_occurring_symbols"]:
+                    if symbol_key(s) not in {symbol_key(x) for x in co}:
+                        co.append(s)
+            candidates.append({
+                "symbol": entry["symbol"],
+                "query_forms": query_forms(entry["symbol"]),
+                "action": lead["action"],
+                "action_position": lead["action_position"],
+                "thing": thing["id"],
+                "thing_kind": thing.get("kind"),
+                "thing_name": thing.get("name"),
+                "already_nominated": thing["id"] in nominated_ids,
+                "field": lead["field"],
+                "whole_field": lead["whole_field"],
+                "phrase": lead["phrase"],
+                # True whenever the symbol shared a phrase with another symbol.
+                # The agent resolves which one the dossier is about; picking one
+                # here would be a guess.
+                "ambiguous": bool(co),
+                "co_occurring_symbols": co,
+                "other_mentions": [m for m in mentions if m is not lead],
+                # Filled by the agent from the SQL. Left null on purpose.
+                "verified": None,
+                "uniprot_accession": None,
+            })
+
+    return {
+        "note": (
+            "PROPOSED, NOT CONFIRMED. Regex over thing `name` and `aliases`, run "
+            "because a graph can carry its proteins only inside intervention "
+            "names -- 'IRAK4 inhibition' is typed small_molecule. Nothing here is "
+            "a nomination. Verify every symbol against uniprot_v.proteins before "
+            "using it; a symbol naming a complex rather than a gene (NF-kB) is "
+            "expected to return no row, and that is the answer, not a failure."
+        ),
+        "verify_with": (
+            "SELECT accession, gene_name, protein_name, organism, sequence_length "
+            "FROM uniprot_v.proteins WHERE gene_name IN (<query_forms>) "
+            "AND organism = 'Homo sapiens'"
+        ),
+        "ambiguous_things": sorted({c["thing"] for c in candidates
+                                    if c["ambiguous"]}),
+        "candidates": candidates,
+    }
+
+
 def build(graph, only=None):
     idx = index(graph)
     things = idx["things"]
     nominated, rejected, adjudicate = nominate(graph, idx)
+    # Captured before the --thing filter: `already_nominated` reports the graph,
+    # not the slice being printed.
+    nominated_ids = set(nominated)
 
     if only:
         nominated = {k: v for k, v in nominated.items() if k == only}
@@ -311,6 +561,27 @@ def build(graph, only=None):
             "mechanism_hypothesis": None,
             "evidence": neighbourhood(tid, idx),
         })
+
+    # `links` summarises `findings`, but nothing guarantees every finding is
+    # summarised BY one. On the real g_1a4f, f6 is referenced by no link and is
+    # also the graph's only is_own_result: false row -- so a link-walking intake
+    # sees 11 of 12 findings and never sees the one background-flavoured item.
+    linked = set()
+    for l in idx["links"].values():
+        for arr in ("yes", "no", "no_effect"):
+            linked |= set(l.get(arr) or [])
+    orphans = [
+        {
+            "finding": f["id"],
+            "relation": f"{things.get(f.get('from'), {}).get('name')} "
+                        f"{f.get('how')} {things.get(f.get('to'), {}).get('name')}",
+            "says": f.get("says"),
+            "quote": f.get("quote"),
+            "is_own_result": f.get("is_own_result"),
+            "why": "referenced by no link -- invisible to link traversal, read it directly",
+        }
+        for fid, f in idx["findings"].items() if fid not in linked
+    ]
 
     coverage = graph.get("coverage", {})
     status = graph.get("status")
@@ -346,12 +617,17 @@ def build(graph, only=None):
             else None
         ),
         "retracted_papers": retracted,
+        "orphan_findings": orphans,
         "nominations": out,
         "rejected": [
             {"thing": tid, "name": things.get(tid, {}).get("name"), "why": why}
             for tid, why in sorted(rejected.items())
         ],
         "needs_adjudication": adjudicate,
+        # Second route. Independent of `nominations` -- it neither adds to nor
+        # subtracts from them, and a graph with entity nodes still nominates on
+        # kind exactly as before.
+        "symbol_candidates": symbol_candidates(idx, nominated_ids, only),
     }
 
 

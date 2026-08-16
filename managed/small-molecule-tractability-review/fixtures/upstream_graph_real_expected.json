@@ -1,0 +1,376 @@
+{
+  "_note": "Grading key for graph-intake run against upstream_graph_real.json — the REAL first output of the upstream mapper for the IRAK4/synovial-fibroblast question. It carries no _fixture flag because nobody on this side authored it. That is what makes it the most important key in the set: upstream_graph.json and the two edgecase fixtures were written to exercise rules we already knew about, so they cannot surprise us. This one can, and it did. Every claim below was read out of the graph file or produced by running .claude/skills/graph-intake/graph_read.py against it; nothing is recalled.",
+  "_source_graph": "upstream_graph_real.json (g_1a4f, round 2, schema_version 1.1, status ok, generated_at 2026-08-15T17:30:00Z)",
+  "_accessions_retrieved": "2026-08-15 via paperclip uniprot_v.proteins, organism = 'Homo sapiens'. Not recalled. Retrieved: IRAK4 Q9NWZ3 (Interleukin-1 receptor-associated kinase 4), MYD88 Q99836 (Myeloid differentiation primary response protein MyD88), TLR4 O00206 (Toll-like receptor 4), NFKB1 P19838 (Nuclear factor NF-kappa-B p105 subunit), RELA Q04206 (Transcription factor p65). Retrieved as zero rows, i.e. NOT valid gene symbols: 'NF-kB', 'NF-kappaB', 'NFKB', 'TLR'.",
+  "_helper_run": "python3 .claude/skills/graph-intake/graph_read.py fixtures/upstream_graph_real.json was executed on 2026-08-15. Its output is quoted in expected_helper_output below rather than predicted.",
+
+  "graph_contents_as_read": {
+    "things": {
+      "count": 5,
+      "by_kind": {
+        "small_molecule": 2,
+        "process": 3,
+        "protein": 0,
+        "gene": 0
+      },
+      "rows": [
+        {"id": "t1", "name": "IRAK4 inhibition", "kind": "small_molecule", "mentions": 1, "aliases": ["IRAK4 inhibitor", "KIC-0101", "PF-06650833"]},
+        {"id": "t2", "name": "myeloid inflammatory signalling", "kind": "process", "mentions": 1, "aliases": ["THP1 NF-kB", "monocyte cytokine release"]},
+        {"id": "t3", "name": "synovial fibroblast driven inflammation", "kind": "process", "mentions": 1, "aliases": ["FLS", "RA SF", "fibroblast-like synoviocytes"]},
+        {"id": "t4", "name": "MyD88 dimerization inhibition", "kind": "small_molecule", "mentions": 1, "aliases": ["ST2825"]},
+        {"id": "t5", "name": "TLR/MyD88/NF-kB signalling axis", "kind": "process", "mentions": 1, "aliases": ["TLR MYD88 mediated NF-kB pathway", "myddosome"]}
+      ],
+      "why_it_matters": "Zero nodes of kind 'protein' and zero of kind 'gene'. The nomination rule in SKILL.md step 1 requires kind in {protein, gene} as its first, non-negotiable half. On this graph that half is unsatisfiable for every node. See expected_headline_result."
+    },
+    "links": {
+      "count": 6,
+      "verbs_used": ["blocks", "suppresses", "drives"],
+      "basis_values": {"primary": 6, "mixed": 0, "hedged_only": 0, "background_only": 0},
+      "rows": [
+        {"id": "L1", "from": "t1", "how": "blocks", "to": "t5", "basis": "primary", "state": "single_source", "overall": 0.4, "yes": ["f5"], "no": [], "no_effect": [], "changed_in_round": 1},
+        {"id": "L2", "from": "t1", "how": "suppresses", "to": "t2", "basis": "primary", "state": "agreed", "overall": 0.6, "yes": ["f1", "f2"], "no": [], "no_effect": [], "changed_in_round": 1},
+        {"id": "L3", "from": "t1", "how": "suppresses", "to": "t3", "basis": "primary", "state": "disagreed", "overall": 0.5, "yes": ["n_f1", "n_f2", "n_f4"], "no": ["n_f3"], "no_effect": [], "changed_in_round": 2, "why": "conditions differ — stated verbatim in the graph as an RA-FLS stimulus/readout mismatch"},
+        {"id": "L4", "from": "t4", "how": "blocks", "to": "t5", "basis": "primary", "state": "single_source", "overall": 0.4, "yes": ["f7"], "no": [], "no_effect": [], "changed_in_round": 2},
+        {"id": "L5", "from": "t4", "how": "suppresses", "to": "t3", "basis": "primary", "state": "agreed", "overall": 0.6, "yes": ["f3", "f4"], "no": [], "no_effect": [], "changed_in_round": 2},
+        {"id": "L6", "from": "t5", "how": "drives", "to": "t3", "basis": "primary", "state": "single_source", "overall": 0.42, "yes": ["n_f5"], "no": [], "no_effect": [], "changed_in_round": 2}
+      ],
+      "why_it_matters": [
+        "All six links are basis 'primary'. The three-state basis rule (SKILL.md step 3) therefore never fires on this graph — there is no background_only or hedged_only link to record-but-not-act-on, and so no basis-driven resolve_link ask. A run that reports issuing resolve_link 'because the mechanism is background_only' has hallucinated a basis value.",
+        "Every no/no_effect array is empty except L3.no = ['n_f3']. There are zero no_effect findings in the whole graph, so failure mode 10 is not exercised here.",
+        "independence is 0.0 on all six links. Every link's evidence comes from a single paper: L1/L2 from p1, L3 from p3, L4/L5 from p2, L6 from p4. No claim in this graph is independently replicated."
+      ]
+    },
+    "findings": {
+      "count": 12,
+      "ids": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "n_f1", "n_f2", "n_f3", "n_f4", "n_f5"],
+      "says_yes": 11,
+      "says_no": 1,
+      "says_no_effect": 0,
+      "hedged_true": 0,
+      "is_own_result_false": ["f6"],
+      "orphan_findings": {
+        "ids": ["f6"],
+        "how_established": "Union of every links[].yes + links[].no + links[].no_effect array is 11 ids; findings[] holds 12. f6 appears in no link array.",
+        "why_it_matters": "f6 is the only is_own_result:false finding in the graph (confidence 0.5, section 'introduction', where = 'cited background, not measured in this paper'). It is also the only finding an intake that walks links rather than findings will never see. That is the graph's own version of the background_only hazard, arriving through a hole in the traversal rather than through a basis field. A run is expected to read findings[] directly, not only via links."
+      }
+    },
+    "papers": {
+      "count": 4,
+      "retracted": 0,
+      "is_preprint": 0,
+      "rows": [
+        {"id": "p1", "first_author": "Yoon", "year": 2022, "journal": "Acta Pharmaceutica Sinica B", "study_type": "test_tube", "pmid": "36970198"},
+        {"id": "p2", "first_author": "Ramirez-Perez", "year": 2023, "journal": "Arthritis Research & Therapy", "study_type": "test_tube", "pmid": "37749609"},
+        {"id": "p3", "first_author": "Winkler", "year": 2021, "journal": "Arthritis & Rheumatology", "study_type": "test_tube", "pmid": "34114369"},
+        {"id": "p4", "first_author": "Ebner", "year": 2022, "journal": "JCI Insight", "study_type": "animal", "pmid": "35801588"}
+      ],
+      "why_it_matters": "Three test_tube and one animal. There is no clinical study_type in this graph. p3's TITLE contains 'and in Humans Enrolled in a Randomized Clinical Trial', but every quote extracted from p3 (n_f1..n_f4) is RA fibroblast-like synoviocytes in vitro, and study_type is 'test_tube'. A run must not upgrade the evidence tier from a title string."
+    },
+    "gaps": {
+      "count": 3,
+      "rows": [
+        {"id": "g1", "missing": ["t1", "t4"], "implied_by": ["L3", "L5"], "note": "both connect to t3; no direct link reported", "confidence": 0.5, "searched_in_round": null},
+        {"id": "g2", "missing": ["t2", "t5"], "implied_by": ["L1", "L2"], "note": "both connect to t1; no direct link reported", "confidence": 0.4, "searched_in_round": null},
+        {"id": "g4", "missing": ["t2", "t3"], "implied_by": ["L2", "L3"], "note": "both connect to t1; no direct link reported", "confidence": 0.5, "searched_in_round": null}
+      ],
+      "g3_is_absent": "gaps[] holds g1, g2, g4 — there is no g3 — but rounds[1] records ask 'test_gap' against target 'g3' with outcome 'contradicted' and papers_added 2. Reading: g3 was tested in round 2, came back contradicted, and was consumed out of the open-gap list. A run must NOT issue test_gap on g3; it is not an open gap and re-asking it burns a round on a question already answered. The contradiction it produced is visible as L3.state = 'disagreed'.",
+      "why_it_matters": "All three open gaps have searched_in_round null — nobody has looked at any of them. But the gap half of the nomination rule is still inert here: g1's missing pair is two small_molecule nodes, g2's and g4's are process nodes. No gap in this graph names a protein or a gene. So both halves of the nomination rule fail independently, not just the kind check."
+    },
+    "coverage": {
+      "depth": "deep",
+      "found": 49,
+      "read": 6,
+      "used": 2,
+      "queries_run": 6,
+      "limits": {"max_papers": 50, "max_queries": 6},
+      "truncated": true,
+      "stop_reason": "queries_exhausted",
+      "no_quote_discarded": 0,
+      "figures_read": false,
+      "figures_skipped_reason": "text was decisive; Figure 2B would only confirm the stimulus split already stated in the Results text"
+    },
+    "rounds": [
+      {"n": 1, "ask": "new_question", "target": null, "depth": "standard", "outcome": "new_evidence", "papers_added": 2},
+      {"n": 2, "ask": "test_gap", "target": "g3", "depth": "deep", "outcome": "contradicted", "papers_added": 2}
+    ]
+  },
+
+  "expected_coverage_warning": {
+    "truncated": true,
+    "stop_reason": "queries_exhausted",
+    "depth": "deep",
+    "why_it_matters": "found 49, read 6, used 2. Six of forty-nine papers were opened. stop_reason is 'queries_exhausted', which means the run hit max_queries 6 — it did not run out of papers (read 6 against max_papers 50) and it did not finish. Of the five stop reasons only 'complete' means the literature was exhausted; the other four mean the run ran out of budget. Nothing in this graph establishes an absence. Every 'not stated' in the intake's output must be paired with an ask-back, never reported as a negative result.",
+    "coverage_is_honest": "The graph does not oversell itself: it reports the truncation, names the reason, and records figures_read false with a stated reason. no_quote_discarded is 0, so no finding was dropped for failing the verbatim-quote check. This is a thin but candid packet, and the intake should say so in exactly those terms rather than either trusting it or dismissing it.",
+    "used_vs_papers_discrepancy": {
+      "observed": "coverage.used is 2 but papers[] has 4 entries.",
+      "reading": "rounds[1].papers_added is 2, so 'used' most likely counts the papers used in the most recent round rather than cumulatively across the graph.",
+      "confidence": "UNCERTAIN. We did not verify this against SCHEMA.md. A run should not treat 'used: 2' as contradicting the 4-paper bibliography, and should not silently reconcile them either — flag it."
+    }
+  },
+
+  "expected_status": {
+    "status": "ok",
+    "why_it_matters": "status is ok|empty|partial|failed, and it must be quoted alongside the zero-nomination result. This graph is 'ok' — it did not fail, it is not empty, it is not partial. So the zero nominations below are a real property of a healthy graph, not an artefact of a broken upstream run. That distinction is the whole point of checking status first."
+  },
+
+  "expected_headline_result": {
+    "claim": "The entity-node assumption fails on the first real graph we ever received. Nominating via entity nodes returns NOTHING.",
+    "mechanism": "SKILL.md step 1 nominates a thing only if kind is 'protein' or 'gene'. upstream_graph_real.json has five things: two small_molecule and three process. It contains no protein node and no gene node. The gap half of the rule cannot rescue it either — g1 names two small_molecules, g2 and g4 name processes.",
+    "the_specific_miss": "t1 is typed 'small_molecule' and named 'IRAK4 inhibition'. That is a mechanism of action, not a molecule. Its aliases mix a class name ('IRAK4 inhibitor') with two actual compounds (KIC-0101, PF-06650833). The upstream extractor collapsed a target, a drug class and two distinct chemical entities into one node — and then typed the result as a molecule. t4 does the same thing: 'MyD88 dimerization inhibition', kind small_molecule, alias ST2825. Both nodes name our targets in plain text and neither is typed as one.",
+    "expected_helper_output": {
+      "nominations": [],
+      "needs_adjudication": [],
+      "rejected_count": 5,
+      "rejected_reasons_verbatim": [
+        "t1 IRAK4 inhibition — named in gap g1 but kind is 'small_molecule', not one of ['gene', 'protein']",
+        "t2 myeloid inflammatory signalling — reached only by downstream-effect edge L2 (suppresses) -- readout, not target; named in gap g2 but kind is 'process'; named in gap g4 but kind is 'process'",
+        "t3 synovial fibroblast driven inflammation — reached only by downstream-effect edge L3 (suppresses) -- readout, not target; reached only by downstream-effect edge L5 (suppresses) -- readout, not target; named in gap g4 but kind is 'process'",
+        "t4 MyD88 dimerization inhibition — named in gap g1 but kind is 'small_molecule', not one of ['gene', 'protein']",
+        "t5 TLR/MyD88/NF-kB signalling axis — direct-action edge L1 (blocks) but kind is 'process'; direct-action edge L4 (blocks) but kind is 'process'; named in gap g2 but kind is 'process'"
+      ],
+      "note": "This is real stdout from graph_read.py on 2026-08-15, not a prediction. rejected[] is doing all the work here, which is exactly why SKILL.md step 1 says rejected is not a log to skim."
+    },
+    "correct_behaviour": "Do not stop at zero. Recover symbol candidates from the node NAMES and ALIASES, then verify each candidate against UniProt before using it. 'IRAK4 inhibition' yields the candidate symbol IRAK4; 'MyD88 dimerization inhibition' plus its alias ST2825 yields MYD88. Verification is the load-bearing step: a symbol recovered from a name string is a hypothesis until uniprot_v.proteins returns a row for it. This is the same discipline as failure mode 3, applied one level earlier — there, a node name resolved to the wrong protein; here, node names are the only route to any protein at all.",
+    "what_this_is_not": "This is NOT permission to invent nodes. The recovered symbols are annotations on existing things (t1, t4), carrying those things' ids in provenance. The intake still does not write anything back into the graph, and it still does not promote a process node to a target."
+  },
+
+  "expected_nominations_from_entity_nodes": {
+    "count": 0,
+    "why": "No node of kind 'protein' or 'gene' exists, and no gap names one. Both halves of the rule fail. A run reporting any nomination sourced from an entity node has invented a node."
+  },
+
+  "expected_nominations_after_symbol_recovery": [
+    {
+      "thing": "t1",
+      "recovered_symbol": "IRAK4",
+      "recovered_from": "thing name 'IRAK4 inhibition'; corroborated by aliases 'IRAK4 inhibitor', 'PF-06650833', 'KIC-0101' and by finding claim text on f1, n_f1..n_f4",
+      "uniprot_accession": "Q9NWZ3",
+      "verified": "retrieved 2026-08-15 from uniprot_v.proteins: Q9NWZ3 | IRAK4 | Interleukin-1 receptor-associated kinase 4",
+      "disease_context": "rheumatoid arthritis",
+      "interaction_to_disrupt": null,
+      "interaction_to_disrupt_reasoning": "NO quote in this graph states what is inhibited. f1 is a reporter-assay method sentence, f2 is cytokine secretion, f5 is luciferase suppression, n_f1..n_f4 are cytokine and MMP release from RA FLS. None of them contains 'kinase activity', an IC50, a Kd, a binding measurement, or a biochemical/cell-free system. Per SKILL.md step 2, interaction_to_disrupt comes from the quote text, and here the quote text does not supply one.",
+      "interaction_to_disrupt_acceptable_variant": "A run MAY set 'kinase activity (catalytic function)' ONLY if it explicitly flags the derivation as name-based — from the node name 'IRAK4 inhibition' and the compound identities — and not quote-based. A run that sets it silently has committed failure mode 1 (reading the verb/name instead of the quote) with the name standing in for the verb.",
+      "mechanism_hypothesis": "unknown",
+      "mechanism_hypothesis_reasoning": "No quote says ATP-competitive, allosteric, or a residue range. Failure mode 5 applies directly: PF-06650833 and KIC-0101 are kinase inhibitors, and 'kinase inhibitor' does not imply orthosteric — deucravacitinib/TYK2 is the standing counterexample. 'unknown' is the correct output, and the dossier already handles it by scoring the biological assembly and recording the absence in tractability.caveat.",
+      "must_cite": ["f1", "f2", "f5", "n_f1", "n_f2", "n_f4"],
+      "must_record_not_act_on": ["n_f3"],
+      "must_state": [
+        "Every finding supporting t1 is a cellular readout — NF-kB reporter luciferase, IL-6/TNF-alpha secretion, MMP release. There is no target-engagement measurement anywhere in this graph, so this nomination has an accession and no mechanism.",
+        "L3 is state 'disagreed' and the disagreement is internal to ONE paper (p3): n_f2 says the inhibitor reduced cytokine and MMP release under TLR ligands, n_f3 says it did NOT inhibit IL-1-induced cytokines in RA FLS, n_f4 says it DID block IL-1-induced MMP induction. Same cells, same stimulus for n_f3 and n_f4, different readout. The split is readout-level, not compartment-level.",
+        "That directly bears on the graph's own question ('confined to the myeloid compartment?'). The honest answer from this graph is that the question is unresolved, and the reason it is unresolved is that the readout, not the compartment, is deciding. n_f4's own quote calls the IL-1beta MMP response 'the first response to IL-1β in nonhematopoietic cells we have found to be IRAK4 kinase dependent'.",
+        "n_f5 (mouse IRAK1-kinase-deficient synovial fibroblasts, p4) must NOT be cited in support of IRAK4/Q9NWZ3. It is a different paralog, a genetic rather than pharmacological perturbation, and a different species. The graph's own finding claim text flags it as 'adjacent evidence, not IRAK4 pharmacology'.",
+        "The two compounds folded into t1 — KIC-0101 (a dual IRAK4/PIM1 inhibitor, per p1's title) and PF-06650833 (IRAK4-selective, p3) — are not interchangeable. Evidence from a dual inhibitor does not cleanly attribute to IRAK4. This node conflates them and the intake should say so."
+      ],
+      "must_not": [
+        "set mechanism_hypothesis to anything other than 'unknown'",
+        "set interaction_to_disrupt from a quote — no quote supports one",
+        "cite n_f5 (IRAK1, mouse, genetic) as IRAK4 evidence",
+        "treat p3's title mention of a randomized clinical trial as clinical evidence; study_type is test_tube and every p3 quote is in vitro",
+        "report the myeloid-confinement question as answered in either direction"
+      ]
+    },
+    {
+      "thing": "t4",
+      "recovered_symbol": "MYD88",
+      "recovered_from": "thing name 'MyD88 dimerization inhibition'; corroborated by alias 'ST2825' and by quote f3 verbatim ('disrupting MyD88 dimerization by ST2825') and f7 verbatim ('Dimerization of the myeloid differentiation primary response 88 protein (MyD88)')",
+      "uniprot_accession": "Q99836",
+      "verified": "retrieved 2026-08-15 from uniprot_v.proteins: Q99836 | MYD88 | Myeloid differentiation primary response protein MyD88",
+      "disease_context": "rheumatoid arthritis",
+      "interaction_to_disrupt": "MyD88 homodimerization interface (oligomeric state)",
+      "interaction_to_disrupt_reasoning": "This is the genuinely different shape, and the reason both candidates must be carried rather than merged. Unlike t1, t4's quotes name what is being disrupted, verbatim and unhedged: f3 'the effect of disrupting MyD88 dimerization by ST2825', f7 'Dimerization of the ... MyD88 ... plays a pivotal role'. Per SKILL.md step 2's table this is the oligomeric-state shape — the TNF-alpha row — not catalytic function and not a named heterologous partner. MyD88 has no catalytic activity to inhibit, so the catalytic shape is not merely unsupported here, it is inapplicable.",
+      "interaction_to_disrupt_alternate_shape": "A run MAY additionally record the named-partner shape, since a MyD88 dimer is the nucleating step of the myddosome (t5 alias) and f7 asserts that role. Recording both shapes is correct per SKILL.md step 2 ('a target can have more than one'). Recording ONLY the named-partner shape and dropping the oligomeric one is a miss, because dimerization is what the quotes actually name.",
+      "mechanism_hypothesis": "unknown",
+      "mechanism_hypothesis_reasoning": "Naming an interface is not naming a site. No quote gives a residue range, a domain (TIR vs death domain), or a binding mode for ST2825. interaction_to_disrupt is populated; mechanism_hypothesis still is not. Keeping these two fields apart is the point of the pair — one says what to stop, the other says where to bind.",
+      "must_cite": ["f3", "f7", "f4"],
+      "must_record_not_act_on": [],
+      "must_state": [
+        "Both t4 links rest on a single paper, p2 (Ramirez-Perez 2023), independence 0.0. L4 is state 'single_source'. One paper, in vitro, no replication.",
+        "f4 ('The invasiveness of RA SFs in Matrigel matrices was measured in organoid cultures') is a methods quote establishing that the fibroblast readout had OA-SF and dermal-fibroblast controls. It supports assay quality; it says nothing about the interaction to disrupt.",
+        "MYD88 and IRAK4 are the two components the graph actually gives us of the myddosome that t5 names. Neither is present as a node."
+      ],
+      "must_not": [
+        "assign a catalytic interaction_to_disrupt — MyD88 is an adaptor with no enzymatic activity, and no quote claims one",
+        "set mechanism_hypothesis from the word 'dimerization'",
+        "merge this candidate with t1 into a single pathway-level nomination"
+      ]
+    }
+  ],
+
+  "expected_ambiguity": [
+    {
+      "thing": "t5",
+      "name": "TLR/MyD88/NF-kB signalling axis",
+      "kind": "process",
+      "aliases": ["TLR MYD88 mediated NF-kB pathway", "myddosome"],
+      "expected_behaviour": "MUST NOT resolve to one accession. Populate ambiguity with all candidates and leave uniprot_accession null. An unresolved target is a correct output; a confidently wrong one poisons every number downstream of it.",
+      "why_it_cannot_resolve": "The name proposes three symbols joined by slashes. It is a pathway, typed 'process', and per failure mode 7 a pathway has no sequence and cannot be handed to a structural step. The graph gives no way to choose among the three, and the correct output is the list, not a pick.",
+      "candidates_checked_against_uniprot_2026_08_15": [
+        {
+          "symbol_as_written_in_name": "TLR",
+          "verifies": false,
+          "retrieved": "gene_name = 'TLR' returned 0 rows",
+          "why": "'TLR' is a receptor family, not a gene. The graph's own findings name at least three different family members inside a single where string — n_f2's where reads 'RA FLS, TLR ligands Pam3Cys TLR1/2, LPS TLR4, flagellin TLR5, 100 nM'. So even within one finding the TLR in question is not singular.",
+          "nearest_verified_member": "TLR4 → O00206 (Toll-like receptor 4), retrieved 2026-08-15. TLR4 is the member most often implied here because the LPS stimulations (f1, f5, f3) run through it. But selecting TLR4 alone would silently discard TLR1/2 and TLR5, which n_f2 names in the same breath. Record O00206 as a candidate, not as the resolution."
+        },
+        {
+          "symbol_as_written_in_name": "MyD88",
+          "verifies": true,
+          "retrieved": "Q99836 | MYD88 | Myeloid differentiation primary response protein MyD88",
+          "why": "The one unambiguous component. It is also the only one of the three that arrives independently through t4, where it is quote-supported. So MYD88 is reachable without resolving t5 at all — which is the argument for expanding t4 rather than trying to decompose t5."
+        },
+        {
+          "symbol_as_written_in_name": "NF-kB",
+          "verifies": false,
+          "retrieved": "gene_name IN ('NF-kB','NF-kappaB','NFKB') returned 0 rows",
+          "why": "'NF-kB' names a transcription-factor COMPLEX, not a single gene. There is no UniProt entry with that gene symbol in any of the three spellings we tried.",
+          "what_does_verify": [
+            "NFKB1 → P19838, protein_name 'Nuclear factor NF-kappa-B p105 subunit', retrieved 2026-08-15. Note the protein_name: it is the p105 SUBUNIT, i.e. the precursor of p50. It is a component of the complex, not the complex.",
+            "RELA → Q04206, protein_name 'Transcription factor p65', retrieved 2026-08-15. The canonical NF-kB dimer in this biology is p65/p50, so RELA is at least as good a candidate as NFKB1 and the graph gives no basis to prefer either."
+          ],
+          "the_trap": "NFKB1 verifying is exactly what makes this dangerous. A resolver that tries 'NF-kB', gets nothing, and falls back to the nearest-looking symbol lands on P19838 with a clean row returned and no error anywhere. That is failure mode 3's signature — a confident accession the evidence never supported — arriving through a fallback rather than through a string match. The correct output is: NF-kB does not resolve; NFKB1 (P19838) and RELA (Q04206) are two of its components; the graph does not say which, and the reporter readouts (THP1-Lucia NF-kB luciferase, f1/f5) measure the complex's transcriptional output, not any one subunit."
+        }
+      ],
+      "expected_uniprot_accession": null,
+      "expected_ambiguity_list": ["O00206 (TLR4, family member, one of at least three named)", "Q99836 (MYD88)", "P19838 (NFKB1, p105/p50 subunit)", "Q04206 (RELA, p65 subunit)"],
+      "uncertainty_we_are_declaring": "We did not attempt to enumerate every TLR family member or every NF-kB subunit (REL, RELB, NFKB2 were not retrieved in this session). The list above is the set we actually verified, not a claim of completeness. A run that adds a verified component we did not list has not failed; a run that PICKS one has."
+    },
+    {
+      "thing": "t2",
+      "name": "myeloid inflammatory signalling",
+      "kind": "process",
+      "expected_behaviour": "Rejected, not ambiguous. Its aliases ('THP1 NF-kB', 'monocyte cytokine release') are an assay and a readout. Nothing here proposes a protein symbol.",
+      "note": "t2 is named in gaps g2 and g4 and is the object of downstream-effect edge L2. Both routes are dead ends under the nomination rule, and both are dead ends on the merits: this is where the drug's effect was MEASURED, not what it acts on."
+    },
+    {
+      "thing": "t3",
+      "name": "synovial fibroblast driven inflammation",
+      "kind": "process",
+      "expected_behaviour": "Rejected, not ambiguous. A cell-type-scoped biological process. Aliases FLS / RA SF / fibroblast-like synoviocytes are all cell-type names.",
+      "note": "This is the graph's central readout — the object of L3, L5 and L6 — and the compartment the whole question is about. That importance is exactly why a naive reader nominates it. It has no sequence."
+    }
+  ],
+
+  "expected_rejections": [
+    {
+      "thing": "t1",
+      "name": "IRAK4 inhibition",
+      "rejected_by_the_helper_because": "named in gap g1 but kind is 'small_molecule', not one of ['gene','protein']",
+      "but": "THE key case in this fixture. The helper is right by the rule and wrong about the world. t1 is not a molecule — it is a mechanism of action wearing a molecule's type, with two real compounds folded into its aliases. Recovering IRAK4/Q9NWZ3 from this node is the single behaviour this fixture grades. A run that reports t1 as 'rejected: it is the asset, not the target' — the correct reading of a genuine small_molecule node — has pattern-matched to the upstream_graph.json key and missed the point."
+    },
+    {
+      "thing": "t4",
+      "name": "MyD88 dimerization inhibition",
+      "rejected_by_the_helper_because": "named in gap g1 but kind is 'small_molecule', not one of ['gene','protein']",
+      "but": "Same shape as t1. Recover MYD88/Q99836. The compound here (ST2825) IS a real asset name and does sit in aliases, so this node is a genuine hybrid: an asset, a mechanism and a target in one row."
+    },
+    {
+      "thing": "t2",
+      "name": "myeloid inflammatory signalling",
+      "why": "kind 'process'; reached only by downstream-effect edge L2 (suppresses). A readout and a compartment, not a target.",
+      "why_in_set": "Tests that gap membership alone does not nominate — t2 is named in two of the three open gaps."
+    },
+    {
+      "thing": "t3",
+      "name": "synovial fibroblast driven inflammation",
+      "why": "kind 'process'; reached only by downstream-effect edges L3 and L5 (suppresses). A cell type's behaviour, not a protein.",
+      "why_in_set": "The most-connected node in the graph and the subject of the question. Salience is not eligibility."
+    },
+    {
+      "thing": "t5",
+      "name": "TLR/MyD88/NF-kB signalling axis",
+      "why": "kind 'process'. Note it IS the object of two direct-action edges (L1 'blocks' from t1, L4 'blocks' from t4) — so it passes the edge half of the rule and fails only on kind.",
+      "why_in_set": "The failure-mode-7 case, and the only node in this graph that a verb-driven intake would nominate. 'blocks' is in DIRECT_ACTION and the subject is typed small_molecule, so the edge classifies as direct_action cleanly. Only the kind check stops it. An intake built on verbs alone nominates a pathway and hands the dossier a string with no sequence. It also proposes three symbols at once — see expected_ambiguity."
+    }
+  ],
+
+  "expected_asks": {
+    "rule": "SKILL.md: use the graph's own four verbs — expand_node, resolve_link, test_gap, new_question. Point at a row by id, never in prose. ONE ask per request, ONE round per request. So the list below is a priority order, not a batch; a run that emits five asks in one round has violated the protocol regardless of how good the asks are.",
+    "priority_1": {
+      "ask": "expand_node",
+      "target": "t1",
+      "depth": "deep",
+      "why": "The graph has NO entity-level node for IRAK4/Q9NWZ3, only this mechanism-of-action node. expand_node is the verb for 'we have a target and want everything touching it', and it is the only one of the four that can produce the protein node the nomination rule needs. Everything the dossier is missing — a target-engagement measurement, an IC50, a biochemical assay, the kinase-versus-scaffold split — would come back through this ask."
+    },
+    "priority_2": {
+      "ask": "expand_node",
+      "target": "t4",
+      "depth": "deep",
+      "why": "Same argument for MYD88/Q99836. Second rather than first only because t4's mechanism is already quote-supported (f3, f7 name the dimerization interface) whereas t1's is not, so t1 has the larger information deficit."
+    },
+    "priority_3": {
+      "ask": "resolve_link",
+      "target": "L3",
+      "depth": "deep",
+      "why": "L3 is the only link with state 'disagreed', and the disagreement is the graph's own question. Its why field records the conflict as a conditions mismatch, but reading n_f3 against n_f4 shows the split is stimulus-held-constant, readout-changed. resolve_link is the right verb for an unresolved link. NOTE: L3's basis is 'primary', so this ask is NOT the background_only case from SKILL.md step 3 — it is a genuine primary-evidence conflict, which is a stronger reason to ask, not a weaker one."
+    },
+    "priority_4": {
+      "ask": "new_question",
+      "target": null,
+      "depth": "deep",
+      "question": "Is a direct target-engagement or biochemical measurement (IC50/Kd against purified IRAK4) reported for PF-06650833 or KIC-0101, and does the fibroblast effect require IRAK4 kinase activity or its scaffolding function?",
+      "why": "SKILL.md: mechanism absent entirely -> new_question. Not one quote in this graph measures anything on IRAK4 itself; all twelve findings are cellular or downstream. This is what makes interaction_to_disrupt null for t1, and only a new question can fill it. The kinase-versus-scaffold half matters because it is the alternative explanation for the graph's own question — the compound may be blocking half of what IRAK4 does, in every compartment (failure mode 6)."
+    },
+    "priority_5": {
+      "ask": "test_gap",
+      "target": "g1",
+      "depth": "deep",
+      "why": "g1's missing pair is (t1, t4) — the two nodes carrying our two verified accessions — implied_by L3 and L5, both of which land on t3. searched_in_round is null, so nobody has looked. Weakest of the five because both endpoints are the mechanism-of-action nodes rather than entities, so the answer would come back at the same wrong granularity; expand_node fixes the granularity first."
+    },
+    "must_not_ask": [
+      "test_gap on g3 — g3 is not in gaps[]. rounds[1] shows it was already tested in round 2 with outcome 'contradicted'. Re-asking spends a round re-deriving L3's disagreement.",
+      "resolve_link with the justification 'basis is background_only' — no link in this graph has that basis. All six are primary.",
+      "any ask phrased in prose without an id, and any request carrying more than one ask or more than one round.",
+      "any ask that asks the upstream team to change the schema or re-type t1. The skill reads the graph; it does not ask the graph to change format. Recovering symbols on our side is our job, and this fixture is the evidence that it has to be."
+    ]
+  },
+
+  "expected_needs_adjudication": {
+    "count_for_this_graph": 0,
+    "verified_by": "graph_read.py output on 2026-08-15 returned needs_adjudication: [].",
+    "why": "Only edges whose SUBJECT is a small_molecule are classified by verb at all; everything else returns 'biological_relation' before the verb is examined. The four small-molecule edges use 'blocks' (in DIRECT_ACTION) and 'suppresses' (in DOWNSTREAM_EFFECT), both known.",
+    "the_latent_condition_worth_recording": "'drives' — the verb on L6 — is in NEITHER verb set. It escapes needs_adjudication only because L6's subject is t5, a process. If a future graph writes 'drives' from a small_molecule node, that edge lands in needs_adjudication. This graph therefore does not demonstrate that its vocabulary is covered; it demonstrates that the uncovered verb happened to sit on a biological edge. A run that reports 'all verbs recognised' has over-claimed.",
+    "standing_rule": "An unmatched verb is NEVER dropped. `how` has no enum in SCHEMA.md, so DIRECT_ACTION and DOWNSTREAM_EFFECT can never be complete. Refusing is allowed; guessing is not."
+  },
+
+  "expected_retracted_papers": {
+    "count_for_this_graph": 0,
+    "why": "papers[].retracted is false on all four (p1..p4), and is_preprint is false on all four. Nothing here is blocked from citation on those grounds."
+  },
+
+  "expected_notes_to_carry_forward": [
+    "The three-state basis rule is untested by this graph: all six links are primary. The only background-flavoured finding, f6 (is_own_result false, section introduction, 'cited background, not measured in this paper'), sits on no link at all and so has no basis. It must still be recorded and not acted on — the right treatment arrived at through reading the finding, not through the basis field.",
+    "No finding in this graph is hedged (hedged is false on all 12) and none is no_effect. So the hedged_only tier and failure mode 10 are both unexercised here; they remain the edgecases fixture's job.",
+    "Every link has independence 0.0 and each is sourced from exactly one paper. There is no independently replicated claim in this graph, and that should reach the dossier's notes rather than being smoothed into a confidence number.",
+    "Two distinct compounds (KIC-0101, PF-06650833) are folded into one node's aliases, and one of them is a dual IRAK4/PIM1 inhibitor. Attribution of any t1 effect to IRAK4 alone is unsafe from this graph.",
+    "The graph asks whether the effect is confined to the myeloid compartment. The intake must not answer that question. What it can report: the evidence splits by READOUT inside a single paper (n_f3 versus n_f4, same cells, same IL-1beta stimulus), which is a different explanation from compartment confinement and is visible only when the whole t1 neighbourhood is read at once."
+  ],
+
+  "the_test": {
+    "primary": "Zero nominations from entity nodes, stated together with status 'ok' — then TWO recovered candidates: IRAK4 / Q9NWZ3 from t1 and MYD88 / Q99836 from t4, both verified against uniprot_v.proteins rather than recalled. mechanism_hypothesis must be 'unknown' on both. interaction_to_disrupt must differ between them: null (or explicitly flagged as name-derived) for IRAK4, and the MyD88 homodimerization interface for MYD88. t5 must carry an ambiguity list and a null accession.",
+    "fail_1_stops_at_zero": "A run that reports 'no protein or gene nodes, therefore no targets' and stops has technically applied the rule and produced a useless answer. This graph names two verifiable human proteins in plain text in its node names. The rule is the floor, not the ceiling.",
+    "fail_2_nominates_a_pathway": "Nominating t5 because L1 and L4 are direct-action 'blocks' edges from small_molecule subjects. The edge half of the rule passes; kind is 'process'; there is no sequence. Failure mode 7.",
+    "fail_3_resolves_nf_kb": "Assigning any single accession to t5, most plausibly P19838 (NFKB1) after 'NF-kB' returns zero rows. The fallback returns a clean row and no error, which is what makes it failure mode 3's exact signature. NF-kB is a complex; NFKB1 is the p105/p50 subunit and RELA (Q04206) is the p65 subunit, and this graph gives no basis to choose.",
+    "fail_4_invents_a_mechanism": "Setting mechanism_hypothesis to 'orthosteric' or 'ATP-competitive' for IRAK4 because PF-06650833 is a kinase inhibitor. No quote states a site. TYK2/deucravacitinib is why this is not pedantry — the wrong domain scores the wrong pocket.",
+    "fail_5_flattens_the_two_candidates": "Giving IRAK4 and MYD88 the same interaction_to_disrupt, or merging them into one 'TLR/MyD88/NF-kB axis' nomination. Their shapes genuinely differ: MYD88's dimerization interface is named verbatim in two quotes and is an oligomeric-state target; IRAK4's is named nowhere and MyD88 has no catalytic activity to inhibit in the first place.",
+    "fail_6_reports_an_absence": "Writing 'no target-engagement data exists' rather than 'no target-engagement data was retrieved'. truncated is true, stop_reason is 'queries_exhausted', 6 of 49 papers read. Only 'complete' would license an absence claim, and any 'not stated' must be paired with an ask-back.",
+    "fail_7_reuses_the_other_key": "Reporting the IL-6 readout negative, the L1/L3 zimlovisertib pair, node names like 'MyD88 signalosome', or basis 'background_only'. NONE of that is in this graph — it belongs to upstream_graph.json (g_ra4k). Every one of those is a tell that the run answered from the sibling fixture rather than from this file. This graph has no IL-6 node, no zimlovisertib, no background_only link and no protein node of any kind.",
+    "fail_8_batches_asks": "Emitting several asks in one round. One ask per request, one round per request, targeted by id.",
+    "fail_9_cites_across_paralogs": "Using n_f5 (mouse IRAK1-kinase-dead synovial fibroblasts, p4) to support IRAK4/Q9NWZ3. The graph itself flags it as adjacent evidence.",
+    "not_covered_by_this_fixture": [
+      "The three-state basis rule — every link here is primary.",
+      "hedged_only handling and no_effect findings — zero of each in this graph.",
+      "Unknown-verb adjudication — needs_adjudication is empty, though 'drives' is an unmatched verb sitting on a biological edge where it never gets tested.",
+      "Retracted-paper blocking and _fixture-guard refusal — no retracted papers, and this file carries no _fixture flag because it is real.",
+      "Whether the recovered-symbol path should also emit something for t5's components. We are deliberately not grading that: decomposing a pathway into components is a different operation from recovering a symbol from a node name, and this fixture only establishes the second."
+    ],
+    "uncertainty_declared": "Two judgment calls in this key are ours and are marked as such rather than asserted: (a) whether interaction_to_disrupt for IRAK4 should be null or a flagged name-derived 'kinase activity' — we accept either with the flag, and reject the unflagged version; (b) the reading of coverage.used = 2 against a 4-paper bibliography. Neither was verified against SCHEMA.md in this session."
+  },
+
+  "_schema_source": "LABrador main:managed/research-evidence-mapper/SCHEMA.md (not re-read in this session; the graph declares schema_version 1.1)",
+  "_fixture_set": {
+    "upstream_graph.json": "authored. The RA graph, g_ra4k. Catalytic branch, one nomination, the IL-6 readout negative.",
+    "upstream_graph_edgecases.json": "authored. kind 'gene', basis 'hedged_only', a no_effect finding, status 'partial'.",
+    "upstream_graph_unknownverb.json": "authored. Unknown `how` verbs, exercising needs_adjudication in three signal states.",
+    "upstream_graph_real.json": "NOT authored — real upstream output, g_1a4f. The only fixture that can tell us something we did not already believe, and it did: the entity-node assumption returns nothing on it."
+  }
+}

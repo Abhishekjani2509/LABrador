@@ -18,6 +18,9 @@ that serves as the grading key.
 | `upstream_graph.json` | synthetic, marked `_fixture` | An upstream evidence graph, conformed to the real `SCHEMA.md` v1.1 |
 | `upstream_graph_edgecases.json` | synthetic, hand-written | `kind: gene`, `basis: hedged_only`, a `no_effect` finding, `status: partial` |
 | `upstream_graph_unknownverb.json` | synthetic, hand-written | Unknown `how` verbs — the `needs_adjudication` path, in three signal states |
+| `upstream_graph_real.json` | **REAL** — mapper output, no `_fixture` flag | `g_1a4f`, round 2. The only graph fixture nobody here authored |
+| `upstream_graph_real_expected.json` | derived, accessions retrieved | Grading key for the real graph |
+| `complex_components.json` | curated, accessions retrieved | Complex and pathway name → component accessions, for the PPI branch |
 | `upstream_graph_expected.json` | derived, accessions retrieved | Grading key for `graph-intake` |
 
 ## The upstream graph
@@ -51,6 +54,38 @@ branches the RA graph never reaches. `upstream_graph_unknownverb.json` covers
 the case that has no clean answer: a verb we do not recognise, where the intake
 must weigh the quote, the assay context and the graph shape — and is allowed to
 refuse.
+
+### And one that is not synthetic at all
+
+`upstream_graph_real.json` is the mapper's first real output for our own IRAK4
+question, and it is the most valuable fixture here precisely because nobody on
+this side wrote it. It immediately falsified an assumption the other three had
+been quietly confirming: **it contains no `protein` or `gene` node at all.**
+
+Its five things are two `small_molecule` and three `process`. "IRAK4 inhibition"
+is typed `small_molecule` — the mapper is naming what the experiments
+manipulated, and that was an intervention, not an entity. Every protein in the
+graph survives only inside an intervention or pathway name. The intake nominated
+nothing against a graph whose own question names IRAK4.
+
+Three fixtures we wrote all passed. The first one we did not write did not. That
+is the argument for keeping a real graph in this set permanently, and for
+re-running against a fresh one whenever the mapper changes.
+
+The fix was a second nomination route: scan every thing's `name` and `aliases`
+for gene-symbol-shaped tokens, capture the action word beside them, and verify
+the proposals against `uniprot_v`. On this graph it recovers IRAK4 (Q9NWZ3) from
+`t1` with the action `inhibition`, and MYD88 (Q99836) from `t4` with the action
+`dimerization inhibition` — a genuinely different mechanism shape, and a rare
+case where the graph supplies mechanism detail we would otherwise have to leave
+`unknown`.
+
+The regex only proposes; UniProt confirms. `NF-kB` is proposed and returns no
+row, because it names a transcription-factor complex rather than a gene, and
+that failure is the correct answer rather than a gap to paper over. `t5` stays
+ambiguous with all three of its symbols recorded. The compound codes in the
+graph's own aliases — `PF-06650833`, `KIC-0101`, `ST2825` — are symbol-shaped
+and never propose, because a run of four or more digits marks a compound code.
 
 ## The ladder
 
