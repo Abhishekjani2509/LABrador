@@ -294,3 +294,5 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:39 UTC** — merged `vaalessi/program-strategy-valuation` (MERGED) — Harden ROI PoA and antibody support — typecheck+check green.
 
 - **2026-08-16 00:41 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: raw-JSON output contract enforced, and gap ranking that discriminates — typecheck+check green.
+
+- **2026-08-16 00:42 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: survive the first real graph, and carry computation back — typecheck+check green.
