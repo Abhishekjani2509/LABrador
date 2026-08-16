@@ -19,7 +19,7 @@ hypothesis (thesis.ts contract)
       ▼                                               │
 trial-recruitment-forecaster  <───────────────────────┘
       │  score, simulatedMonthsToEnroll, counterfactual
-      ▼   (adapter B, unowned: months -> launch_year delta)
+      ▼   (adapter B, built: economics-bridge.ts, months -> launch-delay overlay)
 therapeutic-program-economics
       │  rNPV, value_lost_per_launch_delay_year, decision grade
       ▼
@@ -27,8 +27,8 @@ therapeutic-program-economics
 ```
 
 The shared contract is [`IndicationThesis`](./managed/trial-recruitment-forecaster/thesis.ts).
-**Status: not yet ratified — see §6.** Nothing composes end-to-end today; the
-two adapters marked above have no owner.
+**Status: not yet ratified — see §6.** Nothing composes end-to-end today;
+adapter B is built (§5), adapter A still has no owner.
 
 ## 2. Branch map — who owns what
 
@@ -56,6 +56,7 @@ are dead — do not create files under them.
   (dupilumab-EoE: 12 mo, 100/100, approved 2022); 6-trial backtest.
 - 11 adversarial-review findings fixed same day. `thesis.ts` authored (the
   proposed shared contract). Details: [NEXT.md](./managed/trial-recruitment-forecaster/NEXT.md).
+- Adapter B shipped (`economics-bridge.ts`, 2026-08-15 late) — see §5 row.
 
 **Rafal — small-molecule-tractability-review** *(partial prototype)*
 - 4 real skills (precedent-lookup, structure-select, pocket-scan,
@@ -142,7 +143,7 @@ are dead — do not create files under them.
 | Item | What it is | Suggested owner |
 |---|---|---|
 | **Adapter A** | mapper `findings[]` → thesis `Evidence[]` (mapping is nearly mechanical; `no_effect` needs a convention) | Soliman + Abhishek |
-| **Adapter B** | forecaster `simulatedMonthsToEnroll` → economics `launch_year` delta + `launch_delay_years` range. ⚠️ The two "obvious" wirings are both wrong: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | Abhishek + Vince |
+| ~~**Adapter B**~~ | **Built 2026-08-15 late (owner Abhishek)**: `managed/trial-recruitment-forecaster/economics-bridge.ts` — overlay script shipped (delay years + triangular `launch_delay_years` range + counterfactual pricing, best-effort against the demo fixture, read-only on Vince's dir); **Vince to confirm the `launch_year` application convention**. The two "obvious" wirings remain wrong and are documented in the file header: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | done (Abhishek; Vince to confirm convention) |
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics | Cyrus + whoever's free |
 | ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
