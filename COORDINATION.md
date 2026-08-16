@@ -797,3 +797,5 @@ key, no network, 7/7 PASS) and runs in CI on every push to main.
 
 - **2026-08-16 04:09 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: commit a typed reference graph, delete the misleading one — typecheck+check green.
 - **2026-08-16 04:13 UTC** — Soliman committed the TYPED reference graph g_e087 (31 things incl. gene nodes w/ accessions + a disease entity; 42 findings) and deleted misleading g_1a4f — CI health correctly went red on the two g_1a4f seams; repointed to g_e087 (41 evidence rows, 8 hypotheses shortlisted), 7/7 green. Demo-subject migration (frame/pipeline defaults → antioxidant/BACH1 subject) dispatched to the build agent.
+
+- **2026-08-16 04:14 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: a retried new_question no longer overwrites its own graph — typecheck+check green.
