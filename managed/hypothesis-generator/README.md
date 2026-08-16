@@ -270,6 +270,26 @@ under the table, because a flag in a cell is easy to skim past.
 `test_every_mode_keeps_the_signals_a_reader_must_not_miss` is what stops a
 fifth mode from quietly becoming a softer one.
 
+**The web UI payload** is the second adapter, next to `valuation.py`:
+`webui.emit(slate)` returns one JSON card per hypothesis, written by
+`--emit-webui FILE` on a run or recovered from a saved slate:
+
+```bash
+hypgen --report-from runs/my-run/slate.json --emit-webui runs/my-run/webui.json
+```
+
+Each card carries the walk as one string
+(`pirfenidone --inhibits--> myofibroblast differentiation --contributes_to--> …`,
+a reversed hop rendered `<--how--`), the support / novelty / testability
+metrics plus the rank that orders cards, and `highlights`: one-liners saying
+how the graph supports, contradicts, or qualifies the hypothesis. Every
+highlight is assembled from structured slate fields and carries the ids it was
+built from in `refs`, so the UI can link each line to its evidence — no line
+states anything the slate does not. Highlights are ordered weakest-first
+(failures, contradictions, cautions, novelty, support), rejection flags render
+on the card, and the absence-of-evidence warning sits at payload level where no
+card view can drop it.
+
 **`prose` is kept short by two rules.** Argued fields — the falsifier, the
 decisive experiment, the strongest objection — are clipped to whole sentences
 and the clip is always marked `…`, because an argument that ends mid-case must
