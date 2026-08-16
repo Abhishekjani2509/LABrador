@@ -60,6 +60,17 @@ are dead — do not create files under them.
 - Adapter B shipped (`economics-bridge.ts`, 2026-08-15 late) — see §5 row.
 - Adapter A shipped (`evidence-bridge.ts`, 2026-08-15 late), run on Soliman's
   real `runs/g_1a4f.json` — see §5 row for the schema deviations it found.
+- **Adapters C and D shipped, and the chain now RUNS (2026-08-16)**:
+  `dossier-bridge.ts` (tractability dossier → thesis Evidence) and
+  `thesis-bridge.ts` (hyp_gen slate + analyst frame → `IndicationThesis`),
+  plus `managed/pipeline-observatory/pipeline.ts` — **`bun run pipeline`, 7
+  stations, one traced artifact, verdict "complete"**. See §11 for the map and
+  the honesty labels the run stamps on itself.
+- **Defect the run exposed in this node, deliberately left standing**: on RA the
+  forecaster returns 470 months, because the competition model
+  (`1/(1+0.08×recruitingCount)`) meets ~189 concurrently recruiting trials and
+  cuts per-site velocity 16.1×. It is in §4 as an open item; the pipeline prints
+  a MODEL LIMIT caveat instead of a plausible number.
 
 **Rafal — small-molecule-tractability-review** *(partial prototype)*
 - 4 real skills (precedent-lookup, structure-select, pocket-scan,
@@ -248,6 +259,18 @@ are dead — do not create files under them.
 - [ ] Wrap forecaster as a Managed Agent (fresh session: `/clear` →
       `/managed-agent-prototype`; engine becomes `tools.ts` handlers). Do
       after ratification.
+- [ ] **NEW (found by `bun run pipeline`, 2026-08-16): the competition model
+      does not survive a crowded indication.** `competitionPenalty =
+      1/(1 + 0.08 × recruitingCount)`; rheumatoid arthritis has ~189
+      concurrently recruiting interventional trials, so per-site velocity is
+      divided by 16.1× on the premise that competitors claim 1512% of the
+      patient pool. Output: 470 months, score 0.00, and a 38-year "launch
+      delay" downstream. The forecaster's own counterfactual agrees from the
+      other side ("even all-comers predicts 282 months … would need ~510
+      sites"). NOT patched by tuning the constant — the pipeline prints a
+      MODEL LIMIT REACHED caveat so the month count reads as a failure signal
+      about the design. A real fix needs a share model that saturates (and a
+      site-count anchor that does not disagree with its own counterfactual).
 - [x] ~~Known model limitation: per-site velocity doesn't transfer to 100+
       site scale.~~ **Decided 2026-08-15 late on 22 fresh backtest rows
       across two conditions**: √-dilution REJECTED as a blanket engine term —
@@ -450,6 +473,8 @@ Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
 | Node | Command(s) |
 |---|---|
 | repo-wide TS | `bun run typecheck && bun run check` |
+| **whole pipeline (seams)** | `bun run pipeline:health` — deterministic, no API key, no network, PASS/FAIL per seam, non-zero exit on failure. Runs in CI on every push to main (`.github/workflows/integration-health.yml`). **Run this before you push if you touched any node's output shape.** |
+| **whole pipeline (live)** | `bun run pipeline` — the real 7-station chain (needs `ANTHROPIC_API_KEY` + network); writes `managed/pipeline-observatory/fixtures/pipeline-irak4-ra.trace.json` and re-renders `pipeline.html` |
 | trial-recruitment-forecaster | `bun managed/trial-recruitment-forecaster/demo.ts` (needs `ANTHROPIC_API_KEY`); `bun managed/trial-recruitment-forecaster/backtest.ts` |
 | therapeutic-program-economics | `cd managed/therapeutic-program-economics && uv sync --frozen --extra dev && uv run pytest && uv run ruff check .` |
 | small-molecule-tractability-review | no runnable end-to-end yet; pipeline.html records per-stage status |
@@ -565,9 +590,9 @@ table whenever an edge changes state — same rule as §2–§5.)*
 
 ```
                        ┌────────────────────────────┐
-        ❌ no thesis   │  hyp_gen (Abraham+)        │──✅ own adapter──> economics
-        emission yet   │  graph → program briefs    │    (valuation.py — bypasses thesis)
-                       └────────────┬───────────────┘
+   ✅ Adapter D        │  hyp_gen (Abraham+)        │──✅ own adapter──> economics
+   (thesis-bridge.ts,  │  graph → program briefs    │    (valuation.py — bypasses thesis)
+    slate → thesis)    └────────────┬───────────────┘
                                     │ consumes mapper-style graphs
                                     ▼
    ┌────────────────┐   ✅ Adapter A (evidence-bridge.ts, real-graph verified)
@@ -576,8 +601,10 @@ table whenever an edge changes state — same rule as §2–§5.)*
    │ (DEPLOYED)     │<─────────────────────────────────┐
    └────────────────┘                                   │
                        ┌────────────────────────────────┴──┐
-                       │ small-molecule-tractability-review│ ❌ no adapter out; node not
-                       └───────────────────────────────────┘   end-to-end runnable (Modal $)
+                       │ small-molecule-tractability-review│ ✅ Adapter C
+                       └───────────────────────────────────┘   (dossier-bridge.ts)
+                                    │  ⚠️ but no IRAK4 dossier exists, so its rows
+                                    │     are QUARANTINED, never merged (see below)
                                     IndicationThesis (thesis.ts — §6 sign-offs pending)
                                     │
                                     ▼
@@ -589,7 +616,11 @@ table whenever an edge changes state — same rule as §2–§5.)*
    hypothesis-highlander ──⚠️ consumes everything; 2 hard breaks + stub-only
                               interop tests (INTEROP-highlander.md; fixes = Vince)
    pipeline-observatory  ──✅ glassbox traces the composing chain (§10)
-   orchestrator          ──❌ nobody owns one command; trace-demo.ts is the seed
+   orchestrator          ──✅ `bun run pipeline` — 7 stations, one traced artifact
+                              (managed/pipeline-observatory/pipeline.ts). A RUNNER,
+                              not a meta-search; highlander still sits above it.
+   CI alarm              ──✅ `bun run pipeline:health` + .github/workflows/
+                              integration-health.yml (deterministic, no API key)
 ```
 
 ### The workflow to full integration (dependency order, owners)
@@ -600,17 +631,48 @@ table whenever an edge changes state — same rule as §2–§5.)*
 | 2 | Mapper schema: `how` enum + typed protein/gene entities, round/flags, r2.json chunk contract | Soliman | intake + evidence-bridge run a new real graph with no workarounds |
 | 3 | Highlander repairs: accept `no_effect`, read `target.uniprotAccession`, align score curve, adopt canonical bridges, real-contract tests | Vince | interop tests import real shapes and pass |
 | 4 | Adapter B launch_year convention | Vince + Abhishek | one sentence in the economics README |
-| 5 | ~~$ blocker~~ assemble-dossier LANDED with two measured validator-clean dossiers (JAK1, TNF) committed as examples. Remaining: dossier→thesis adapter (Adapter C — **Abhishek building**, in trial-recruitment-forecaster) + fix run_intake regression (Rafal, §5 hazard) | Abhishek / Rafal | a committed dossier's verdict lands in a thesis Evidence row |
-| 6 | hyp_gen→thesis adapter (**Abhishek building** as thesis-bridge in trial-recruitment-forecaster — research showed the slate carries every field except biomarker/endpoint, which an analyst frame supplies; Abraham to adopt or veto the mapping) | Abhishek → Abraham | a slate hypothesis parses as IndicationThesis and reaches the forecaster |
-| 7 | Orchestrator decision: highlander on top vs simple runner (extend trace-demo.ts) | Cyrus + Vince | `one command → traced verdict` |
+| 5 | ✅ **Adapter C SHIPPED** (`trial-recruitment-forecaster/dossier-bridge.ts`, 2026-08-16): a dossier's verdict lands in thesis `Evidence` rows — retrieved axis → `sourceType: database` + chembl id, computed axis → `simulation` + pdb id, strength capped 0.6/0.25 with a 0.2 falsification floor (TNF hits it: its own sweep reports the dominant assay measures IRAK4, not TNF). TNF's computed row is refused, not backfilled — the pocket run reported nulls. **REMAINING, and it is the one thing that would make this edge real: no IRAK4 (Q9NWZ3) dossier exists**, so every row is `subjectMatch:false` and the runner quarantines them. Also still open: run_intake regression (Rafal, §5 hazard). | ~~Abhishek~~ → **Rafal** (needs one IRAK4 dossier) | ✅ done for the adapter; an IRAK4 dossier makes it load-bearing |
+| 6 | ✅ **Adapter D SHIPPED** (`trial-recruitment-forecaster/thesis-bridge.ts`, 2026-08-16): a slate hypothesis parses as `IndicationThesis` and reaches the forecaster — verified end to end on the real g_1a4f slate (H-g1 → IRAK4/Q9NWZ3 in RA, 6 evidence rows off 2 DOIs, one of them `contradicts`). Two real-artifact findings for the hyp trio: **`--profile valuation` shortlists ZERO on g_1a4f** (it wants 2 independent groups + a protein/gene path node; the graph has one group and no protein entity) — the pipeline uses `--profile default`; and the slate cannot supply `biomarkerPopulation`/`endpoint`/disease, so an analyst **frame** does, with every field stamped ASSUMED. **Abraham/Sean/Weichi: adopt or veto the mapping.** | Abhishek → **Abraham (sign-off)** | ✅ done; awaiting adoption |
+| 7 | ✅ **Orchestrator SHIPPED as a simple runner**: `bun run pipeline` (`managed/pipeline-observatory/pipeline.ts`) — 7 stations, one traced artifact, verdict "complete" on a real run. Deliberately NOT a meta-search: highlander optimises across many runs, this explains one. **Cyrus + Vince: does highlander sit on top of this, or replace it?** | ~~Cyrus + Vince~~ → **decision only** | ✅ `one command → traced verdict` |
 | 8 | Glassbox envelopes per node (§10) + runtime envelopes for deployed agents | all / Cyrus | every node call traced |
 
 ### Demoable TODAY without waiting on anyone
 
-Real mapper graph → evidence-bridge → enriched thesis → forecaster →
-economics-bridge → economics engine, traced by the glassbox
-(5 of 7 stations). Missing from the full chain: tractability (item 5) and a
-thesis-emitting hypothesis step (item 6). Both have owners above.
+**One command: `bun run pipeline`.** 7 of 7 stations, run end to end on
+2026-08-16, artifact committed at
+`managed/pipeline-observatory/fixtures/pipeline-irak4-ra.trace.json`, rendered
+by `managed/pipeline-observatory/pipeline.html` (open in a browser, no server):
+
+real mapper graph `g_1a4f` → hyp_gen dry-run (5 hypotheses, 0 model calls) →
+thesis-bridge → `IndicationThesis` H-g1 → evidence-bridge (11 actionable rows,
+6 on the thesis) → dossier-bridge (3 rows, all quarantined) → forecaster (LIVE
+CT.gov + Claude eligibility read) → economics-bridge → `labrador analyze`.
+
+**Subject: IRAK4 inhibitor in rheumatoid arthritis, and it has to be** — the
+only committed graph asks an IRAK4/RA question, so pairing it with a forecaster
+fixture from another disease would compose on paper and mean nothing.
+
+What the demo says about itself, in its own verdict headline, every run:
+
+- **ASSUMED** — the thesis's population and endpoint come from an analyst frame
+  (7 fields, each labelled with why it is not a graph finding).
+- **SUBJECT_MISMATCH** — tractability enriched NOTHING: both committed dossiers
+  measure JAK1 and TNF. Rows are reported and never merged. *(Rafal: one IRAK4
+  dossier makes this station real.)*
+- **SYNTHETIC / NOT_DECISION_GRADE** — the economics inputs are relabelled
+  copies of the economics node's own fictitious demo fixtures (identity fields
+  changed for subject coherence, every number inherited verbatim), and the
+  engine stamps its own run NOT_DECISION_GRADE.
+- **MODEL LIMIT REACHED** — the run exposed a real defect in MY node: on RA the
+  forecaster returns **470 months**, because ~189 concurrently recruiting trials
+  × the 8%-of-pool competition share divides per-site velocity by 16.1×
+  ("1512% of the pool claimed"). The constant was deliberately NOT tuned to make
+  the demo look good; a caveat now fires whenever the penalty dominates, so the
+  number reads as "this design does not close in a crowded indication", not as a
+  schedule. **Open, owner Abhishek** (see §4).
+
+`bun run pipeline:health` is the deterministic version of the same chain (no API
+key, no network, 7/7 PASS) and runs in CI on every push to main.
 - **2026-08-16 01:15 UTC** — merged `AbrehamT/Hypothesis_Generator` (9bf1682, tier-2: biome format fix on his JSON fixtures) — hyp_gen lands, 212 tests pass; §11 wiring map added per Abhishek — typecheck+check green.
 
 - **2026-08-16 01:15 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: one command from graph_id to dossier inputs — typecheck+check green.
