@@ -15,6 +15,42 @@ that serves as the grading key.
 | `targets.json` | retrieved and cited | Ten targets, `expected_output` grading keys |
 | `pocket_calibration.json` | verified in-repo | KRAS holo vs apo — the backbone-collapse cryptic mechanism |
 | `immunology_calibration.json` | found by execution | Four failure modes only real structures surface |
+| `upstream_graph.json` | synthetic, marked `_fixture` | An upstream evidence graph, conformed to the real `SCHEMA.md` v1.1 |
+| `upstream_graph_edgecases.json` | synthetic, hand-written | `kind: gene`, `basis: hedged_only`, a `no_effect` finding, `status: partial` |
+| `upstream_graph_unknownverb.json` | synthetic, hand-written | Unknown `how` verbs — the `needs_adjudication` path, in three signal states |
+| `upstream_graph_expected.json` | derived, accessions retrieved | Grading key for `graph-intake` |
+
+## The upstream graph
+
+`upstream_graph.json` is where "targets arrive from the upstream pipeline"
+stops being a sentence and becomes a file. It is a literature evidence graph in
+its producer's own format — `things`, `links`, `findings`, `papers`, `gaps` —
+and `graph-intake` reads it to fill this agent's input contract.
+
+It is **synthetic** and carries `_fixture: true`, so its papers and quotes were
+never retrieved from any corpus. That is acceptable here and nowhere else in this
+directory: what it grades is the *extraction*, not the biology. `graph_read.py`
+refuses it without `--allow-fixture` so the guard cannot be forgotten.
+
+One nomination is correct: IRAK4 (Q9NWZ3), catalytic function, mechanism
+`unknown`. The graded negative is IL-6 — `zimlovisertib reduces IL-6` has the
+same shape as `zimlovisertib inhibits IRAK4` and only the verb separates a
+readout from a target. That is the TNF-alpha assay-provenance failure of Rung 4,
+moved one stage upstream where nothing else is looking for it.
+
+### Why three graph fixtures
+
+The producer's schema gives `how` **no enum**, while every other categorical
+field in it has one. So the verb that separates a target from a readout is open
+vocabulary written by an upstream model, and our two verb lists can never be
+complete. We do not get to ask for a closed vocabulary — this is ours to absorb.
+
+That is why the set splits three ways. `upstream_graph.json` covers the happy
+path with known verbs. `upstream_graph_edgecases.json` covers the four schema
+branches the RA graph never reaches. `upstream_graph_unknownverb.json` covers
+the case that has no clean answer: a verb we do not recognise, where the intake
+must weigh the quote, the assay context and the graph shape — and is allowed to
+refuse.
 
 ## The ladder
 
