@@ -246,6 +246,29 @@ sentence.
 
 ---
 
+## The graph must be self-describing: a disease node and an accession
+
+Downstream nodes consume these graphs directly. They must not have to recover
+basic facts from the question string — a consumer that parses the question is
+reading input the graph was supposed to encode.
+
+**Emit the disease or indication as its own `disease` node** whenever the
+question concerns one, even if no finding is "about" the disease as such. The
+question *"do antioxidants accelerate cancer metastasis?"* must leave `cancer`
+(or the specific indication) in `things[]`. Observed failure: a graph of nine
+compounds and two proteins with **no disease node at all**, forcing the
+tractability bridge to re-parse the question.
+
+**Every `protein` and `gene` node carries `uniprot_accession`.** This is the
+identifier a consumer keys on, and without it the node is just a string. Across
+seven real graphs, accession coverage was 0, 0, 0, 0, 1, 1 and 2 nodes — close
+to absent. Resolve it: `search -s proteins "<name> human"`, then put the
+accession, `gene_symbol` and a `resolved_by` naming the quote on the node.
+
+Where it genuinely cannot be resolved — an ambiguous name, no matching entry —
+leave the field off and record why in `ambiguity`. Assembly reports the
+shortfall in `coverage`; a recorded gap is usable, a guessed accession is not.
+
 ## The `how` verb — activity is not abundance
 
 `how` is a closed set. Links key on `(from, how, to)`, so a verb chosen freely
@@ -257,9 +280,12 @@ to decide what actually happened.
 | `inhibits` | reduces the **activity** of a protein | a kinase inhibitor, an antagonist, a blocking antibody |
 | `activates` | increases the **activity** of | a kinase phosphorylates its substrate |
 | `binds` | physical interaction, no direction claimed | co-IP, structural, affinity data |
-| `decreases` | reduces the **amount or magnitude** of | knockdown lowers mRNA; treatment lowers a score |
-| `increases` | raises the amount or magnitude of | expression is upregulated |
-| `drives` | causal contribution to a process or disease | pathway drives inflammation |
+| `suppresses` | reduces a **process or phenotype** | treatment suppresses inflammation, metastasis, disease severity |
+| `decreases` | reduces a **measured quantity** | knockdown lowers mRNA; a score drops |
+| `increases` | raises a measured quantity | expression is upregulated |
+| `causes` | establishes causation of a disease or state | the mutation causes the syndrome |
+| `drives` | contributes causally, short of sufficiency | pathway drives inflammation |
+| `treats` | therapeutic benefit in a disease | the drug treats RA in a trial |
 | `associated_with` | correlation only, no causal claim | expression correlates with severity |
 
 **The distinction that matters: activity is not abundance.** A kinase inhibitor
@@ -272,6 +298,14 @@ reads as *lowers IRAK4 protein levels*, which is not what any of those papers
 showed — they inhibit the kinase. The pooling still worked, because the edge
 existed either way, but a consumer reading `how` to infer direction would have
 drawn the wrong biology from seven of eight edges.
+
+**Three verbs that get confused, kept separate on purpose.** `inhibits` is
+protein activity. `suppresses` is a process or phenotype — inflammation,
+metastasis, disease severity. `decreases` is a measured quantity — an mRNA
+level, a cell count, a score. "The inhibitor suppressed synovitis" is
+`suppresses`; "the inhibitor decreased IL-6 levels" is `decreases`; "the
+inhibitor inhibits IRAK4" is `inhibits`. All three are true of the same drug in
+the same paper, about different things.
 
 Pick from the table. If none fits, use the closest and say why in the finding's
 `claim` — do not invent a verb, because a new verb silently creates a new link.

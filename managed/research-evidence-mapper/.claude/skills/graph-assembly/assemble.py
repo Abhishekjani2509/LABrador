@@ -532,6 +532,25 @@ def interventions_without_target(things, links):
                   and t.get("id") not in linked)
 
 
+def proteins_without_accession(things):
+    """Protein/gene nodes carrying no UniProt accession.
+
+    The accession is what a downstream consumer keys on; without it the node is
+    a string. Across seven real graphs coverage was 0,0,0,0,1,1,2 nodes, and the
+    tractability bridge had to recover identity from the question text instead.
+    Reported, never invented.
+    """
+    return sorted(t.get("id") for t in things
+                  if t.get("kind") in _TARGET_KINDS
+                  and not str(t.get("uniprot_accession") or "").strip())
+
+
+def has_disease_node(things):
+    """A graph about a disease should say so in things[], not only in the
+    question string."""
+    return any(t.get("kind") == "disease" for t in things)
+
+
 def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None,
               round_n=None, findings=None):
     """Open triangles: A-B and B-C exist, A-C does not.
@@ -866,6 +885,10 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
     orphans = interventions_without_target(things, links)
     cov["interventions_without_target"] = orphans
     cov["interventions_without_target_count"] = len(orphans)
+    unresolved = proteins_without_accession(things)
+    cov["proteins_without_accession"] = unresolved
+    cov["proteins_without_accession_count"] = len(unresolved)
+    cov["has_disease_node"] = has_disease_node(things)
     if duplicates:
         cov["duplicates_dropped"] = cov.get("duplicates_dropped", 0) + duplicates
 

@@ -261,6 +261,30 @@ are dead — do not create files under them.
       Facts 1, 2 and 5 are verified (event-level Paperclip calls, raw full-graph
       JSON, and round 2 loading round 1 from memory with `round` incrementing —
       g_5cb6 reached round 7).
+- [x] **Four production findings from the tractability bridge — all real, all
+      fixed.** (a) Graphs carried no disease entity and protein nodes carried no
+      accession, so the bridge recovered both from the question string. (b)
+      `suppresses` was used in real paths but absent from the closed `how` enum
+      — and auditing found `causes` and `treats` outside it too. (c)
+      `example-round.json`, the template the agent copies, omitted the accession
+      fields entirely: its one node was IRAK4 typed `gene`, exactly the node
+      that should carry Q9NWZ3, and SKILL.md tells the agent not to re-derive
+      the shape from source. (d) CLAUDE.md's `things[]` skeleton put IRAK4's
+      accession on an **antibody** node with `resolved_by` claiming the quote
+      named the kinase.
+      (c) is the CAUSE of half of (a): accession coverage across seven real
+      graphs was 0,0,0,0,1,1,2 nodes, because the only place the agent looks
+      never mentioned the field. The template was written 13 minutes before
+      accession merging landed and never updated — the stale-artifact failure
+      this repo's own CLAUDE.md warns about, committed by me.
+      Fixes: template now carries accession + gene_symbol + resolved_by +
+      ambiguity on its gene node AND a disease node; skeleton no longer
+      mistypes an antibody; enum widened to inhibits | activates | binds |
+      suppresses | increases | decreases | causes | drives | treats |
+      associated_with, with the confusable trio separated (activity vs
+      phenotype vs measured quantity); assembly now reports
+      `proteins_without_accession` and `has_disease_node` in coverage.
+      Deployed v9; template re-verified by executing it.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block

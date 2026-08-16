@@ -34,7 +34,20 @@
       "name": "IRAK4",
       "kind": "gene",
       "_comment_kind": "protein | small_molecule | gene | disease | process | method",
-      "aliases": ["IRAK-4", "interleukin-1 receptor-associated kinase 4"]
+      "aliases": ["IRAK-4", "interleukin-1 receptor-associated kinase 4"],
+      "uniprot_accession": "Q9NWZ3",
+      "_comment_uniprot_accession": "REQUIRED on every protein/gene node. Resolve it with `search -s proteins \"<name> human\"`. Species matters: IRAK4 also matches Q1RMT8 (bovine) and Q8R4K2 (mouse). Omit on diseases, processes, methods and small molecules.",
+      "gene_symbol": "IRAK4",
+      "resolved_by": "f1 quote names IRAK4 as the kinase inhibited",
+      "_comment_resolved_by": "resolve from the QUOTE, not the label. \"IL-6\" resolves to P05231 the ligand, but receptor-blockade evidence is P08887.",
+      "ambiguity": [],
+      "_comment_ambiguity": "rejected candidates + why. A node with a non-empty ambiguity is never used as a merge key."
+    },
+    {
+      "id": "t2",
+      "name": "rheumatoid arthritis",
+      "kind": "disease",
+      "_comment_t2": "The graph MUST carry the disease/indication as its own node when the question concerns one. Downstream consumers should not have to recover it from the question string."
     }
   ],
   "_comment_things": "only NEW or newly-aliased entities. Existing ones keep their ids; the script merges by normalized name and alias.",

@@ -59,8 +59,8 @@ other by `id`. Nothing nested.
   }],
   "findings": [{
     "id": "f2", "from": "t2", "how": "binds", "to": "t3",
-    // how: inhibits | activates | binds | increases | decreases | drives |
-    //      associated_with  -- closed set. Activity is not abundance: a kinase
+    // how: inhibits | activates | binds | suppresses | increases | decreases |
+    //      causes | drives | treats | associated_with  -- closed set. Activity is not abundance: a kinase
     //      inhibitor `inhibits`, it does not `decrease`. Links key on
     //      (from, how, to), so a free-form verb forks one relationship.
     "says": "yes",               // yes | no | no_effect
