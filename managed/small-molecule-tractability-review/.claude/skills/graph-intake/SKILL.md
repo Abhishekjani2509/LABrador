@@ -49,6 +49,30 @@ Never report zero nominations without quoting `status` alongside it.
 python3 graph_read.py <graph.json>
 ```
 
+If you were handed a `graph_id` rather than a file, load it from the mapper's
+store first. SCHEMA.md's contract is that Stage 1 owns storage and Stage 2 sends
+an id, never a graph; the MCP transport for that does not exist yet, but the
+store does, on disk in the documented layout:
+
+```bash
+python3 graph_store.py <store_dir> --list                 # what graphs exist
+python3 graph_store.py <store_dir> --graph-id g_1a4f > g.json
+```
+
+`graph_store.py` reassembles `meta/things/papers/links/gaps` plus the per-round
+`findings/r<N>.json` chunks. **It dedupes findings by id rather than
+concatenating them**, because the shipped store does not behave the way the
+schema documents: SCHEMA.md says rounds append and never rewrite, but on
+`g_1a4f` r1 holds 7 findings and r2 holds 12 *including all 7 of r1's*. Each
+chunk is a full snapshot. Concatenating gives 19, and the seven duplicates would
+land in the `yes`/`no` counts that feed `agreement` and `independence`.
+
+It also reports two things worth reading before you trust the graph.
+`_undocumented_fields` lists fields the store emits that the schema does not
+describe — currently `papers.pmid` and `findings.claim`. `_dangling_refs` lists
+ids that do not resolve, which the schema guarantees cannot happen, so any entry
+there means you are reading a torn write rather than a sparse graph.
+
 Stdlib only, no dependencies. It returns `nominations`, `rejected` and
 `needs_adjudication`. Read all three. `rejected` is where a wrongly-dropped
 target would be hiding, and `needs_adjudication` is a decision waiting for you —
@@ -129,6 +153,27 @@ mode 3 — this is the one that silently assesses the wrong protein.
 If two accessions both fit, populate `ambiguity` with both and leave
 `uniprot_accession` null. An unresolved target is a correct output. A confidently
 wrong accession poisons every number downstream of it.
+
+#### Verifying `symbol_candidates`
+
+When no node is typed `protein` or `gene`, the helper scans names and aliases and
+hands you `symbol_candidates` — each with the thing it came from, the matched
+token and the action word beside it. Those are proposals, not nominations. Run
+the SQL above over the proposed symbols in one `IN` list and keep only what comes
+back with a human accession: `MYD88` returns Q99836 and verifies, `ST2825` and
+`TLR` return nothing and do not.
+
+A phrase carrying several candidates stays ambiguous unless exactly one verifies
+**and** the rest were false regex hits — compound codes, assay names, anything
+that was never a biological entity. A candidate that fails because it names a
+complex or a family is not eliminated, it is unresolved, and one unresolved
+candidate keeps the whole phrase ambiguous. That is why `t5` stays ambiguous
+though MYD88 alone resolves: NF-kB and TLR failed as a complex and a family, not
+as noise. Populate `ambiguity` with all three and leave `uniprot_accession` null.
+
+The rule above applies unchanged, and it is what makes this route safe to add at
+all: an unresolved target is a correct output, a confidently wrong accession
+poisons every number downstream of it.
 
 ### 5. Emit
 
@@ -382,6 +427,57 @@ Two consequences. Read all three arrays — an intake that reads `yes` and `no`
 silently drops every null result. And when the shared `Evidence.direction`
 mapping is settled, argue for a third value rather than mapping `no_effect` onto
 `contradicts`.
+
+### 11. The target lives in an intervention node, not an entity node
+
+The first real graph the upstream mapper produced — `upstream_graph_real.json`,
+`g_1a4f`, round 2, status `ok` — made this intake nominate nothing. Its five
+things are the whole graph:
+
+| id | kind | name |
+| --- | --- | --- |
+| `t1` | `small_molecule` | IRAK4 inhibition |
+| `t2` | `process` | myeloid inflammatory signalling |
+| `t3` | `process` | synovial fibroblast driven inflammation |
+| `t4` | `small_molecule` | MyD88 dimerization inhibition |
+| `t5` | `process` | TLR/MyD88/NF-kB signalling axis |
+
+Not one node is typed `protein` or `gene`, so the first half of the nomination
+rule is false for all five and the intake returned an empty list against a graph
+whose own `question` names IRAK4. Every protein is present — IRAK4, MyD88, NF-kB
+— but only inside intervention names and aliases (`PF-06650833`, `ST2825`).
+
+`kind: small_molecule` on "IRAK4 inhibition" is not a lie. The mapper is naming
+what the experiments manipulated, and what they manipulated was an intervention:
+a compound class defined by its mechanism of action. That is one level coarser
+than the entity we expected, and our expectation came from reading SCHEMA.md
+rather than from data. It survived until first contact with a real graph.
+
+The second nomination route exists for this — scan `name` and `aliases` for
+gene-symbol-shaped tokens, capture the adjacent action word, emit
+`symbol_candidates` with provenance. **The regex only proposes. UniProt
+confirms.** A token that looks like a symbol is not a protein until an accession
+comes back; `ST2825` and `KIC-0101` are symbol-shaped and are compound codes.
+Nominating off a regex hit alone is failure mode 3 with a new entry point.
+
+`t5` is where that has to hold. "TLR/MyD88/NF-kB signalling axis" yields three
+candidates, and three is the answer — it stays ambiguous. TLR is a receptor
+family, MYD88 resolves cleanly to Q99836, and NF-kB is a transcription factor
+complex — a dimer of subunits such as RELA and NFKB1 — with no single gene to
+resolve to. NF-kB failing verification is the correct outcome, not a gap to paper
+over by picking RELA, and one clean resolution among three does not collapse the
+phrase onto MYD88. Same refusal as failure mode 7, one node-kind over.
+
+The action word carries the rest. `t1` says "IRAK4 **inhibition**" and stops
+there; `t4` says "MyD88 **dimerization** inhibition", which names the interaction
+rather than just the intent. Disrupting a dimerization interface is the
+oligomeric-state shape from step 2, and `f3` states it verbatim: *"the effect of
+disrupting MyD88 dimerization by ST2825"*. So `t4` supports
+`interaction_to_disrupt: "dimerization interface (oligomeric state)"` and,
+unusually, a real `mechanism_hypothesis` rather than `unknown` — the rare case
+where the graph hands us mechanism failure mode 5 would otherwise force us to
+leave unstated. Take it, but only after MYD88 verifies as Q99836. The action word
+never substitutes for the accession.
 
 ## What this skill does not do
 
