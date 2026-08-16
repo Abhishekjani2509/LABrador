@@ -270,6 +270,16 @@ under the table, because a flag in a cell is easy to skim past.
 `test_every_mode_keeps_the_signals_a_reader_must_not_miss` is what stops a
 fifth mode from quietly becoming a softer one.
 
+**`prose` is kept short by two rules.** Argued fields — the falsifier, the
+decisive experiment, the strongest objection — are clipped to whole sentences
+and the clip is always marked `…`, because an argument that ends mid-case must
+not look like one that ended. The statement itself is never clipped: it is the
+hypothesis, and a hedged claim cut short reads as a flat one. Second, a caveat
+that every hypothesis carries describes the *run*, so it is stated once under
+the header instead of once per hypothesis. On the demo slate the two rules take
+`report.md` from 8.3k characters to 3.9k, against 31k for the same slate in
+`full`.
+
 Verification carries a gate table and one of four verdicts (`verified` /
 `qualified` / `unverified` / `rejected`) in `slate.json` and in the full report:
 
