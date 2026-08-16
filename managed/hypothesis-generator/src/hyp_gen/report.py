@@ -32,9 +32,49 @@ is what stops a new mode from quietly becoming a softer one.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from hyp_gen.schema import Hypothesis, Slate
+
+# How much of a model-written field prose mode will show. These are the only
+# numbers in this module that trade completeness for brevity, so they are named
+# and kept together rather than inlined.
+#
+# The statement is never clipped: it *is* the hypothesis, and a hedged claim cut
+# short reads as a flat one. The three argued fields are clipped at sentence
+# boundaries only, and a clip is always marked, because an argument that ends
+# mid-case must not look like an argument that ended.
+_CLIP_FALSIFIER = 240
+_CLIP_EXPERIMENT = 240
+_CLIP_OBJECTION = 320
+_CLIP_CAVEAT = 120
+
+# A sentence ends at .!? followed by whitespace and something that starts a new
+# sentence. Requiring the capital keeps "support 0.505 below" and "e.g. foo"
+# from being read as boundaries.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\"'])")
+
+
+def _clip(text: str, limit: int) -> str:
+    """Whole sentences up to ``limit``, marked with … if anything was dropped."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    kept = ""
+    for sentence in _SENTENCE_END.split(text):
+        if kept and len(kept) + len(sentence) + 1 > limit:
+            break
+        if not kept:
+            kept = sentence
+            if len(kept) > limit:
+                # One sentence longer than the budget: cut on a word so the
+                # clip mark lands somewhere a reader can see it.
+                kept = kept[:limit].rsplit(" ", 1)[0]
+                break
+        else:
+            kept = f"{kept} {sentence}"
+    return f"{kept.rstrip()} …" if kept != text else text
 
 _BAR = "█"
 
@@ -180,72 +220,66 @@ def _dropped_detail(hypothesis: Hypothesis) -> str:
         counts.append(f"{len(hypothesis.critiques) - 1} more critique(s)")
     if not counts:
         return ""
-    return (
-        f"<sub>Not shown: {', '.join(counts)}, the mechanism write-up and the "
-        "gate table — all of it in `slate.json`. Recover with "
-        "`hypgen --report-from slate.json --report-mode full --out .`</sub>"
-    )
+    return f"<sub>Not shown: {', '.join(counts)} — `--report-mode full`</sub>"
 
 
-def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
+def _hypothesis_brief_md(
+    hypothesis: Hypothesis, position: int, shared_caveats: frozenset[str] = frozenset()
+) -> str:
+    """The reading view: the claim, its shape, and the three things that decide
+    what to do about it -- what kills it, what settles it, what the best critic
+    said. Everything argued is clipped to sentences and marked when clipped."""
     art = hypothesis.articulation
     out: list[str] = []
-    title = art.statement if art else (
-        f"{hypothesis.subject_name} → {hypothesis.object_name} "
-        f"({hypothesis.motif.replace('_', ' ')})"
+    out.append(
+        f"## {position}. {hypothesis.subject_name} → {hypothesis.object_name}"
     )
-    out.append(f"## {position}. {title}")
     out.append("")
 
-    # A failed hypothesis leads with the failure, before any prose makes it
-    # sound alive.
-    badges = _failure_badges(hypothesis)
-    if badges:
-        out.append(" · ".join(badges))
-        out.append("")
-
-    # One paragraph that says what kind of idea this is, how it fared, and how
-    # it scored — the sentence a colleague would say out loud before showing
-    # you the details.
-    motif = _an(hypothesis.motif.replace("_", " "))
-    hops = f"{hypothesis.hops} hop{'s' if hypothesis.hops != 1 else ''}"
-    intro = f"This is {motif} over {hops}"
-    chain = _chain(hypothesis)
-    intro += f": {chain}." if chain else "."
-    judged: list[str] = []
+    # Status before content: a rejected hypothesis must not read as a live one
+    # for even a paragraph.
+    status = _failure_badges(hypothesis)
     if hypothesis.verification:
-        judged.append(
-            f"Verification judged it **{hypothesis.verification.verdict.upper()}**"
-        )
+        status.append(f"**{hypothesis.verification.verdict.upper()}**")
     if hypothesis.verdict:
-        clause = f"the critics read it as {hypothesis.verdict.replace('_', ' ')}"
-        judged.append(clause if judged else clause[0].upper() + clause[1:])
-    if judged:
-        intro += " " + ", and ".join(judged) + "."
-    scores = _scores_sentence(hypothesis)
-    if scores:
-        intro += " " + scores
-    out.append(intro)
+        status.append(hypothesis.verdict.replace("_", " "))
+    if hypothesis.rank_score is not None:
+        status.append(f"rank {hypothesis.rank_score:.2f}")
+    status += [
+        f"{label} {hypothesis.scores[key]:.2f}"
+        for key, label in _SCORE_LABELS[:3]
+        if key in hypothesis.scores
+    ]
+    out.append(" · ".join(status))
     out.append("")
+
+    # The statement is the hypothesis and is never clipped. Without an
+    # articulation there is no claim to state, so the chain stands in for it.
+    if art:
+        out.append(art.statement)
+        out.append("")
+    chain = _chain(hypothesis)
+    if chain:
+        out.append(f"`{hypothesis.motif}` · {chain}")
+        out.append("")
 
     if art:
-        out.append(f"What would kill it: {art.falsifier}")
+        out.append(f"**Kills it.** {_clip(art.falsifier, _CLIP_FALSIFIER)}")
         out.append("")
-        out.append(f"The experiment that would settle it: {art.decisive_experiment}")
+        out.append(
+            f"**Settles it.** {_clip(art.decisive_experiment, _CLIP_EXPERIMENT)}"
+        )
         out.append("")
 
     # One objection, not all of them: the critics are ordered so the first lens
     # is the one that most nearly sank it. The rest are corroboration, and
-    # corroboration is what brief mode is allowed to drop.
+    # corroboration is what this view is allowed to drop.
     if hypothesis.critiques:
         critique = hypothesis.critiques[0]
-        verdict = critique.verdict.replace("_", " ")
         out.append(
-            f"The strongest objection comes from the {critique.lens or 'general'} "
-            f"critic, which read the hypothesis as {verdict}:"
+            f"**Objection ({critique.lens or 'general'}).** "
+            f"{_clip(critique.strongest_objection, _CLIP_OBJECTION)}"
         )
-        out.append("")
-        out.append(f"> {critique.strongest_objection}")
         out.append("")
 
     halt = _halt_note(hypothesis)
@@ -253,24 +287,19 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
         out.append(f"> {halt}")
         out.append("")
 
-    # Caveats are already full sentences written to be read; run them together
-    # as a paragraph rather than bulleting them apart.
-    if hypothesis.caveats:
-        count = len(hypothesis.caveats)
-        lead = (
-            "One caveat travels with this hypothesis. "
-            if count == 1
-            else f"{_count_word(count).capitalize()} caveats travel with this hypothesis. "
-        )
-        out.append(lead + " ".join(hypothesis.caveats))
-        out.append("")
-
-    # Warnings are detail; errors mean the hypothesis is invalid, and that
-    # travels at every detail level.
+    # Errors mean the hypothesis is invalid; they are never clipped or summarised.
     errors = [i for i in hypothesis.issues if i.severity == "error"]
     if errors:
-        out.append("Validation rejected it:")
         out.extend(f"- ❌ `{i.code}` {i.detail}" for i in errors)
+        out.append("")
+
+    # Caveats every hypothesis carries are a property of the run, not of this
+    # hypothesis, and are stated once in the header instead. What is left here
+    # is what makes *this* one different.
+    own = [c for c in hypothesis.caveats if c not in shared_caveats]
+    if own:
+        clipped = " · ".join(_clip(c, _CLIP_CAVEAT) for c in own)
+        out.append(f"<sub>Also: {clipped}</sub>")
         out.append("")
 
     dropped = _dropped_detail(hypothesis)
@@ -342,7 +371,9 @@ def _table_md(slate: Slate) -> str:
 # -- trace mode ------------------------------------------------------------
 
 
-def _trace_md(hypothesis: Hypothesis, position: int) -> str:
+def _trace_md(
+    hypothesis: Hypothesis, position: int, shared_caveats: frozenset[str] = frozenset()
+) -> str:
     """The graph walk, node by node, with each edge's evidence hanging off it.
 
     This is the provenance view: it answers "where did this come from" without
@@ -444,7 +475,11 @@ def _trace_md(hypothesis: Hypothesis, position: int) -> str:
     return "\n".join(out)
 
 
-def _hypothesis_md(hypothesis: Hypothesis, position: int) -> str:
+# The audit views take `shared_caveats` and ignore it on purpose: repeating
+# a caveat is a cost a reading view pays and an audit view does not mind.
+def _hypothesis_md(
+    hypothesis: Hypothesis, position: int, shared_caveats: frozenset[str] = frozenset()
+) -> str:
     art = hypothesis.articulation
     out: list[str] = []
     title = art.statement if art else (
@@ -590,43 +625,25 @@ def _header(slate: Slate, mode: str) -> list[str]:
         for v in ("verified", "qualified", "unverified", "rejected")
     )
     if mode == "prose":
-        # A short narrative instead of stat lines. The truncation flag stays in
-        # the same sentence as the read counts: it is the fact that decides how
-        # much any novelty score below is worth.
+        # One status line, not a block of stats. The truncation flag stays on it
+        # rather than moving to a footnote: it is the fact that decides how much
+        # any novelty score below is worth.
         outcomes = ", ".join(
             f"{slate.counts.get(f'verification_{v}', 0)} {v}"
             for v in ("verified", "qualified", "unverified", "rejected")
             if slate.counts.get(f"verification_{v}", 0)
         )
-        n = len(slate.hypotheses)
-        produced = (
-            f"This run produced {_count_word(n)} "
-            f"hypothes{'is' if n == 1 else 'es'}"
-            + (f" ({outcomes})" if outcomes else "")
-            + f" in {slate.counts.get('model_calls', 0)} model calls, "
-            f"working from a graph of {slate.counts.get('things', 0)} things, "
-            f"{slate.counts.get('links', 0)} links and "
-            f"{slate.counts.get('findings', 0)} findings."
-        )
-        read = (
-            f" The underlying search read {cov.get('read')} of its "
-            f"{cov.get('found')} results"
-            + (
-                ", so the graph is a **truncated sample** of the literature, "
-                "not the literature"
-                if cov.get("truncated")
-                else ""
-            )
-            + "."
-        )
         return [
-            f"# Hypotheses — {slate.graph_id} (round {slate.round})",
+            f"# {slate.graph_id} · round {slate.round}"
+            + (f" · {slate.question}" if slate.question else ""),
             "",
-            f"The question this slate answers: **{slate.question}**"
-            if slate.question
-            else "",
-            "",
-            produced + read,
+            f"{len(slate.hypotheses)} hypotheses"
+            + (f" ({outcomes})" if outcomes else "")
+            + f" · {slate.counts.get('model_calls', 0)} model calls · graph "
+            f"{slate.counts.get('things', 0)}/{slate.counts.get('links', 0)}/"
+            f"{slate.counts.get('findings', 0)} things/links/findings · read "
+            f"{cov.get('read')}/{cov.get('found')}"
+            + (" **truncated**" if cov.get("truncated") else ""),
             "",
         ]
     return [
@@ -656,7 +673,7 @@ def _header(slate: Slate, mode: str) -> list[str]:
 # Every mode is a function of the slate and nothing else. Adding one means
 # adding a renderer here; the CLI, the filenames and the mode validation all
 # read from this map rather than repeating the list.
-MODES: dict[str, Callable[[Hypothesis, int], str]] = {
+MODES: dict[str, Callable[[Hypothesis, int, frozenset[str]], str]] = {
     "prose": _hypothesis_brief_md,
     "trace": _trace_md,
     "full": _hypothesis_md,
@@ -691,9 +708,28 @@ def to_markdown(slate: Slate, mode: str = "prose") -> str:
     # read straight off the page.
     if cov.get("truncated") or cov.get("depth") == "quick":
         out += [
-            "> Absence of a link in this graph is **not** evidence of absence in "
-            "the literature. Every novelty score below is discounted for that, "
-            "but read the per-hypothesis caveats before acting on one.",
+            "> Absence of a link is **not** evidence of absence: it means this "
+            "search did not surface it, never that nobody has shown it. Novelty "
+            "below is discounted for that.",
+            "",
+        ]
+
+    # A caveat every hypothesis carries describes the run, not any one of them.
+    # Stating it once here and dropping it from each hypothesis is the whole
+    # difference between a report that repeats itself and one that does not --
+    # on a two-hypothesis slate the same coverage caveat was printed three
+    # times, counting the header.
+    shared: frozenset[str] = frozenset()
+    if len(slate.hypotheses) > 1:
+        shared = frozenset.intersection(
+            *(frozenset(h.caveats) for h in slate.hypotheses)
+        )
+    if shared and mode == "prose":
+        ordered = [c for c in slate.hypotheses[0].caveats if c in shared]
+        out += [
+            "<sub>Applies to every hypothesis below: "
+            + " · ".join(_clip(c, _CLIP_CAVEAT) for c in ordered)
+            + "</sub>",
             "",
         ]
 
@@ -702,7 +738,7 @@ def to_markdown(slate: Slate, mode: str = "prose") -> str:
     else:
         render = MODES[mode]
         for i, hypothesis in enumerate(slate.hypotheses, start=1):
-            out.append(render(hypothesis, i))
+            out.append(render(hypothesis, i, shared))
 
     if slate.asks:
         out += ["---", "", "## Next round", "", "One ask per request:", ""]

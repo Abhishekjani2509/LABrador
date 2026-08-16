@@ -311,12 +311,13 @@ def test_the_brief_report_is_the_default_and_is_much_shorter(
     assert brief == to_markdown(slate, mode="prose")
     assert len(brief) < len(to_markdown(slate, mode="full")) / 2
     # The corroboration is what got dropped, not the idea or its refutation.
-    assert "What would kill it" in brief
-    assert "The experiment that would settle it" in brief
+    assert "Kills it" in brief
+    assert "Settles it" in brief
     assert "Source sentences" not in brief
     # ...and a reader is told detail was withheld, rather than left to assume
     # the short report is the whole record.
-    assert "slate.json" in brief
+    assert "Not shown" in brief
+    assert "--report-mode full" in brief
 
 
 def test_the_brief_report_keeps_every_warning_the_full_one_has(
@@ -327,9 +328,57 @@ def test_the_brief_report_keeps_every_warning_the_full_one_has(
     brief = to_markdown(slate)
     # Truncated coverage: the absence-of-evidence warning is not optional.
     assert "not** evidence of absence" in brief
-    # Per-hypothesis caveats survive too -- they carry the same warning down to
-    # the individual claim.
-    assert "caveat" in brief.lower()
+    # The caveats themselves survive, not merely the word: a caveat shared by
+    # every hypothesis is hoisted to the header rather than dropped.
+    caveats = {c for h in slate.hypotheses for c in h.caveats}
+    assert caveats, "fixture must produce caveats for this to test anything"
+    for caveat in caveats:
+        opening = caveat.split(":")[0][:40]
+        assert opening in brief, caveat
+
+
+def test_a_caveat_every_hypothesis_shares_is_stated_once(
+    graph: KnowledgeGraph,
+) -> None:
+    """Repetition is the enemy of a short report, but dropping is the enemy of
+    a safe one -- so a shared caveat moves up, it does not disappear."""
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    assert len(slate.hypotheses) > 1
+    shared = frozenset.intersection(*(frozenset(h.caveats) for h in slate.hypotheses))
+    assert shared, "fixture must have a caveat common to every hypothesis"
+
+    brief = to_markdown(slate)
+    for caveat in shared:
+        opening = caveat.split(":")[0][:40]
+        assert brief.count(opening) == 1, f"stated {brief.count(opening)}x: {caveat}"
+    assert "Applies to every hypothesis below" in brief
+
+
+def test_clipping_cuts_on_sentences_and_always_marks_the_cut() -> None:
+    """An argument that ends mid-case must not look like one that ended.
+
+    Clipping is the one place this module trades completeness for brevity, so
+    it may only cut at a sentence boundary and must leave a visible mark.
+    """
+    from hyp_gen.report import _clip
+
+    short = "One sentence that fits."
+    assert _clip(short, 100) == short  # nothing to do, nothing marked
+
+    two = "First sentence here. Second sentence that pushes past the budget."
+    clipped = _clip(two, 30)
+    assert clipped == "First sentence here. …"
+    assert "Second" not in clipped
+
+    # A decimal is not a sentence boundary -- support 0.505 must survive whole.
+    decimals = "Support fell to 0.505 in the recomputation. Then more text follows."
+    assert _clip(decimals, 45).startswith("Support fell to 0.505 in the recomputation.")
+
+    # A single sentence longer than the budget still gets cut and marked, on a
+    # word boundary rather than mid-token.
+    one_long = "A single very long sentence that simply will not fit anywhere"
+    cut = _clip(one_long, 20)
+    assert cut.endswith("…") and len(cut) <= 24 and not cut.startswith("A single very long s ")
 
 
 def test_every_mode_keeps_the_signals_a_reader_must_not_miss(

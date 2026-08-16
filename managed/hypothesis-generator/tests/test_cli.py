@@ -39,7 +39,9 @@ def test_dry_run_needs_no_credentials(tmp_path: Path, capsys, monkeypatch) -> No
     slate = json.loads((tmp_path / "slate.json").read_text())
     assert slate["graph_id"] == "g_demo1"
     assert slate["counts"]["model_calls"] == 0
-    assert (tmp_path / "report.md").read_text().startswith("# Hypotheses")
+    # The heading names the graph and round rather than the word "Hypotheses":
+    # the reader knows what file they opened, and the header has to earn its line.
+    assert (tmp_path / "report.md").read_text().startswith("# g_demo1 · round")
 
 
 def test_the_full_report_is_recoverable_from_a_saved_slate(
@@ -76,7 +78,9 @@ def test_every_mode_can_be_written_in_one_pass(tmp_path: Path, monkeypatch) -> N
     )
     assert code == 0
     for name in ("report.md", "report-table.md", "report-trace.md", "report-full.md"):
-        assert (tmp_path / name).read_text().startswith("# Hypotheses"), name
+        rendered = (tmp_path / name).read_text()
+        assert rendered.startswith("# "), name
+        assert "g_demo1" in rendered, name
     # The record is written whatever views were asked for.
     assert (tmp_path / "slate.json").exists()
 
