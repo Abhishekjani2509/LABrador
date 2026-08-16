@@ -149,6 +149,62 @@ Databases: `pdb100, afdb50, afdb-swissprot, afdb-proteome, mgnify_esm30,
 gmgcl_id, BFVD, cath50, bfmd`. Use `pdb100` when you need PDB IDs back —
 afdb/BFVD return AlphaFold/UniProt accessions and need a different parse.
 
+### 4b. Foldseek MULTIMER — the right tool for any assembly
+
+Use this whenever the input has more than one chain. Signature, verbatim from
+`proto_tools/tools/structure_alignment/foldseek/foldseek_multimer_search.py`:
+
+```python
+@tool(
+    key="foldseek-multimer-search",
+    label="Foldseek Multimer Search",
+    category="structure_alignment",
+    input_class=FoldseekMultimerSearchInput,
+    config_class=FoldseekMultimerSearchConfig,
+    output_class=FoldseekMultimerSearchOutput,
+    description="Search Foldseek multimer (complex) structural homology — remote (server) or local (CLI)",
+    uses_gpu=False,
+    example_input=example_input,
+    cacheable=True,
+)
+def run_foldseek_multimer_search(
+    inputs: FoldseekMultimerSearchInput,
+    config: FoldseekMultimerSearchConfig,
+    instance: Any = None,
+) -> FoldseekMultimerSearchOutput:
+```
+
+`FoldseekMultimerSearchInput` has one field, `structure: Structure` — "Multi-chain
+query complex (Structure object, file path, or raw PDB/CIF string)". Config is
+`search_mode` (`'remote'` default | `'local'`), `databases` (default
+`['pdb100']`), `mode` (`'3diaa'` default, **wire-encoded as `complex-{mode}`**),
+`poll_interval_seconds`, `timeout_seconds`, plus a local-only block (`local_db`
+required, `evalue`, `sensitivity`, `max_seqs`, `alignment_type`,
+`tmscore_threshold`, `lddt_threshold`, `num_threads`, `use_gpu`). Output is
+`ticket_id`, `hits`, `num_hits`, `databases_queried`, `result_url`.
+
+```python
+from proto_tools.tools.structure_alignment.foldseek.foldseek_multimer_search import (
+    FoldseekMultimerSearchConfig, FoldseekMultimerSearchInput,
+    run_foldseek_multimer_search)
+
+result = run_foldseek_multimer_search(
+    FoldseekMultimerSearchInput(structure="/path/8DYG-assembly1.cif"),
+    FoldseekMultimerSearchConfig(search_mode="remote", databases=["pdb100"],
+                                 mode="3diaa", timeout_seconds=900.0))
+```
+
+**No Modal, no GPU, no `MODAL_PROFILE`.** `uses_gpu=False`, and the tool's own
+`local_execution_reason` says remote mode "queries the public Foldseek server
+over HTTP, so device=... would only add a network hop". It POSTs to the same
+`search.foldseek.com/api/ticket` endpoint as the single-chain tool with
+`mode='complex-3diaa'`; `/foldmulti` is the web UI path, not the API path.
+
+Verified: IL-17A 8DYG assembly1 (2 chains) 863 rows in **405 s**; TNF-alpha
+1A8M assembly1 (3 chains) 6,891 rows. **Read `result_url` and parse the raw m8
+yourself** — the wrapper's parser drops the columns that make it a multimer
+result. See the failure modes.
+
 ## 5. Neighbour precedent — `neighbour_precedent.py`
 
 This is wired up. Run the module in this directory rather than reassembling the
@@ -166,12 +222,16 @@ python. It needs `paperclip` on PATH and `PAPERCLIP_API_KEY`; the module reads
 
 The procedure it implements, in order:
 
-0. **Count the chains and pick the search.** `>1` chain routes to
+0. **Count the chains and pick the search.** `>1` polymer chain routes to
    `foldseek-multimer-search` (`mode='complex-3diaa'`), one chain to
-   `foldseek-search`. This is not a preference — `foldseek-search` reads only
-   ONE chain of a multi-chain file, so on an oligomer it answers a different
-   question. `--multimer no` pins the old path; a multimer failure falls back
-   to it and records the error in `foldseek.multimer_attempted_and_failed`.
+   `foldseek-search`. This is not a preference: `foldseek-search` aligns each
+   chain of a multi-chain file *independently* and returns the union, with no
+   complex assignment and no complex TM-score, so on an oligomer it answers a
+   different question. `--multimer no` pins the old path; a multimer failure
+   falls back to it and records the error in
+   `foldseek.multimer_attempted_and_failed`. Chains are counted from ATOM
+   records only — a ligand in its own chain id must not trigger the multimer
+   path.
 1. **Foldseek against `pdb100`**, remote. Single-chain path: `mode='3diaa'`
    plus a second `mode='tmalign'` search joined on `target_id` for TM-scores.
    Multimer path: **no second search** — the complex TM-score is already in the
@@ -191,7 +251,9 @@ The procedure it implements, in order:
 
 Output keys worth knowing: **`search_path`** (`multimer` | `single_chain` — read
 this first; it decides whether the block is evidence about an interface),
-`n_query_chains_in_file` / `n_query_chains_searched`, `neighbours` (per entry —
+`n_query_chains_in_file`, `n_query_chains_observed_in_result` (None on the
+single-chain path — the wrapper drops the column that would tell you) and
+`chains_assembled_into_complexes`, `neighbours` (per entry —
 `tm_score` with `tm_score_kind`, `chains`, `n_query_chains_matched`,
 `probability`, `evalue`, `has_druglike_holo`, `ligands`, `ligand_names`,
 `attribution`, `title`), `neighbour_accessions` (per accession across *all* its
@@ -510,8 +572,10 @@ matched it falls back to entry accessions and says so.
 
 ### Foldseek's `evalue` and `bit_score` are mislabeled in remote mode
 
-The public server emits a 17-column m8, but the parser reads columns 10 and 11
-per the standard 12-column layout. Confirmed against the raw m8:
+The public server emits a wide m8 — **21 columns single-chain, 26 multimer**
+(an earlier note here said 17; re-measured on IL-17A 8DYG, both paths) — but the
+parser reads columns 10 and 11 per the standard 12-column layout. Confirmed
+against the raw m8 on both endpoints:
 
 | field | actually holds | best hit | worst hit |
 | --- | --- | --- | --- |
@@ -520,7 +584,15 @@ per the standard 12-column layout. Confirmed against the raw m8:
 
 **Do not sort or threshold on `hit.evalue`.** Hits arrive best-first, so ranking
 by list order is safe; if you must threshold, use `hit.bit_score` as the E-value.
-The real bit score (1338) is in column 12 and is dropped entirely.
+The real bit score is in raw column 13 and is dropped entirely.
+
+The single-chain layout, 1-indexed, for anyone parsing the raw archive:
+1 query chain, 2 target, 3 identity %, 4 alignment length, 5 mismatches,
+6 gap openings, 7-8 query start/end, 9-10 target start/end, **11 probability**,
+**12 E-value**, 13 bit score, 14-15 query/target length, 16-17 aligned
+sequences, 18 target C-alpha coords, 19 target sequence, 20 taxid, 21 species.
+The multimer layout matches through column 19 and then diverges — see
+"`foldseek-multimer-search` returns 26 columns".
 
 ### There is no TM-score field — but `mode='tmalign'` hides it in `bit_score`
 
@@ -613,6 +685,32 @@ Same input, 8DYG assembly 1:
 On TNF-alpha (3 chains) the difference is starker still: 1,010 rows against
 **6,891**, and **1,206 complex assignments of size 3** — trimer-to-trimer
 matches, which is exactly the object TNF-alpha's site belongs to.
+
+### The complex TM-score catches a wrong biological assembly
+
+Unexpected and useful. `2AZ5` — the canonical TNF-alpha holo entry, SPD304
+bound — has **four chains in `2AZ5-assembly1.cif`**, two ligand-bound dimers,
+not the TNF trimer. TNF-alpha's biological unit is a trimer and its site is on
+the 3-fold axis, so that file is the wrong object to ask an interface question
+about.
+
+The multimer search says so without being told:
+
+| query | chains | best NON-SELF complex qTM |
+| --- | --- | --- |
+| 1A8M assembly1 (trimer) | 3 | **0.99** (1TNF), then 0.983, 0.98 |
+| 2AZ5 assembly1 | 4 | **0.495** (5MU8), then 0.495, 0.494 |
+
+A trimer query matches the TNF superfamily at 0.85-0.99. The 4-chain query
+matches nothing above 0.50, including other TNF-alpha entries — because there is
+no 4-chain TNF in the PDB to match. The single-chain search cannot produce this
+signal at all; every protomer matches every protomer regardless.
+
+So **a uniformly low best complex TM-score against a family you know your target
+belongs to is a signal that the assembly is wrong**, not that the fold is
+unusual. Check the chain count against the known oligomeric state before
+concluding anything about the neighbourhood. `assembly1` is the right default
+over the asymmetric unit, but it is not a guarantee of the biological oligomer.
 
 ### `query_end` is NOT a test of which search ran
 
@@ -805,12 +903,30 @@ Three more query shapes that fail, all measured on `pdb_v.entry_ligands`:
   in **9 ms**, while `FROM structures_by_accession st JOIN entry_ligands l ON
   l.entry_id = st.entry_id WHERE st.accession = ...` **times out**. Same rows,
   same accession.
-- **One accession at a time, and even then expect one to fail.** Sweeping the
-  17 accessions of the IL-17A single-chain neighbourhood as one `unnest` array
-  timed out; per accession, 16 of 17 returned in ~1.4 s and **P67861 timed out
-  reproducibly at 120 s**. So the sweep retries and, on persistent failure,
-  marks that accession `lookup_failed` / `holo_determined: false` rather than
-  recording it as having no drug-like ligands. A timeout is not a zero.
+- **One accession at a time — the brief's rule, and it is not optional.**
+  Sweeping the 17 accessions of the IL-17A single-chain neighbourhood as one
+  `unnest` array timed out; per accession, 16 of 17 returned in ~1.4 s and
+  **P67861 timed out reproducibly at 120 s**. The same is true of the holo
+  aggregation: unioned over the 8 TNF-superfamily accessions it timed out even
+  at a 300 s client budget, and per accession it is bounded. Both sweeps now
+  loop. On persistent failure the accession is marked `lookup_failed` /
+  `holo_determined: false` rather than recorded as having no drug-like ligands.
+  **A timeout is not a zero.**
+- **Retry short-then-long, not long-twice.** A deterministically slow statement
+  retried at the same generous budget just doubles the bill — P67861 at
+  2 x 300 s would cost ten minutes of a run with sixteen good accessions left.
+  90 s then 240 s.
+
+**Attribution caveat on all of the above.** Some of these timeouts were measured
+while a parallel session was running **16 concurrent `paperclip` processes**
+against the same backend, so the absolute thresholds are load-dependent and
+should not be read as fixed properties of the queries. What is NOT
+load-dependent, because it was measured back-to-back in the same seconds, are
+the *relative* results: `comp_type` present vs absent (6 ms vs timeout) and
+`IN (SELECT ...)` vs JOIN (9 ms vs timeout). Trust the comparisons, treat the
+timeout values as a floor on how bad it gets, and keep the retries — a shared
+backend under someone else's load is the normal condition here, not an
+anomaly.
 
 `neighbour_precedent.py` also short-circuits the accession aggregation entirely
 when nothing classified drug-like: the `n_dl > 0` filter is then unsatisfiable,
@@ -850,7 +966,7 @@ drug-like, total and holo counts, and the ensemble actually used. Fill
 applied and how many entries it removed.
 
 For `structural_neighbour_precedent` specifically, carry through: **the
-`search_path`** (`multimer` or `single_chain`) and the chain counts, the
+`search_path`** (`multimer` or `single_chain`) and `chains_assembled_into_complexes`, the
 TM-score with its `tm_score_kind` (a complex TM-score and a chain TM-score are
 not the same number — never the raw `evalue`/`bit_score`), **both** holo counts
 per neighbour with the entry-level one named as an upper bound, the ligand
