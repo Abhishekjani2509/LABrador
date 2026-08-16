@@ -292,3 +292,5 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:30 UTC** — merged `msoliman6/literature-graph-mcp` (b9a0c71, tier-2: shared-runtime conflict — union of Cyrus's streaming generator + Soliman's MCP fail-fast watchdog, complexity refactor; wrapper paths fixed to renamed dir) — research-evidence-mapper is now DEPLOYED (manifest + acl + eve wrapper) — typecheck+check green.
 
 - **2026-08-16 00:39 UTC** — merged `vaalessi/program-strategy-valuation` (MERGED) — Harden ROI PoA and antibody support — typecheck+check green.
+
+- **2026-08-16 00:41 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: raw-JSON output contract enforced, and gap ranking that discriminates — typecheck+check green.
