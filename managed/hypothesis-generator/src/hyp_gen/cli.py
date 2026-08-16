@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from hyp_gen import report, valuation, verify, webui
+from hyp_gen import diagram, report, valuation, verify, webui
 from hyp_gen.evidence import build_pack
 from hyp_gen.graph import GraphIndex, KnowledgeGraph
 from hyp_gen.llm import Judge
@@ -106,6 +106,13 @@ def _dry_run(generator: Generator) -> None:
     if not shortlist:
         print("(nothing survived selection — loosen the params or check the graph)")
     print(f"\n{len(shortlist)} shortlisted. No model calls made.")
+
+
+def _emit_diagram(slate: Slate, target: Path) -> None:
+    """Write the trace diagram. Pure over the slate, like the report modes."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(diagram.to_svg(slate))
+    print(f"wrote {target} (trace diagram)")
 
 
 def _emit_webui(slate: Slate, target: Path) -> None:
@@ -249,6 +256,16 @@ def main(argv: list[str] | None = None) -> int:
             "id-referenced one-liner highlights"
         ),
     )
+    parser.add_argument(
+        "--emit-diagram",
+        type=Path,
+        metavar="FILE.svg",
+        help=(
+            "also write an SVG of the traces: nodes deduplicated across "
+            "hypotheses, edges blue where every finding supports them and red "
+            "where one argues against them"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.report_from:
@@ -258,7 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         slate = Slate.model_validate(json.loads(args.report_from.read_text()))
         # --emit-webui alone means the caller wants the payload, not a report
         # they never asked for.
-        modes = args.report_mode or ([] if args.emit_webui else ["prose"])
+        asked_for_data = args.emit_webui or args.emit_diagram
+        modes = args.report_mode or ([] if asked_for_data else ["prose"])
         if args.out:
             args.out.mkdir(parents=True, exist_ok=True)
             for mode in modes:
@@ -269,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
             print("\n\n".join(to_markdown(slate, mode=m) for m in modes))
         if args.emit_webui:
             _emit_webui(slate, args.emit_webui)
+        if args.emit_diagram:
+            _emit_diagram(slate, args.emit_diagram)
         return 0
 
     if args.emit_programs_from:
@@ -353,6 +373,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.emit_webui:
         _emit_webui(slate, args.emit_webui)
+
+    if args.emit_diagram:
+        _emit_diagram(slate, args.emit_diagram)
 
     if args.emit_programs:
         return _emit_programs(slate, args.frame, args.emit_programs)
