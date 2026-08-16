@@ -109,6 +109,12 @@ Run these in order, once.
 6. **Propose name merges** against the **whole graph**, not just this round —
    "KRAS" arriving in round 3 joins the existing "K-Ras" node instead of forking
    it. You propose; the assembly script applies.
+   **The graph must be self-describing.** Emit the disease or indication as a
+   `disease` node whenever the question concerns one, and give every `protein`
+   and `gene` node its `uniprot_accession` (resolve with
+   `search -s proteins "<name> human"`). Downstream nodes read these graphs
+   directly and must not have to recover either fact by parsing the question
+   string. Assembly reports what is missing in `coverage`.
    **Every intervention states its target.** When a compound, inhibitor,
    knockdown or knockout enters the graph, emit a finding linking it to the
    protein or gene it acts on (`X inhibits IRAK4`), quoted like any other. Keep
@@ -425,11 +431,15 @@ Emit exactly this object. Fill every field. Empty lists where nothing was found;
   },
 
   "things": [
-    { "id": "t1", "name": "antibody 38C2", "kind": "protein",
-      "aliases": ["38C2"], "mentions": 14,
+    { "id": "t1", "name": "IRAK4", "kind": "gene",
+      "aliases": ["IRAK-4"], "mentions": 14,
       "uniprot_accession": "Q9NWZ3", "gene_symbol": "IRAK4",
       "resolved_by": "f7 quote names the kinase directly",
-      "ambiguity": [], "merged_from": [] }
+      "ambiguity": [], "merged_from": [] },
+    { "id": "t2", "name": "rheumatoid arthritis", "kind": "disease",
+      "aliases": ["RA"], "mentions": 9 },
+    { "id": "t3", "name": "PF-06650833", "kind": "small_molecule",
+      "aliases": ["zimlovisertib"], "mentions": 4 }
   ],
 
   "papers": [
@@ -471,7 +481,7 @@ Field vocabularies, exact spellings, no substitutes:
 - `status` — `ok` | `empty` | `partial` | `failed`
 - `things.kind` — `protein` | `small_molecule` | `gene` | `disease` | `process` | `method`
 - `papers.study_type` — `meta_analysis` | `clinical_trial` | `human_cohort` | `animal` | `test_tube` | `computational` | `review`
-- `findings.how` / `links.how` — `inhibits` | `activates` | `binds` | `increases` | `decreases` | `drives` | `associated_with`
+- `findings.how` / `links.how` — `inhibits` | `activates` | `binds` | `suppresses` | `increases` | `decreases` | `causes` | `drives` | `treats` | `associated_with`
 - `findings.says` — `yes` | `no` | `no_effect`
 - `findings.section` — `abstract` | `introduction` | `results` | `methods` | `discussion` | `figure_caption`
 - `links.state` — `agreed` | `disagreed` | `single_source` | `no_effect`
