@@ -107,6 +107,19 @@ function isAncestor(sha: string, cwd: string): boolean {
  * dir. Returns "clean" | "moved" | "collision" — collision means a moved
  * file already exists at the destination, which needs human judgment.
  */
+function listFilesRecursive(dir: string, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      out.push(...listFilesRecursive(join(dir, entry.name), rel));
+    } else {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
 function fixDeadPaths(cwd: string): "clean" | "moved" | "collision" {
   let moved = false;
   for (const [dead, live] of Object.entries(RENAMES)) {
@@ -114,11 +127,18 @@ function fixDeadPaths(cwd: string): "clean" | "moved" | "collision" {
     if (!existsSync(deadDir)) {
       continue;
     }
-    for (const entry of readdirSync(deadDir)) {
-      if (existsSync(join(cwd, "managed", live, entry))) {
+    // FILE-level moves: a shared top dir (.claude/) is not a collision —
+    // only the same file existing at BOTH paths needs a human.
+    const files = listFilesRecursive(deadDir);
+    for (const rel of files) {
+      if (existsSync(join(cwd, "managed", live, rel))) {
+        log(`true collision: managed/${live}/${rel}`);
         return "collision";
       }
-      sh(`git mv "managed/${dead}/${entry}" "managed/${live}/${entry}"`, cwd);
+    }
+    for (const rel of files) {
+      sh(`mkdir -p "$(dirname "managed/${live}/${rel}")"`, cwd);
+      sh(`git mv "managed/${dead}/${rel}" "managed/${live}/${rel}"`, cwd);
       moved = true;
     }
     rmSync(deadDir, { force: true, recursive: true });
