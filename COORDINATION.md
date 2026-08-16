@@ -610,3 +610,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 02:36 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: require every intervention to link to its target — typecheck+check green.
 - **2026-08-16 02:48 UTC** — merged `rafwiewiora/druggability-dossier` (b5e4050, tier-2: new ppi-hypothesis skill resurrected the dead path — file-level check showed zero true collisions, moved whole skill to small-molecule-tractability-review) — big drop: assemble-dossier (end-to-end assembler + validate gate), cofold-check (4 GPU tools THROUGH Modal — GPU stage appears unblocked), terminated-programs, upgraded falsification-sweep/graph-intake — typecheck+check green.
 - **2026-08-16 02:51 UTC** — merged `rafwiewiora/druggability-dossier` (8b2e206, tier-2: rename-location on ppi-hypothesis data files) — typecheck+check green.
+
+- **2026-08-16 02:51 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: intervention->target edges verified in production, 0 orphans — typecheck+check green.
