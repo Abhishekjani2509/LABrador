@@ -241,7 +241,57 @@ def _run_sql(
     if "..." in out and "|" not in out.split("\n")[0]:
         # Long single-column values get truncated with a literal ellipsis.
         raise RuntimeError("paperclip truncated the result; narrow the columns")
-    return _parse_table(out)
+
+    # PAPERCLIP FAILS WITH rc=0. Three of its failure signatures come back on
+    # stdout with a zero exit status, and `_parse_table` finds no `---+---`
+    # rule in any of them, so it returns [] — a failed query and an empty
+    # result set become the same value. Measured: `3LKJ` returned
+    # "vsh: cd: /papers/: Permission denied" three times in a row, rc=0, 17 ms,
+    # and a TNF-alpha run turned 25 unresolved entries into a confident
+    # "25 apo / 0 holo". Raise instead, so the caller's retry sees it.
+    low = out.lower()
+    for sig in (
+        "permission denied",       # a shell error, for a SQL query
+        "something went wrong",    # undocumented, no code, no detail
+        "request timed out",       # not a statement-cost signal
+    ):
+        if sig in low:
+            raise RuntimeError(
+                f"paperclip sql failed with rc=0 and a failure signature "
+                f"({sig!r}): {out.strip()[:300]}"
+            )
+
+    rows = _parse_table(out)
+    if not rows and "row" not in low and "|" not in out:
+        # No rule line, no "(N rows)" trailer, no table at all. Whatever this
+        # is, it is not an empty result set.
+        raise RuntimeError(
+            f"paperclip sql returned no parseable table (rc=0): {out.strip()[:300]!r}"
+        )
+    return rows
+
+
+def _run_sql_retry(
+    sql: str,
+    *,
+    env: dict[str, str],
+    paperclip: str = "paperclip",
+    budgets: tuple[float, ...] = (90.0, 240.0),
+) -> list[dict[str, str]] | None:
+    """`_run_sql` with short-then-long retries. `None` means it never returned.
+
+    Short first, long second — retrying a deterministically slow statement at
+    the same generous budget just doubles the bill. `None` is deliberately a
+    distinct value from `[]`: the caller must be able to tell "the query said
+    there is nothing" from "the query never ran", which is the whole point of
+    the rc=0 signature checks in `_run_sql`.
+    """
+    for budget in budgets:
+        try:
+            return _run_sql(sql, env=env, paperclip=paperclip, timeout=budget)
+        except (RuntimeError, subprocess.TimeoutExpired):
+            continue
+    return None
 
 
 def _sql_list(values: object) -> str:
@@ -698,7 +748,13 @@ def _entry_facts(
     LEFT JOIN cm ON cm.entry_id = e.entry_id
     LEFT JOIN pdb_v.entries en ON en.entry_id = e.entry_id
     """
-    rows = _run_sql(sql, env=env, paperclip=paperclip, timeout=300.0)
+    rows = _run_sql_retry(sql, env=env, paperclip=paperclip)
+    if rows is None:
+        # Never ran. Return {} so the caller's missing-entry reconciliation
+        # marks every entry UNDETERMINED, rather than raising and losing the
+        # Foldseek result entirely. The empty dict is safe ONLY because that
+        # reconciliation exists — without it this is the false-negative path.
+        return {}
 
     def _cands(cell: str) -> list[str]:
         # LEFT(..., 400) is OUR truncation and it leaves no ellipsis, so a
@@ -776,20 +832,10 @@ def _druglike_comp_ids_for_accessions(
             WHERE l.entry_id IN (SELECT entry_id FROM s) AND {_CANDIDATE}
             ORDER BY 1 LIMIT {page} OFFSET {offset}
             """
-            rows = None
-            # Short first, long second. A retry at the same generous timeout
-            # doubles the cost of a deterministically-slow accession for
-            # nothing: P67861 times out reproducibly, and at 2 x 300 s one bad
-            # accession would cost ten minutes of a run that has seven good
-            # ones left to do.
-            for budget in (90.0, 240.0):
-                try:
-                    rows = _run_sql(
-                        sql, env=env, paperclip=paperclip, timeout=budget
-                    )
-                    break
-                except (RuntimeError, subprocess.TimeoutExpired):
-                    rows = None
+            # P67861 times out reproducibly, so short-then-long matters here:
+            # at 2 x 300 s one bad accession would cost ten minutes of a run
+            # that has sixteen good ones left to do.
+            rows = _run_sql_retry(sql, env=env, paperclip=paperclip)
             if rows is None:
                 failed.append(acc)
                 break
@@ -852,6 +898,10 @@ def _accession_precedent(
         FROM a LEFT JOIN pdb_v.structures_by_accession st ON st.accession = a.acc
         GROUP BY 1 ORDER BY 1
         """
+        # Retry, and tolerate a total failure: when every accession's ligand
+        # sweep already failed, this structure-count query is the one thing
+        # still worth having, but its absence must not crash the axis either.
+        rows_n = _run_sql_retry(sql, env=env, paperclip=paperclip) or []
         summary = {
             r["acc"]: _mark(
                 {
@@ -868,8 +918,13 @@ def _accession_precedent(
                 },
                 r["acc"],
             )
-            for r in _run_sql(sql, env=env, paperclip=paperclip, timeout=300.0)
+            for r in rows_n
         }
+        # An accession whose sweep failed still needs a block saying so, even
+        # when the count query returned nothing to hang it on.
+        for acc in accessions:
+            if acc not in summary:
+                summary[acc] = _mark({"n_structures": None}, acc)
         return summary, {}
 
     dl = f"l.comp_id IN ({_sql_list(druglike_ids)})"
@@ -928,13 +983,7 @@ def _accession_precedent(
     """
 
     def _try(sql: str) -> list[dict[str, str]] | None:
-        """Short budget then long. None means the statement never returned."""
-        for budget in (90.0, 240.0):
-            try:
-                return _run_sql(sql, env=env, paperclip=paperclip, timeout=budget)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                continue
-        return None
+        return _run_sql_retry(sql, env=env, paperclip=paperclip)
 
     summary: dict[str, dict[str, Any]] = {}
     titles: dict[str, list[dict[str, Any]]] = {}
@@ -1239,6 +1288,22 @@ def neighbour_precedent(
         paperclip=paperclip,
     )
 
+    # A MISSING ENTRY IS UNDETERMINED, NOT APO. Measured: a TNF-alpha run under
+    # heavy concurrent load got zero rows back from _entry_facts with rc=0, and
+    # every downstream `.get()` then defaulted so cleanly that the module
+    # reported "25 apo / 0 holo, 0 undetermined, 0 accessions, 0 rejected
+    # ligands" — a confident clean negative produced by a retrieval that never
+    # returned. Reconcile the entries asked for against the entries answered,
+    # and refuse to let the gap default to a finding.
+    missing = [h["pdb_id"] for h in filtered if h["pdb_id"] not in entry_facts]
+    if missing:
+        result["not_found"].append(
+            f"entry facts missing for {len(missing)} of {len(filtered)} "
+            f"neighbour entries ({', '.join(missing[:8])}"
+            f"{' ...' if len(missing) > 8 else ''}); their holo/apo state is "
+            "UNDETERMINED and is not reported as apo"
+        )
+
     acc_set: list[str] = []
     for h in filtered:
         f = entry_facts.get(h["pdb_id"], {})
@@ -1276,7 +1341,11 @@ def neighbour_precedent(
                 "ligand_names": f.get("druglike_ligand_names"),
                 # Why each candidate ligand was rejected, from ligand_filter.
                 "rejected_ligands": f.get("rejected_ligands", []),
-                "holo_determined": f.get("holo_determined", True),
+                # `f` empty => the entry never came back => UNDETERMINED.
+                # The default here must be False, not True: `.get(k, True)` on
+                # an absent record is how a failed retrieval becomes a clean
+                # apo call.
+                "holo_determined": f.get("holo_determined", False) if f else False,
                 "undetermined_ligands": f.get("undetermined_ligands", []),
                 "attribution": (
                     "unambiguous"

@@ -28,6 +28,36 @@ Usage
     classify_compound(smiles, molecule_type, structure_type)
 
 Run `python modality.py --selftest` for the calibration set.
+
+Measured performance
+--------------------
+256 cases: 98 IL-17C macrocyclic peptides, 117 IL-17A compounds, 16 named
+drugs chosen to be hard, 22 ChEMBL oligosaccharides, 3 drugs with no SMILES.
+
+    coarse (small_molecule vs not)   256/256
+    false small-molecule calls         0/256   <- the error that matters
+    missed small molecules             0/256
+    fine-grained label               255/256
+
+Known limitations, named
+------------------------
+1. **Depsipeptides.** ROMIDEPSIN is the one fine-grained miss. Its backbone
+   alternates amide and *ester*, so only 2 alpha linkages are found and
+   structure alone calls it `small_molecule`. It is caught only because ChEMBL
+   types it `Protein`. **A depsipeptide that ChEMBL typed `Small molecule`
+   would pass as a small molecule.** No case of that is known in the fixture
+   set; it is an untested hole, not a measured pass.
+2. **No oligonucleotide control was retrievable.** Every ChEMBL
+   `Oligonucleotide` row has a SMILES of 1,150-1,818 characters and the
+   Paperclip transport truncates long text fields (see SKILL.md). The
+   oligonucleotide rule is therefore written but **unverified against real
+   data** -- treat an `oligonucleotide` call as untested.
+3. **No SMILES means no structural call.** ICOTROKINRA is the reason
+   `Small molecule` + `structure_type = NONE` returns `modality_unknown` rather
+   than a modality, and that is a disclosure, not a classification.
+4. Thresholds are calibrated on immunology and oncology targets. The
+   alpha-linkage gap (3 -> 12) is wide enough that it is unlikely to be
+   target-specific, but it has not been checked outside the fixture set.
 """
 
 from __future__ import annotations
@@ -61,17 +91,15 @@ COUNTS_AS_SMALL_MOLECULE = frozenset({SMALL_MOLECULE})
 # --------------------------------------------------------------------------
 
 # An internal alpha-amino-acid linkage: N-CA-C(=O)-N.
-# Requires the alpha carbon to be sp3 and the amide N to be a real amine-type
-# nitrogen (not an imine, not an aromatic ring N, not a nitro).
-# One match == one residue that both accepts and donates a backbone amide,
-# i.e. the residue count of a linear peptide is (matches + 1).
-_ALPHA_RESIDUE = Chem.MolFromSmarts(
-    "[NX3;!$(N=*);!$(N[!#6;!#1]);!$(N*=[O,N])!R0,NX3;!$(N=*)]"
-    "[CX4]"
-    "[CX3](=[OX1])"
-    "[NX3;!$(N=*)]"
-)
-# The permissive form above is fragile to write inline; build it plainly.
+# The alpha carbon must be sp3 and both nitrogens must be amine-type (the
+# `!$(N=*)` guard rejects imines and amidines; aromatic ring N is excluded by
+# NX3 with the aromatic perception RDKit applies).
+# One match == one residue that both accepts and donates a backbone amide, so a
+# linear peptide of R residues gives R-1 matches.
+#
+# Calibration: this count is bimodal with an empty gap on real data. IL-17A's
+# 117 compounds give {0:94, 1:5, 2:5, 3:2, 12:6, 13:1, 14:3, 24:1} -- nothing
+# between 3 and 12 -- and IL-17C's 98 macrocyclic peptides all sit at 12-15.
 _ALPHA_RESIDUE = Chem.MolFromSmarts("[NX3;!$(N=*)][CX4][CX3](=[OX1])[NX3;!$(N=*)]")
 
 # Backbone amide alone (C(=O)-N with an sp3 alpha carbon on the acyl side).

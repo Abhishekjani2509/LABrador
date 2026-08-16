@@ -26,6 +26,19 @@ paperclip skill proteins
 This is mandatory, not advisory. The schema is not guessable and wrong column
 names are the most common failure. Run it once per task and read it.
 
+**Modality classification needs RDKit.** `modality.py` in this skill directory
+does the compound-level call (step 2c). It is 2D only — no conformer embedding,
+no force-field optimisation, nothing from geometry.
+
+```bash
+micromamba run -n <env-with-rdkit> python modality.py --selftest
+```
+
+The selftest is 32 hard cases with ground truth from known chemistry rather than
+from ChEMBL, and it must print `PASS` with **0 false small-molecule calls**
+before you trust a modality split. Never `conda`/`mamba`; use
+`/Users/bb/.local/bin/micromamba`.
+
 ## The three schemas
 
 | Schema | Scale | What you take from it |
@@ -67,19 +80,24 @@ WHERE d.accession = '<ACC>'
 ORDER BY d.max_phase DESC, d.first_approval NULLS LAST
 ```
 
-`max_phase` 4.0 = approved. `molecule_type` is the discriminator, and it is the
-only one that has survived testing — see the superseded tests in failure modes.
+`max_phase` 4.0 = approved. On drugs `molecule_type` is the discriminator; the
+tests it superseded are in failure modes and must not be reinstated.
 
 The full enum, with counts over the whole `molecule_dictionary` (12 values):
 
 | `molecule_type` | rows | modality | where it goes |
 | --- | --- | --- | --- |
-| `Small molecule` | 1,920,259 | `small_molecule` | `target_precedent` |
-| `Protein` | 22,799 | `fusion_protein` or `other` — read the drug | `biologic_precedent` |
+| `Small molecule` | 1,920,259 | `small_molecule` **only if corroborated** — see below | `target_precedent` |
+| `Protein` | 22,799 | `protein_or_antibody`, often really a **peptide** — read the structure | `biologic_precedent` |
 | `Antibody` | 1,032 | `antibody` | `biologic_precedent` |
 | `Oligonucleotide` / `Gene` / `Enzyme` / `Antibody drug conjugate` / `Vaccine component` / `Cell` / `Oligosaccharide` | 260 / 191 / 129 / 109 / 90 / 85 / 81 | `other` | `biologic_precedent` |
-| **`Unknown`** | 404,621 | **modality-unknown** | neither block — see below |
-| **NULL** | 571,492 | **modality-unknown** | neither block |
+| **`Unknown`** | 404,621 | resolve from structure (step 2c); `modality_unknown` only if that fails | reported, never dropped |
+| **NULL** | 571,492 | resolve from structure (step 2c); `modality_unknown` only if that fails | reported, never dropped |
+
+The last two rows are 976,113 molecules — **40.4% of the table**, and the reason
+step 2c exists. Note that **570,221 of the 571,492 NULL rows carry
+`structure_type = MOL`**: a NULL `molecule_type` is a missing annotation, not a
+missing molecule, and the structure is almost always there to read.
 
 Verified on the three calibration accessions:
 
@@ -246,7 +264,7 @@ structure of either kind — and `NONE` appears on genuine antibodies
 a record is thin. AZ9773 is `Unknown`/`SEQ` — sequence-based, so almost
 certainly a biologic, but ChEMBL declines to say and so do you.
 
-### 2b. Collapse salt and parent forms before counting
+### 2e. Collapse salt and parent forms before counting
 
 Salt, hydrate and parent forms are **distinct molregnos**, so deduplicating on
 `molregno` does not deduplicate drugs. Verified on JAK1 (P23458): the 11 approved
@@ -385,6 +403,22 @@ all NULL.
 **Do not use `molecule_type` to classify a compound. Use
 `precedent-lookup/modality.py`.**
 
+*Provenance of the table above, stated so a reader can discount it.* Each row is
+a **single-row server-side aggregate**, which the moving row cap cannot truncate
+— that is the structural argument, and it is the reason the sweep was written
+as aggregates rather than as row pulls. Supporting checks that were actually
+run: the four counts partition `n` exactly on all twelve rows; the whole sweep
+was executed twice about ten minutes apart with identical results; canaries on
+`compounds_by_accession`, `molecule_dictionary` and `drugs_by_accession` passed
+immediately before and immediately after the batch; and four figures reconcile
+against numbers recorded independently of this run — IL-17A 117, IL-17C 98,
+RORgt 12,900, JAK1 23 drug rows. **The per-target reconciliation against a
+separately issued `COUNT(*)` did not complete** — the SQL backend went down
+mid-task and stayed down — so treat the eight unreconciled rows as provisional.
+**One figure does not reconcile: MYC 1,249 compounds here against 1,079 recorded
+in `CLAUDE.md` rule 6.** Both may be right (different predicates) and neither has
+been re-derived; do not quote either as settled until it is.
+
 ### The `modality` column is empty — do not use it
 
 `chembl_v.bioactivities_by_accession` has a `modality` column. It is NULL.
@@ -469,7 +503,7 @@ with NULL SMILES. Counting rows overstates drug counts. Deduplicate on
 
 **And `molregno` deduplication is not enough** — salt and parent forms are
 *distinct* molregnos, so JAK1 still returns 11 approved rows for 9 approved
-drugs after deduplicating. Collapse salt/parent pairs as well; step 2b says how.
+drugs after deduplicating. Collapse salt/parent pairs as well; step 2e says how.
 
 ### Approved biologics and tractable small molecules can coexist
 

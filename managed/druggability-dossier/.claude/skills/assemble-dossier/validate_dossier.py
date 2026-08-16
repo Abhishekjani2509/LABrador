@@ -307,10 +307,20 @@ OFF_SITE_CENTROID_DISTANCE_A = 4.0
 # 15 targets, 67 structures, 134 measurements. fpocket's druggability score does
 # not separate druggable from hard: target-level AUC 0.720 at D=1.6 with a
 # bootstrap 95% CI of 0.44-0.94 (includes chance) and 0.520 at D=2.4. The
-# label-free test is the one that settles it — on 37 holo structures where a
+# label-free test is the one that settles it — on holo structures where a
 # drug-like ligand is physically bound and the scored pocket is anchored to it,
-# the median score is 0.320, 25 of 37 fall below 0.5 and 15 of 37 (41%) fall
-# below 0.1. EGFR 6LUD with osimertinib bound scores 0.013.
+# the median score is 0.320 and a large fraction fall below 0.1. EGFR 6LUD with
+# osimertinib bound scores 0.013; JAK1's median is 0.009 across nine approved
+# drugs.
+#
+# THE DENOMINATOR IS UNDER AUDIT (2026-08-15). This was reported as 37 holo
+# structures, 25 of 37 below 0.5 and 15 of 37 (41%) below 0.1. At least one of
+# the 37 is not a certain positive: RORgt's 6C1P contains no RORgt (sole entity
+# A8EVM5, an ion transport protein) and its 1N7 anchor is CHAPSO, a detergent.
+# So the clean denominator is 36, and the other 36 have never been re-audited at
+# residue level — the audit that caught this one. The demotion does NOT turn on
+# that case and is unaffected; only the rate is uncertain. Quote the direction
+# and the named cases, not the percentage, until the 36 are audited.
 #
 # These two are the false-negative band, NOT a druggability threshold. Nothing
 # is classified by them; they are the trip-wire for "this score is in the range
@@ -1080,10 +1090,15 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
                     "DRUGGABILITY_LOAD_BEARING",
                     "tractability.pocket_druggability._false_negative_rate",
                     "a druggability range reported without its measured "
-                    "false-negative rate beside it — 15 of 37 (41%) pockets "
-                    "with a drug-like ligand physically bound score below "
-                    f"{DRUGGABILITY_FALSE_NEGATIVE_FLOOR}, and a reader who "
-                    "meets the number later cannot discount it without that",
+                    "false-negative rate beside it — a large fraction of "
+                    "pockets with a drug-like ligand physically bound score "
+                    f"below {DRUGGABILITY_FALSE_NEGATIVE_FLOOR} (EGFR 6LUD with "
+                    "osimertinib bound scores 0.013), and a reader who meets "
+                    "the number later cannot discount it without that. The rate "
+                    "was reported as 41% (15 of 37); that DENOMINATOR IS UNDER "
+                    "AUDIT — one of the 37 was not a certain positive and the "
+                    "other 36 are unaudited at residue level, so state the "
+                    "direction and the named cases, not the percentage",
                 )
             )
 
