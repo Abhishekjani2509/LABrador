@@ -715,3 +715,4 @@ key, no network, 7/7 PASS) and runs in CI on every push to main.
 - **2026-08-16 03:38 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: all six acceptance facts verified; README rewritten for v10 — typecheck+check green.
 
 - **2026-08-16 03:41 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Add the web UI adapter: trace strings, metrics, id-referenced one-liners — typecheck+check green.
+- **2026-08-16 03:45 UTC** — merged `rafwiewiora/druggability-dossier` (b2ee617, tier-2: structure-select test suite relocated from dead path, zero true collisions) — typecheck+check green.
