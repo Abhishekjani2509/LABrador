@@ -13,14 +13,19 @@
  * `tools.ts` and posts a `user.custom_tool_result`. The process running
  * this file is the tool executor — no extra infrastructure.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import dotenvx from "@dotenvx/dotenvx";
 import { z } from "zod";
-import { assertNoCredentials } from "@/lib/credential-scan.ts";
+import {
+  assertNoCredentials,
+  findCredentials,
+  redact,
+  type ScannedArtifact,
+} from "@/lib/credential-scan.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas + types shared with managed agent dirs
@@ -602,6 +607,36 @@ function finalText(opts: RunTaskOptions, state: StreamState): string {
     : state.lastMessage;
 }
 
+/**
+ * A fourth upload route, and the only one that is not a compiled artifact:
+ * whatever a local handler RETURNS is posted straight back to the API as
+ * `user.custom_tool_result`, and so is any exception message it throws. In
+ * `managed/druggability-dossier/tools.ts` those strings are raw child-process
+ * stdout and stderr from `paperclip`, `modal` and `micromamba` — text this repo
+ * never wrote and cannot review. A subprocess that echoes its own environment
+ * on an error path uploads a key without any artifact ever containing one.
+ *
+ * THIS ONE REDACTS INSTEAD OF THROWING, and the difference is deliberate.
+ * Everywhere else the scanner guards a file a human authored or a compiler
+ * wrote, where throwing is right: the fix is to edit the file, and refusing to
+ * upload costs nothing. Here the input is live output from a tool call that may
+ * be forty minutes into a run, and there is no file to fix. Throwing would
+ * destroy the run to protect a string we can simply remove from it. So the
+ * secret is replaced in place, the agent gets a usable result with a visible
+ * marker where the value was, and the credential does not leave the machine.
+ */
+function redactCredentials(text: string): string {
+  let out = text;
+  for (const hit of findCredentials(text)) {
+    // Base64-encoded hits report the decoded match, which is not a substring of
+    // `text`; replaceAll is then a no-op and the wrapper below still fires.
+    out = out.replaceAll(hit.match, `[${hit.rule}: ${redact(hit.match)}]`);
+  }
+  return out === text
+    ? out
+    : `${out}\n\n[credential-scan: this tool result contained credential-like strings; they were redacted before upload. Rotate the key — it was disclosed to this process either way.]`;
+}
+
 async function executeCustomTool(
   toolsByName: Map<string, CustomToolSpec>,
   eventId: string,
@@ -615,9 +650,11 @@ async function executeCustomTool(
     return `Error: no local handler registered for custom tool "${use.name}"`;
   }
   try {
-    return await tool.handler(use.input);
+    return redactCredentials(await tool.handler(use.input));
   } catch (error) {
-    return `Error executing ${use.name}: ${error instanceof Error ? error.message : String(error)}`;
+    return redactCredentials(
+      `Error executing ${use.name}: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -762,4 +799,101 @@ export async function loadManagedAgent(
   );
 
   return { dir, instructions, manifest, rubric, tools };
+}
+
+// ---------------------------------------------------------------------------
+// The router's OWN uploads (the eve app, not the managed agents)
+// ---------------------------------------------------------------------------
+//
+// `loadManagedAgent()` above is the chokepoint for everything that reaches the
+// API *as a managed agent* — CLAUDE.md, rubric.md, manifest.json, tool
+// declarations. It is not a chokepoint for the router itself.
+//
+// The router is an eve app. Its own system prompt is `agent/instructions.md`
+// (eve prepends it to every model call; see node_modules/eve/docs/instructions.mdx),
+// and its own tool declarations come from `agent/tools/**`. Both are shipped by
+// `@ai-sdk/anthropic` straight from `agent/agent.ts` on EVERY ROUTER TURN, and
+// neither passes through `scripts/deploy.ts` or `loadManagedAgent()` — a router
+// turn that answers without dispatching to a specialist never calls either one.
+//
+// That matters because `agent/instructions.md` is compiler output, not hand
+// input: `/managed-agent-deploy` appends a dispatch entry to it from the
+// session transcript (.claude/skills/managed-agent-deploy/SKILL.md:126), it is
+// tracked in manifest.json's `compiled_hashes`, and transcripts have contained
+// live keys. Same compiler, same transcript, same exposure as CLAUDE.md — but
+// until this guard, no scan.
+//
+// The gate is `agent/agent.ts` at module scope: eve evaluates the agent config
+// module when it compiles the app and again when the runtime boots, always
+// before the first turn, so a throw there means a dirty prompt cannot be built
+// or served. Same scanner as everywhere else (lib/credential-scan.ts); a second
+// copy of those regexes would drift and the weaker copy would end up guarding
+// the path that matters.
+
+/** Files eve compiles into the router's request: prompt text and tool modules. */
+const ROUTER_PROMPT_FILE = /\.(?:md|mdx|ts|tsx|js|mjs|cjs)$/;
+
+function walkPromptFiles(dir: string, recurse: boolean): string[] {
+  if (!existsSync(dir)) {
+    return [];
+  }
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (recurse) {
+        found.push(...walkPromptFiles(full, true));
+      }
+    } else if (ROUTER_PROMPT_FILE.test(entry.name)) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
+function routerArtifactLabel(root: string, path: string): string {
+  const rel = relative(root, path).split(sep).join("/");
+  if (rel.startsWith("agent/instructions")) {
+    return `${rel} (router system prompt)`;
+  }
+  if (rel.startsWith("agent/skills/")) {
+    return `${rel} (router skill)`;
+  }
+  return `${rel} (router tool declaration)`;
+}
+
+/**
+ * Every file the router app itself uploads: the always-on instructions (root
+ * `instructions.md`/`.ts` plus the optional `agent/instructions/` directory,
+ * which eve reads non-recursively), the tool modules whose `description` and
+ * `inputSchema` strings ship as tool declarations, and any eve skills whose
+ * text the model can pull into context.
+ *
+ * Exported so a test can point it at a fixture tree instead of this repo.
+ */
+export function routerPromptArtifacts(
+  root: string = repoRoot
+): ScannedArtifact[] {
+  const agentDir = join(root, "agent");
+  const paths = [
+    ...["instructions.md", "instructions.ts"]
+      .map((file) => join(agentDir, file))
+      .filter((path) => existsSync(path)),
+    ...walkPromptFiles(join(agentDir, "instructions"), false),
+    ...walkPromptFiles(join(agentDir, "tools"), true),
+    ...walkPromptFiles(join(agentDir, "skills"), true),
+  ];
+  return [...new Set(paths)].sort().map((path) => ({
+    label: routerArtifactLabel(root, path),
+    text: readFileSync(path, "utf8"),
+  }));
+}
+
+/**
+ * Refuse to build or boot the router while any of its own uploads carries a
+ * credential. Throws, like every other caller of the scanner — a warning in a
+ * build log is not a control. Call it at module scope from `agent/agent.ts`.
+ */
+export function assertRouterPromptClean(root: string = repoRoot): void {
+  assertNoCredentials(routerPromptArtifacts(root), "start the router");
 }

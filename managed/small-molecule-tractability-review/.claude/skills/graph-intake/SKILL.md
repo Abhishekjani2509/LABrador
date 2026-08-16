@@ -284,9 +284,9 @@ numbers of claims we must handle ourselves.
 | # | gate | fails when |
 | --- | --- | --- |
 | 1 | **It changes a dossier value.** If true, the claim fills or alters a field in the template — a precedent list entry, a count, a mechanism, a structure choice. | it is an efficacy, outcome or clinical-success argument. Dossier rule 7: clinical failure is not evidence against tractability, so an efficacy claim touches no tractability number and is out at gate 1. |
-| 2 | **Its support is secondary-only.** The link's `basis` is `background_only` or `hedged_only`. | `basis` is `primary` or `mixed`. A primary-supported claim is either usable or contradicted by something we can measure; neither is an ask. |
-| 3 | **We tried, we failed, and the failures are written down.** ChEMBL, the registry, the structure and a `grep` on the exact identifiers were all actually run, all abstained, and each null is in `not_found` **before** the ask is drafted. | any of them was not run. This is the gate that does all the work — see the never-ask list. |
-| 4 | **There is a row to point at, and nobody has asked yet.** A `links[]`, `things[]` or `gaps[]` id, or a genuinely new question; and no matching entry in `rounds`. | `rounds` already carries the same verb at the same target. Re-asking costs a round and returns the same evidence. |
+| 2 | **Its support is secondary-only.** The link's `basis` is `background_only` or `hedged_only`. | `basis` is `primary` or `mixed`. A primary-supported claim is either usable or contradicted by something we can measure; neither is a *request*. **Exempt: the post-resolution contradiction ask**, which is the second branch of that same sentence — see below. |
+| 3 | **We tried, we failed, and the failures are written down.** ChEMBL, the registry, the structure and a `grep` on the exact identifiers were all actually run, all abstained, and each null is in `not_found` **before** the ask is drafted. | any of them was not run. This is the gate that does all the work — see the never-ask list. **Exempt: the post-resolution contradiction ask.** |
+| 4 | **There is a row to point at, and nobody has asked yet.** A `links[]`, `things[]` or `gaps[]` id, or a genuinely new question; and no matching entry in `rounds`. | `rounds` already carries the same verb at the same target — or, for a targetless `new_question`, the same **source identifiers**. Re-asking costs a round and returns the same evidence. See failure mode 18 for why `new_question` is matched differently. |
 | 5 | **There is literature left to find.** `coverage.stop_reason != "complete"`, or `coverage.truncated` is true. | `stop_reason` is `complete`. The graph has exhausted the literature; another round returns what you already have. |
 
 Gate 5 is the one that is easy to skip and cheap to check. It is also the only
@@ -304,7 +304,19 @@ says so in its own output.** Those are judgment, they are the two that stop this
 becoming a way to avoid work, and no green result from a script substitutes for
 them. Treat an all-green `--check-ask` as permission to *consider* an ask.
 
-### The one ask that may skip gate 3
+Two fields carry the exemption above, and both are mechanical facts, not
+permission:
+
+- `--check-ask` returns `exempt_for_this_ask`, populated only when `question`
+  declares the ask post-resolution. When it is populated, gates 2 and 3 move out
+  of `not_checked_here` and into it, each with the reason. Gate 1 never moves.
+- `--ask-context` returns `clear_if_post_resolution_contradiction` per link:
+  true where every mechanical gate **except gate 2** is clear, i.e. where the
+  only thing blocking an ask is that the support is primary or mixed. Without
+  it, `L4` — the ask that worked — and `L2` — the ask that must never fire —
+  were both just `mechanical_gates_clear: false` and indistinguishable.
+
+### The one ask that skips gates 2 and 3
 
 When we **did** settle a claim ourselves and the settlement **contradicts a row
 in the graph**, issue `resolve_link` on that row anyway, carrying our answer.
@@ -316,6 +328,46 @@ the wrong row does not propagate to every other consumer of the graph on the
 next round. Mark it plainly as post-resolution so nobody upstream reads it as a
 blocker. An ask of this kind must state our answer and its source, not just the
 doubt.
+
+**It skips gate 2 as well, and the reason is the same one.** An ask that carries
+our answer is **not a request for work — it is a correction, and the gates were
+written for requests.** Every one of them asks some version of "should somebody
+else spend a round on this?", and that question does not apply to a statement of
+what we already measured.
+
+Gate 2 was the last thing blocking it. The exemption was written for gate 3
+only, so a contradiction ask still had to clear "the link's `basis` is
+`background_only` or `hedged_only`" — and the row you are most likely to be
+correcting is a `primary` one, because a `primary` basis is what makes a wrong
+row look authoritative to every downstream consumer. **A wrong `primary` row is
+more damaging than a wrong `background_only` one, not less.** Gate 2's own
+rationale already says so — "a primary-supported claim is either usable or
+**contradicted by something we can measure**" — and then routed the second half
+of its own sentence nowhere.
+
+The worked case: `L4` in `fixtures/upstream_graph_askback.json` asserts a 2.4 Å
+TL1A/DR3 crystal structure burying 1840 Å², at `basis: primary`. A PDB census
+against DR3's accession returns three entities, all intracellular death domain,
+no ectodomain, no complex of any kind. The claim is false and we can show it.
+Under gate 2 as written, that ask could not fire. The worked ask is
+`.claude/skills/ppi-hypothesis/fixtures/worked_ask.json`.
+
+**What replaces the two exempted gates is stricter, not looser.** All four
+required, and failure mode 19 is what happens when they are not:
+
+1. `question` says **post-resolution**, in those words, so nobody upstream reads
+   it as a blocker and so `--check-ask` can see it;
+2. it states **our answer, its source and its date** — not the doubt;
+3. it blocks **no** dossier field: every field the row touches is already filled
+   from our own measurement, and the ask goes in `not_found[]` as a record;
+4. every unexempted gate still applies — an id to point at, no prior round, a
+   non-exhausted graph, two source identifiers.
+
+Nothing here licenses a *forward* ask on a primary row. "Our prediction disagrees
+with this row, please check" is not a correction, it is a hypothesis wearing
+one — the PPI panel measured that direction and issued **zero asks in fifteen
+cases**, because a predicted interface is never a thing to send upstream. The
+exemption covers a row we **falsified with a measurement**, and nothing else.
 
 ### Make the ask carry its own evidence
 
@@ -444,6 +496,8 @@ number in this dossier. Reporting it unresolved is the correct output and always
 was.
 
 **10. Anything already in `rounds`.** Gate 4. Check before drafting, not after.
+For `new_question` this check is weaker than it looks and you must read its
+detail string rather than its boolean — failure mode 18.
 
 **11. Anything against a `complete` graph.** Gate 5.
 
@@ -910,6 +964,72 @@ of a flag that we invented and upstream has never heard of. The guard protects
 against our own fixtures leaking into a real run. It provides no assurance
 whatsoever in the other direction, and nothing in the pipeline verifies that an
 unflagged graph came from a real corpus.
+
+### 18. One `new_question` retired the verb for the life of the graph
+
+`already_asked()` matched a proposed ask against `rounds` on **(verb, target)**.
+Three of the four verbs have a target. `new_question` does not — SCHEMA.md gives
+it `target: null` by design, because it is the ask for a claim the graph has no
+row for.
+
+So every `new_question` ever issued is `("new_question", None)`, and the first
+one asked against a graph made **every** later one fail `NOT_ALREADY_ASKED`,
+exit 1, forever. Measured on `upstream_graph_askback.json`, whose `rounds[0]` is
+a `new_question` from round 1: an unrelated structural `new_question` came back
+`FAIL NOT_ALREADY_ASKED`, exit 1, with the detail string
+`rounds already carries 1 ask(s) of new_question at None` — pointing at a
+question that had nothing to do with it.
+
+The verb that carries every claim the graph has no row for was the one verb that
+could be used once.
+
+**The fix is not a hash of the question text**, which was the obvious repair and
+is wrong in a way that would have looked right. `rounds` is not required to
+record the question — the real ask-back fixture's round 1 records `ask`,
+`target`, `depth`, `papers_added` and `outcome`, and no question at all — so a
+text hash would match nothing and the gate would silently become a no-op that
+always passes. And where the text *is* recorded, the upstream team rewords a
+question when it services it, so a hash calls a rephrasing a different ask and
+lets the same question through twice. Both failures are invisible.
+
+A targetless ask is now matched on **the set of source identifiers `question`
+names** (`question_identity`). Those are what make an ask routable at all —
+`QUESTION_IS_ACTIONABLE` already refuses a question naming fewer than two — and
+they survive rewording, reordering and translation, which the wording does not.
+
+**And where a prior round records no question, the gate says so instead of
+passing.** Those rounds come back in the detail string as rounds this gate is
+structurally unable to compare against. That is an honest "cannot tell", and it
+is the state the one real ask-back fixture is in. Read the detail, not the
+boolean.
+
+### 19. "Post-resolution" as a password
+
+Failure mode 11 is the ask becoming the thing you do instead of the work. The
+gate-2/gate-3 exemption above is the same hazard with a specific key: the two
+gates that stop an ask being a way to avoid work are exactly the two an agent
+can now switch off, and it switches them off **by putting a word in the
+`question` text**. `--check-ask` cannot tell a correction from a claim to be
+one. Nothing mechanical can.
+
+What separates them is not the wording, it is whether an artifact exists:
+
+- a real one names **what we measured, with what, on what date, and what it
+  returned** — a PDB census, a ChEMBL row, a registry record — and the number it
+  contradicts;
+- a fake one names our *disagreement*: a prediction, a confidence, an
+  expectation, an "inconsistent with", a "we would expect". A cofold is not a
+  measurement of what is deposited. A prediction contradicting a graph row is
+  failure mode 11 with a new label, and the PPI panel is the precedent: fifteen
+  cases, a predicted interface every time, **zero asks**, because a prediction is
+  never a correction.
+
+Two tells, both cheap. **The ask must be writable before the exemption is
+claimed** — if you cannot state our answer without the phrase "post-resolution"
+doing the work, there is no answer. And **it must block nothing**: a
+post-resolution ask beside a null field is a contradiction in terms, because the
+whole premise is that we already filled that field ourselves. If the field is
+null, gate 3 was skipped and the exemption was not earned.
 
 ## What this skill does not do
 
