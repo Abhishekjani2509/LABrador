@@ -8,12 +8,12 @@ quote** from text it actually fetched, and returns the whole graph as JSON —
 nodes, evidence, scored relationships, and the places where the literature has
 a hole in it.
 
-**Status: deployed and verified.** `agent_015feTqKz3Bmtec2RaWaE2sW` v3 runs on
-the Claude Developer Platform with three skills, a memory store, and the
-Paperclip MCP attached. It has produced a real graph end to end in the cloud
-sandbox — 23 findings, every one quote-verified, none discarded. Two of its
-four ask types have never executed, and `fixtures/` is not written. See
-[Status and gaps](#status-and-gaps) before relying on it.
+**Status: deployed, and its own acceptance test passes.**
+`agent_015feTqKz3Bmtec2RaWaE2sW` **v10** runs on the Claude Developer Platform
+with three skills, a memory store and the Paperclip MCP attached. All four ask
+types have executed against it, and all six of `BUILD.md`'s blocking facts are
+verified — including the one it calls out as *"zero is a failure, not a clean
+result"*. See [Status and gaps](#status-and-gaps) for what is still open.
 
 ---
 
@@ -53,6 +53,66 @@ The distinguishing behaviours:
   literature was exhausted.
 
 ---
+
+## What it guarantees, and how each one is enforced
+
+Every one of these is a mechanism, not an intention. Where a rule is checked by
+code, that is said; where it is reported rather than enforced, that is said too.
+
+| guarantee | enforced by |
+|---|---|
+| Every finding carries a **verbatim quote** | `verify_quote` string-matches it against the fetched text. No match, the finding is dropped and counted in `coverage.no_quote_discarded`. Never repaired. |
+| **Nothing is filtered by score** | The only removals are a failed quote match and a content duplicate. Confidence is never a threshold anywhere. |
+| **A retried round is a no-op** | Findings dedupe on content — paper + relationship + normalized quote — not on id, because a retry re-extracts the same sentences under fresh ids. Reported in `coverage.duplicates_dropped`. |
+| **Assembly is deterministic** | `assemble.py` is stdlib-only and byte-identical across runs and `PYTHONHASHSEED` values. All arithmetic lives there; nothing is scored by hand. |
+| **Entities merge on identity, not similarity** | UniProt accession first, name second. Exact, auditable, species-safe (`Q9NWZ3` ≠ `Q8R4K2`), and a node with non-empty `ambiguity` is never a merge key. Every merge records `merged_from`. |
+| **A dead corpus never reads as "no evidence"** | A canary query runs before any real search; a missing or failing Paperclip tool returns `status: "failed"`, `stop_reason: "search_unavailable"` and an `error` prefixed `PAPERCLIP UNAVAILABLE:`. |
+| **The reply is machine-readable** | The first character is `{`, the last is `}`. No preamble, no fence — a downstream `JSON.parse` is the consumer. |
+| **Gaps are ranked, not just counted** | Basis of both supporting links, paper-independence, a hub penalty, and a bonus when several intermediates imply the same missing pair. |
+
+Reported rather than enforced, so a shortfall is visible instead of silent:
+`coverage.interventions_without_target`, `proteins_without_accession`,
+`has_disease_node`, and `confidence_profile` (including `hedged_but_confident`,
+findings whose own two fields disagree about the same sentence).
+
+## Modelling rules that shape the graph
+
+These are the decisions that determine whether the graph is usable downstream.
+
+**Nodes are concepts; reagents are conditions.** `IRAK4 inhibition` is one node.
+`PF-06650833`, `KIC-0101` and `IRAK4 kinase-deficient mice` are ways of doing it
+and belong in `where`. Splitting one relationship across four reagents produces
+four `single_source` links where the literature supports one `agreed` link, and
+understates every confidence nearby.
+
+**But compounds stay distinct, and each states its target.** For *"what inhibits
+IRAK4?"*, eight compounds is the answer — merging them destroys it. What makes
+their evidence poolable is the **edge**: every intervention emits a quoted
+finding naming what it acts on, so pooling runs along the mechanism path.
+Unlinked ones are reported, never invented.
+
+**Identity is an accession, resolved from the quote.** Every `protein`/`gene`
+node carries `uniprot_accession`. Resolve from the evidence, not the label — the
+string "IL-6" gives P05231, the ligand, while receptor-blockade evidence is
+P08887, a different molecule. Where it cannot be resolved, leave it off and say
+why in `ambiguity`.
+
+**The graph is self-describing.** The disease or indication is its own node
+whenever the question concerns one. A consumer that has to parse the question
+string is reading input the graph should have encoded.
+
+**`how` is a closed set** — `inhibits` · `activates` · `binds` · `suppresses` ·
+`increases` · `decreases` · `causes` · `drives` · `treats` · `associated_with`.
+Links key on `(from, how, to)`, so a free-form verb forks one relationship into
+several. Activity is not abundance: a kinase inhibitor `inhibits` its target;
+`suppresses` is for a process or phenotype; `decreases` is for a measured
+quantity.
+
+**`findings.confidence` is calibrated to be used at the bottom.** It never
+filters anything — its job is to let Stage 2 tell a hard result from a
+speculation, and the low-confidence findings are the ones worth exploring for
+novel directions. 0.9–1.0 quantified primary result · 0.5–0.65 hedged ·
+0.3–0.45 discussion-section speculation. `hedged: true` means ≤ 0.65.
 
 ## Input / output schema
 
@@ -296,26 +356,53 @@ same `stop_reason`. And a `test_gap` that could not query never sets
 
 ## Status and gaps
 
-| | |
+`BUILD.md` defines six blocking facts. All six are verified.
+
+| # | fact | result |
+|---|---|---|
+| 1 | Paperclip called at the event level, not claimed in prose | ✅ MCP calls in every trace |
+| 2 | reply carries the full graph JSON, not a summary | ✅ 43KB raw, asserted mechanically |
+| 3 | disputed fixture yields ≥1 link `state: "disagreed"` | ✅ see below |
+| 4 | a low-confidence finding survives into the output | ✅ nothing filters on score — verified in code |
+| 5 | round 2 loads round 1 from memory and `round` increments | ✅ one graph reached round 7 |
+| 6 | three quotes spot-checked verbatim against their DOIs | ✅ 3/3, re-resolved **by DOI** rather than by the id the agent used |
+
+Fact 3, in production, on `fixtures/q-disputed.txt`:
+
+```
+L26  Vitamin C --increases--> melanoma metastasis   state: disagreed
+why: "conditions differ: {braf v600e-driven melanoma, mouse}
+                     vs  {b16f0 melanoma, gulo ko mice}"
+```
+
+It did not merely flag the conflict. It identified that one camp used
+**Gulo-knockout mice** — the model that cannot synthesise vitamin C — which is
+the actual reason those two labs disagree.
+
+| capability | state |
 |---|---|
-| Sandbox affordances (bundled scripts, python3, `/mnt/memory`, egress) | verified via the `spike` agent |
-| `new_question` | ✅ run against real papers, locally and deployed |
-| `test_gap` | ✅ run against real papers; overturned a round-1 answer |
-| `expand_node`, `resolve_link` | **never executed** |
-| Figure reading (`ask-image`) | **never executed** |
-| Deployment | ✅ live — `agent_015feTqKz3Bmtec2RaWaE2sW` v3 |
-| Raw-JSON output contract | ✅ enforced and checked mechanically |
-| Paperclip liveness canary | ✅ fired and passed in production |
-| Long-lived API key auth against the MCP | **untested** — vault holds a session token that expires |
-| Findings idempotency on a retried round | **known bug** — appends without dedupe, inflates agreement/independence |
+| `new_question`, `expand_node`, `resolve_link`, `test_gap` | ✅ all four run in production |
+| figure reading (`ask-image`) | ✅ produces `figure_caption` findings; `resolve_link`/`test_gap` only |
+| MCP outage reporting | ✅ deliberately tested — credential invalidated, agent reported, credential restored |
+| entity merge by accession | ✅ shipped; coverage of accessions in older graphs is still thin |
+| `targets[]` block for the tractability node | ❌ **not built** — a contract change against a live consumer, needs its owner's sign-off |
 
-`resolve_link` is the likeliest to break first: it is the ask that biases
-queries toward the under-represented side *and* reads figures, and neither path
-has run.
+### Known limits
 
-Known rough edge: `explain_disagreement` concatenates every `where` value into
-one string, so its output is correct but reads poorly when findings differ along
-more than one axis. Worth tightening before this is demo material.
+- **Search is cheap; extraction is the bottleneck.** Runs routinely find 40–100
+  papers and use 1–11. The tier's `max_papers` is not what binds.
+- **Older graphs are not migrated.** Accession merging and the `how` enum govern
+  new extraction. Changing a verb on an existing pair *forks* a parallel link,
+  because links key on `(from, how, to)` — migrating an old graph needs a
+  deliberate remap, not a re-extraction.
+- **`quick` may never report absence.** Ten papers is page one, and page one
+  lies. A negative finding needs the deepest tier that was actually run — a
+  `standard` sweep once reported "nobody has tested this" and `deep` found the
+  paper.
+- **The MCP watchdog and the outage report race each other.** With no server
+  there is no MCP call to observe, so the client-side watchdog can fire before
+  the agent reports the outage it exists to report. `--mcp-silence 0` stands it
+  down.
 
 ## Files
 
