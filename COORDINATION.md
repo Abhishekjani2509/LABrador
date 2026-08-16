@@ -631,3 +631,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 03:15 UTC** — merged `abhishek-jani` (MERGED) — thesis-bridge: hyp_gen slate -> IndicationThesis, on the real IRAK4/RA graph — typecheck+check green.
 
 - **2026-08-16 03:16 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Render a slate in four modes: prose, table, trace, full — typecheck+check green.
+
+- **2026-08-16 03:17 UTC** — merged `abhishek-jani` (MERGED) — dossier-bridge: Adapter C — a tractability dossier's verdict as thesis Evidence — typecheck+check green.
