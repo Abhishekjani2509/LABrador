@@ -114,6 +114,15 @@ export type RunTaskOptions = {
   task: string;
   /** Hard cap on one task, in milliseconds. Default 10 minutes. */
   timeoutMs?: number;
+  /**
+   * Abort if the agent has not called an MCP tool within this window.
+   *
+   * A total timeout only tells you the run was slow. This tells you it never
+   * reached its tools at all -- a dead MCP server, an expired credential, a
+   * misconfigured toolset -- which is a different failure and worth failing
+   * fast on instead of burning the whole budget waiting. Set 0 to disable.
+   */
+  mcpSilenceMs?: number;
   tools?: CustomToolSpec[];
 };
 
@@ -254,6 +263,9 @@ function titleSnippet(task: string, maxLen = 60): string {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+// If an agent has not touched an MCP tool in this long it is not slow -- it
+// never got to its tools at all. Fail fast and name the likely causes.
+const DEFAULT_MCP_SILENCE_MS = 120_000;
 
 /**
  * Run one task against a deployed managed agent and wait for the result.
@@ -366,6 +378,54 @@ type StreamState = {
   pendingToolUses: Map<string, PendingToolUse>;
 };
 
+/**
+ * Fail fast when an agent that declares an MCP server never calls one.
+ *
+ * A total timeout tells you the run was slow; this tells you it never reached
+ * its tools, which is a different fault with different causes -- and one worth
+ * surfacing in two minutes rather than after the whole budget is gone.
+ */
+function assertMcpAlive(a: {
+  deadline: number | null;
+  sawMcpCall: boolean;
+  sessionId: string;
+  silenceMs: number;
+}): void {
+  if (a.deadline === null || a.sawMcpCall || Date.now() <= a.deadline) {
+    return;
+  }
+  throw new Error(
+    `no MCP tool call within ${a.silenceMs}ms (session ${a.sessionId}). The agent never reached its MCP tools — check the server is reachable, its credential is valid and unexpired, and the manifest declares an mcp_toolset with permission always_allow.`
+  );
+}
+
+function assertRunAlive(a: {
+  deadline: number;
+  sessionId: string;
+  timeoutMs: number;
+}): void {
+  if (Date.now() > a.deadline) {
+    throw new Error(
+      `runTask timed out after ${a.timeoutMs}ms (session ${a.sessionId})`
+    );
+  }
+}
+
+/**
+ * Only watch agents that actually declare an MCP server -- otherwise an
+ * agent with no MCP at all would trip the watchdog every time.
+ */
+function mcpWatchdogConfig(opts: RunTaskOptions): {
+  deadline: number | null;
+  silenceMs: number;
+} {
+  const expectsMcp = (opts.manifest.mcp_servers ?? []).length > 0;
+  const silenceMs = expectsMcp
+    ? (opts.mcpSilenceMs ?? DEFAULT_MCP_SILENCE_MS)
+    : 0;
+  return { deadline: silenceMs > 0 ? Date.now() + silenceMs : null, silenceMs };
+}
+
 async function* consumeUntilEndTurn(args: {
   client: Anthropic;
   sessionId: string;
@@ -375,6 +435,8 @@ async function* consumeUntilEndTurn(args: {
   const toolsByName = new Map((opts.tools ?? []).map((t) => [t.name, t]));
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
+  const mcpWatch = mcpWatchdogConfig(opts);
+  let sawMcpCall = false;
   const state: StreamState = {
     lastMessage: "",
     longestMessage: "",
@@ -385,11 +447,7 @@ async function* consumeUntilEndTurn(args: {
   const stream = await client.beta.sessions.events.stream(sessionId);
 
   for await (const raw of stream) {
-    if (Date.now() > deadline) {
-      throw new Error(
-        `runTask timed out after ${timeoutMs}ms (session ${sessionId})`
-      );
-    }
+    assertRunAlive({ deadline, sessionId, timeoutMs });
     opts.onEvent?.(SessionEvent.parse(raw));
 
     const parsed = KnownEvent.safeParse(raw);
@@ -397,6 +455,14 @@ async function* consumeUntilEndTurn(args: {
       continue;
     }
     const event = parsed.data;
+
+    sawMcpCall = sawMcpCall || event.type === "agent.mcp_tool_use";
+    assertMcpAlive({
+      deadline: mcpWatch.deadline,
+      sawMcpCall,
+      sessionId,
+      silenceMs: mcpWatch.silenceMs,
+    });
 
     if (event.type === "session.status_terminated") {
       throw new Error(

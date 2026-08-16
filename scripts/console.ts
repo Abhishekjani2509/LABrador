@@ -23,7 +23,9 @@ import {
 const args = process.argv.slice(2);
 const [name] = args;
 if (!name) {
-  console.error('usage: bun run console <name> [-- --once "task"] [--quiet]');
+  console.error(
+    'usage: bun run console <name> [-- --once "task"] [--quiet] [--timeout <seconds>]'
+  );
   process.exit(1);
 }
 const onceIndex = args.indexOf("--once");
@@ -36,6 +38,16 @@ if (onceIndex !== -1 && !args[onceIndex + 1]?.trim()) {
 }
 const once = onceIndex === -1 ? undefined : args[onceIndex + 1];
 const quiet = args.includes("--quiet");
+const timeoutIndex = args.indexOf("--timeout");
+const timeoutMs =
+  timeoutIndex === -1 ? undefined : Number(args[timeoutIndex + 1]) * 1000;
+if (
+  timeoutIndex !== -1 &&
+  (!Number.isFinite(timeoutMs) || (timeoutMs ?? 0) <= 0)
+) {
+  console.error("--timeout needs a positive number of seconds");
+  process.exit(1);
+}
 
 const { manifest, rubric, tools } = await loadManagedAgent(name);
 
@@ -82,6 +94,13 @@ function renderEvent(event: SessionEvent) {
     case "agent.tool_use":
       console.error(`  · tool: ${String(event.name ?? "?")}`);
       break;
+    case "agent.mcp_tool_use":
+      // Render MCP calls too. Without this an MCP-driven agent shows only its
+      // bash/read calls and looks like it never reached its tools at all.
+      console.error(
+        `  · mcp: ${String(event.name ?? "?")} ${JSON.stringify(event.input ?? {}).slice(0, 160)}`
+      );
+      break;
     case "agent.custom_tool_use":
       console.error(
         `  · custom tool: ${String(event.name ?? "?")} ${JSON.stringify(event.input ?? {})}`
@@ -103,6 +122,7 @@ const result = await runTask({
   onEvent: renderEvent,
   rubric,
   task: once,
+  timeoutMs,
   tools,
 });
 if (result.outcome) {
