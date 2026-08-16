@@ -277,3 +277,5 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 
 - **2026-08-16 00:11 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: read the upstream evidence graph, on the real schema — typecheck+check green.
 - **2026-08-16 00:23 UTC** — merged `abhishek-jani` (6c3c094, tier-2: par6 checklist union) — thesis.ts ratification legwork (items 1-4, all optional/back-compat, 4/4 fixtures parse) · backtest scale-transfer EXPERIMENT columns (sqrt-dilution rejected on 22 fresh rows) — typecheck+check green.
+
+- **2026-08-16 00:25 UTC** — merged `vaalessi/hypothesis-highlander` (MERGED) — Add hypothesis-highlander: quality-diversity meta-search over the pipeline — typecheck+check green.
