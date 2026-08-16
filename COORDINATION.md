@@ -620,3 +620,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 02:55 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — COORDINATION: §4 back to open-only, §3 current at agent v7 — typecheck+check green.
 
 - **2026-08-16 03:01 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: close the `how` verb to an enum, and prove the MCP-down alert works — typecheck+check green.
+
+- **2026-08-16 03:07 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — COORDINATION: record that BUILD.md's blocking acceptance test never ran — typecheck+check green.
