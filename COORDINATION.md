@@ -63,6 +63,10 @@ are dead — do not create files under them.
   falsification-sweep), deployed CPU Modal pocket scanner (fpocket + P2Rank),
   10-target calibration fixtures, evidence-rules CLAUDE.md, pipeline.html
   status board. Precedent + structure-selection stages VERIFIED.
+- graph-intake stage (2026-08-15 late): reads a research-evidence-mapper
+  graph on the REAL SCHEMA.md (first live cross-node edge — mapper →
+  tractability) and nominates UniProt targets from it; handles `no_effect`,
+  `hedged_only`, failed-graph status, and gene-vs-protein kinds.
 
 **Soliman — research-evidence-mapper** *(implementation landed 2026-08-15 late)*
 - SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
@@ -164,7 +168,13 @@ nodes' actual contracts:
    with a note).
 4. Modality vocabulary: thesis has 6 values, economics accepts 2. Align or
    declare the boundary.
-5. Confirm the two adapters in §5 and their owners.
+5. Confirm the adapters in §5 and their owners (B is built; Vince to
+   confirm the `launch_year` application convention).
+6. **SCHEMA.md: `how` needs an enum** (raised by Rafal's graph-intake,
+   2026-08-15 late): every other categorical field is enumerated, but `how`
+   is open vocabulary — so "drug inhibits IRAK4" (a target) and "drug
+   reduces IL-6" (a downstream effect) are structurally identical. Soliman
+   to enumerate at least the target-nominating verbs.
 
 ## 7. The process (what you actually do)
 
