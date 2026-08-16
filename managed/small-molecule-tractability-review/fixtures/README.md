@@ -13,7 +13,7 @@ that serves as the grading key.
 | File | Status | Contents |
 | --- | --- | --- |
 | `targets.json` | retrieved and cited | Ten targets, `expected_output` grading keys |
-| `pocket_calibration.json` | verified in-repo | KRAS holo vs apo — the backbone-collapse cryptic mechanism |
+| `pocket_calibration.json` | verified in-repo | KRAS holo vs apo — the backbone-collapse cryptic mechanism; the TNF-α mdpocket ensemble calibration; and the withdrawn 651-fold druggability spread, kept as the record of a retraction |
 | `immunology_calibration.json` | found by execution | Four failure modes only real structures surface |
 | `upstream_graph.json` | synthetic, marked `_fixture` | An upstream evidence graph, conformed to the real `SCHEMA.md` v1.1 |
 | `upstream_graph_edgecases.json` | synthetic, hand-written | `kind: gene`, `basis: hedged_only`, a `no_effect` finding, `status: partial` |
@@ -21,6 +21,7 @@ that serves as the grading key.
 | `upstream_graph_real.json` | **REAL** — mapper output, no `_fixture` flag | `g_1a4f`, round 2. The only graph fixture nobody here authored |
 | `upstream_graph_real_expected.json` | derived, accessions retrieved | Grading key for the real graph |
 | `complex_components.json` | curated, accessions retrieved | Complex and pathway name → component accessions, for the PPI branch |
+| `upstream_graph_askback.json` | synthetic, two quotes verbatim-retrieved | The post-intake ask-back trigger — two links that should produce an ask, five that must not |
 | `upstream_graph_expected.json` | derived, accessions retrieved | Grading key for `graph-intake` |
 
 ## The upstream graph
@@ -41,6 +42,33 @@ same shape as `zimlovisertib inhibits IRAK4` and only the verb separates a
 readout from a target. That is the TNF-alpha assay-provenance failure of Rung 4,
 moved one stage upstream where nothing else is looking for it.
 
+### The fourth graph fixture — and why its negatives matter more
+
+`upstream_graph_askback.json` grades a different thing from the other three:
+not what the intake *extracts*, but what it decides to **send back**. Two links
+should produce an ask; five must not, and the five are the point.
+
+| link | outcome | why it is in the set |
+| --- | --- | --- |
+| `L3` | **ask** — `resolve_link` | A review asserts an oral small-molecule antagonist reached Phase 2. It would fill `clinical_stage_small_molecules`; the compound has no ChEMBL mechanism row, no registry record, and the only source is the review. All five gates pass. |
+| `L1` | **ask** — `resolve_link`, post-resolution | The obefazimod/TL1A trap. We answer it ourselves from `chembl.drug_mechanism`, so it never blocks; the ask goes anyway so the wrong edge does not propagate. |
+| `L2`, `L4` | no ask | `basis: primary`. A primary-supported claim is never an ask. |
+| `L5` | no ask | An efficacy claim. Dossier rule 7 — it touches no tractability number, so it fails gate 1. |
+| `L6` | no ask | A contested clinical status. `ctgov` settles it; fails gate 3. |
+| `L7` | no ask | `rounds` already carries `resolve_link` at `L7`. Fails gate 4. |
+
+A sixth negative is not expressible in the file, because `coverage.stop_reason`
+is a single global value and this graph needs `max_papers` for `L3`. Set it to
+`complete` and every ask must stop firing — verified: `--ask-context` then
+reports no link clearing the gates at all.
+
+Two of its quotes (`f1`, `f2`) are **verbatim from real papers**, PMC10762860
+and PMC11642585, retrieved 2026-08-15. That is a deliberate departure from the
+other three fixtures and it is recorded in the file's `_quote_provenance` block.
+The rule was derived from those two exact sentences and a paraphrase would hide
+why the trap works — both reviews call ABX464 "a prototype of TL1A", and they
+share a senior author, so "two sources agree" is one source twice. The file is
+still `_fixture: true` and nothing in it may be cited.
 ### Why three graph fixtures
 
 The producer's schema gives `how` **no enum**, while every other categorical
@@ -54,7 +82,6 @@ branches the RA graph never reaches. `upstream_graph_unknownverb.json` covers
 the case that has no clean answer: a verb we do not recognise, where the intake
 must weigh the quote, the assay context and the graph shape — and is allowed to
 refuse.
-
 ### And one that is not synthetic at all
 
 `upstream_graph_real.json` is the mapper's first real output for our own IRAK4
@@ -91,16 +118,23 @@ and never propose, because a run of four or more digits marks a compound code.
 
 ### Rung 1 — JAK1 (P23458). Can it do the easy thing?
 
-Pre-formed ATP-site kinase. 14,342 compounds, best 0.032 nM, ruxolitinib 2011
-plus two JAK1-selective approvals, 40 of 52 structures holo.
+Pre-formed ATP-site kinase. 14,342 compounds, best 0.010 nM, ruxolitinib 2011
+plus two JAK1-selective approvals, 42 of 52 structures holo.
+
+The 14,342 is a *filtered* count — `n_target_components = 1`. Dropping that
+predicate gives 14,472 and is wrong; see `_audit_2026_08_15` in `targets.json`.
+Best potency was 0.032 nM here until the 2026-08-15 audit found that value came
+from excluding every IC50 on a false "flagged" premise.
 
 **Tests:** nothing subtle. If this is wrong, stop and fix the plumbing.
 **Expect:** `small_molecule_tractable`, `cryptic_pocket_risk: low`.
 
 ### Rung 2 — RORγt (P51449). Does it confuse tractable with successful?
 
-152 holo of 162 structures, 12,900 compounds, 0.1 nM potency — and **zero
-approvals**. VTP-43742 stopped on transaminase elevations, TAK-828F on
+154 holo of 162 structures, 12,900 compounds, 0.017 nM potency — and **zero
+approvals**. (154 is the current holo rule; 152 is defensible and 152–154 all
+pass — two of the three entries the rule adds are a DHEA sterol and an NDSB-256
+crystallisation additive. 0.1 nM remains the best cell-context IC50.) VTP-43742 stopped on transaminase elevations, TAK-828F on
 preclinical teratogenicity, class-wide thymic lymphoma concern.
 
 **Tests:** that clinical failure does not leak into the tractability number.
@@ -127,19 +161,38 @@ recorded.
 
 2,582 compounds — and **45% of all bioactivity comes from an IRAK4 assay
 measuring a different protein**, labelled `assay_type = 'B'` so the obvious
-filter does not catch it. Five approved biologics, zero small molecules. The one
-holo ligand (`307`, 2AZ5) is a known promiscuous frequent hitter. The site is a
-cryptic trimer-axis cavity — steric-occlusion mechanism, not collapse.
+filter does not catch it. Five approved biologics, zero small molecules. The
+earliest holo ligand (`307`, 2AZ5) is a known promiscuous frequent hitter. The
+site is a trimer-axis cavity that is **occluded, not cryptic** — steric
+occlusion, not backbone collapse. It is pre-formed: delete the third chain and
+all five apo structures recover the pocket, and the max backbone C-α
+displacement at the site is ~1.6 Å. It therefore fails both community criteria
+for cryptic (Vajda 2018; CryptoBench's apo-holo pocket-residue RMSD > 2 Å), and
+must not be cited as a cryptic-pocket case. "Pre-formed" is a statement about the
+subunit-removed state; in the intact trimer the third protomer is standing in
+the site.
+
+Holo count is **17 by the current rule, 16 defensibly** (was 15 under the
+superseded ≥300 Da rule). One of the two entries the rule added, 5UUI, is a
+TNF-α carrying the MTSL nitroxide **spin label** on an engineered T77C cysteine
+— a false holo. The other, 6OOY, is real.
 
 **Tests:** assay provenance, frequent-hitter detection, multi-chain handling, and
-the second cryptic mechanism.
+the occlusion mechanism — including that it is *not* reported as cryptic.
 **Expect:** `axis_conflict` populated. Reporting 2,582 compounds as precedent is
 the failure.
 
 ### Rung 5 — KRAS (P01116), `as_of_date = 2012-12-31`. Does it know what it cannot see?
 
 Every pre-2013 structure is apo or GDP-bound. The switch-II pocket scores
-**0.708 on holo and 0.000 on apo** — backbone collapsed 8.8 Å at Glu63.
+**0.708 on holo and 0.000 on apo** — backbone collapsed ~8.8 Å at Glu63. That
+figure is hand calibration: it comes from a protocol with auto-trim and
+residue-name matching disabled and the mobile regions named by hand. The
+deployed zero-knowledge default measures 8.65 Å max C-α displacement for KRAS
+and ~1.55 Å for TNF-α, against hand figures of 8.83 Å and 1.62 Å. Mechanism and
+`is_cryptic` are identical under both, so nothing downstream changes, but the
+two sets are not interchangeable — quote what the run reported. The
+order-of-magnitude separation (~8.8 vs ~1.6 Å) is the finding, not the decimals.
 
 **Tests:** the cryptic blind spot, and the as-of cutoff.
 **Expect:** low computed tractability **with `cryptic_pocket_risk: high`**, and
@@ -150,7 +203,7 @@ thirty-year error. Knowing that is the deliverable.
 
 ### Rung 6 — MYC (P01106). Can it hold two contradictory facts?
 
-1,079 compounds and **0 of 25 structures with any ligand above 120 Da**.
+1,079 compounds and **0 of 25 structures with any ligand above 122 Da**.
 Intrinsically disordered. Best potency 0.2 nM from an assay described only as
 "Inhibition of c-MYC (unknown origin)".
 
@@ -161,8 +214,13 @@ precedent.
 
 ### Rung 7 — IL-11 (P20809). Will it refuse?
 
-15 compounds, all from a single SPR assay, best 140 nM. 8 structures, none holo.
+15 compounds from two near-identical SPR assays on the same CAP chip
+(CHEMBL6115567 ×11, CHEMBL6115571 ×4), best 140 nM. 8 structures, none holo.
 No drugs at any phase. Just enough data to tempt a confident score.
+
+Sharper still: **only 2 of the 15 rows carry a number at all** — 140 nM and
+2,600 nM. The other 13 have `standard_value` NULL. Reporting "15 activities" as
+15 measurements already overstates the evidence 7.5×.
 
 **Tests:** the hardest thing to make a system do — decline.
 **Expect:** `insufficient_evidence`. Any number here is a failure.

@@ -4,9 +4,12 @@ description: >
   Attacks a druggability claim before it is reported — checks whether reported
   actives collapse to one assay, one series or one lab, whether a holo ligand is
   a known frequent hitter, whether a pocket appears in only one crystal form, and
-  what clinical programs were terminated and why. Records checks that found
-  nothing as well as checks that found something. It does NOT produce a verdict
-  and does NOT adjust any score; it attaches evidence for the reader to weigh.
+  what clinical programs were terminated and why. Routes the rare finding that is
+  a literature-provenance question back to the upstream graph as an ask, under a
+  five-gate rule that refuses anything a local table can settle. Records checks
+  that found nothing as well as checks that found something. It does NOT produce
+  a verdict, does NOT adjust any score, and an outstanding ask does NOT block a
+  verdict or justify a null; it attaches evidence for the reader to weigh.
 ---
 
 # falsification-sweep
@@ -125,17 +128,77 @@ A structure is not evidence just because something is bound. Check the ligand:
 
 ### 5. Does the pocket appear in only one crystal form?
 
-Run the ensemble. Across five apo TNF-alpha trimers the same site gave
-volume 206.7–309.2 A^3 but druggability **0.001–0.651, a 650-fold spread** — a
-single structure (1A8M, 0.651) would call it druggable and the other four would
-call it dead.
+Run the ensemble. A pocket present in one entry and absent in five is a finding.
+So is a druggability score that swings by orders of magnitude across an ensemble
+— **but only if every value in the swing describes the same site**, and that is
+exactly what this section used to get wrong.
 
-A pocket present in one entry and absent in five is a finding. So is a
-druggability score that swings by orders of magnitude across an ensemble.
+#### RETRACTED — the 651-fold TNF-alpha druggability spread
 
-Check the ensemble's composition too: only one wild-type apo TNF-alpha entry
-exists, and two of the four others carry K98R — **a residue lining the very
-pocket being measured**. An ensemble of mutants is not an ensemble.
+This section carried a worked example, and the example was wrong. It is kept
+here, marked, rather than deleted: a withdrawn result shown as withdrawn is more
+trustworthy than one quietly dropped, and a reader who meets the number in an
+older document needs to be able to find out what happened to it.
+
+**What was claimed.** Across five apo TNF-alpha trimers, "the same site" gave
+volume 206.7–309.2 A^3 and druggability 0.001 (2ZJC) to 0.651 (1A8M) — a
+**651-fold spread**. The reading offered was that a single structure, 1A8M,
+would call the site druggable and the other four would call it dead. The figure
+appears as **650-fold** in some older copies; the two are the same claim, and
+651 is what 0.651/0.001 gives. It is now cited only as retracted.
+
+**What killed it.** The pockets were matched across structures on shared residue
+*numbers*, chain-agnostically. mdpocket, run in characterization mode over the
+superposed ensemble, showed the matched pocket's centroid sits **7.7 A** from the
+SPD304 site it claimed to be measuring, and that the matcher was not even
+self-consistent: 1TNF matched a pocket **12.2 A** from where the other four
+matched. Within a single structure, the pockets called the same site at
+clustering D=1.6 and at D=2.4 sit about **12.3 A** apart — about **18.4 A** on
+2AZ5. And the method cannot work here even in principle: a 19-residue reference
+on a homotrimer collapses to **11 distinct residue numbers**, because the three
+protomers triplicate them, so discarding chain identity makes a C3-symmetric
+site unresolvable. No overlap threshold fixes that.
+
+The spread was therefore never a spread of one site. Neither was the volume
+range beside it: **206.7–309.2 A^3 is void as well**, because it came from the
+same matching step.
+
+**Three further defects in the passage that carried it** (audit 2026-08-15):
+
+- the volume range 206.7–309.2 A^3, void as above;
+- the **K98R caveat was attached to the wrong pocket**. K98 does not line the
+  SPD304 site — in holo 2AZ5 the nearest Lys98 heavy atom is **8.74 A** from
+  ligand `307`, outside the 5 A contact shell (Tyr56 is 7.82 A, also outside).
+  K98 lines the *on-axis* cavity, which is the pocket the matcher was actually
+  tracking;
+- the **mutant count was wrong**. The text said two of four. It is **four of
+  five**: 1TNF is the only wild-type apo entry; 1A8M carries R31D, 2ZJC carries
+  both K98R and R31A, 2E7A carries K98R, 5TSW carries Y56F.
+
+**What the check should be instead.** The question is still worth asking. Ask it
+with the site fixed by construction rather than matched after the fact:
+
+- use mdpocket characterization mode — one grid definition, derived once,
+  applied to every superposed structure. `pocket_scan` returns it as
+  `mdpocket.sites`;
+- prefer `site_from_ligand`, and read `distance_to_donor_ligand_centroid_a`
+  before quoting any number off a site entry. A centroid more than ~4 A from the
+  donor ligand is a different pocket — and that 4 A is a proposal resting on one
+  measured case, not a calibrated threshold, so say so wherever you rely on it;
+- read `site_pocket_selected_by`. `max_druggability_no_ligand_site`,
+  `site_signature_unreliable_homooligomer` and `no_pocket_matched_site_signature`
+  do not identify a site at all, so values carrying them are reported per
+  structure and never pooled into a spread;
+- **a refusal is a result.** Run this way, the same five apo TNF-alpha trimers
+  return **0.00 A^3 in four of five** at the true SPD304 site, because SPD304
+  binds only after a subunit is displaced. mdpocket returning zero, rather than
+  substituting a cavity 7.7 A away and calling it the site, is the entire reason
+  the tool was changed.
+
+Keep the ensemble-composition check, which was right in substance and wrong in
+its numbers: only one wild-type apo TNF-alpha entry exists (1TNF) and **four of
+the five** carry mutations. An ensemble of mutants is not an ensemble. State the
+composition beside any spread you report.
 
 ### 6. Is the accession mapping real?
 
@@ -175,7 +238,156 @@ modality:
   easy false positive for an IL-17A small-molecule search, because "oral" and
   "IL-17 pathway" both match.
 
+### 9. Is this our question at all?
+
+Checks 1–8 attack claims we are the right instrument to settle. This one asks
+the opposite: **is this finding a claim about what the literature says, which we
+are not equipped to adjudicate and somebody upstream is?**
+
+We are the structural and chemical instrument. The upstream knowledge-graph team
+is the literature instrument. "Do these two reviews assert a target relationship
+that primary literature supports?" is their question. Until now the sweep either
+burned effort on it, reported it unresolved, or dropped it.
+
+**Route it, do not answer it.** The mechanism is `graph-intake`'s existing
+ask-back protocol — four verbs, `expand_node` / `resolve_link` / `test_gap` /
+`new_question`, pointed at a graph row by id, one ask per request, one round per
+request. Read "Asking back after intake" there before issuing anything; the five
+gates and the never-ask list live in that file and are not repeated here.
+
+Two things about this check that make it unlike the other eight:
+
+- **It changes no number, same as the rest** — but it also does not change a
+  *verdict*, a *null*, or the completion of the run. An outstanding ask never
+  blocks a verdict and never licenses a null. Finish the dossier as though the
+  ask will never be answered.
+- **It is expected to fire almost never.** Run it on every sweep; expect it to
+  come back clean nearly every time, and record that it came back clean like any
+  other check. The four cases below are the ones that motivated building it, and
+  the rule fires on exactly one of them.
+
+Record the check in `checks_run` whether or not it fires, and put any issued ask
+in `not_found[]` prefixed `ASK[<verb>:<target id>]`.
+
+#### The four cases that motivated this, run through the rule
+
+Every one of these was a real run. Three of the four are here to show the rule
+*not* firing, which is the more useful half.
+
+**Obefazimod / ABX464 on TL1A — FIRES, but only after we answered it.**
+
+PMC10762860: *"One prototype of TL1A, ABX464, is an oral small molecule that
+upregulates a single micro-RNA…"*. PMC11642585: *"ABX464, a prototype of TL1A,
+is an oral small molecule that modulates a specific microRNA…"*. It is not a
+TL1A agent. It is a quinoline miR-124 upregulator, originally an HIV Rev
+antiviral, and it matches every surface feature an automated search keys on:
+oral, small molecule, IBD, named in the same sentence as anti-TL1A agents.
+Swallowing it yields a Phase 2b oral small-molecule TL1A programme that does not
+exist.
+
+Gate 3 kills the obvious ask, because **we can settle this ourselves in one
+query** — measured, 6 ms:
+
+```sql
+SELECT molregno, tid, mechanism_of_action, action_type
+FROM chembl.drug_mechanism WHERE molregno = 2335315
+-- 2335315 | 120082 | Cap binding complex modulator | MODULATOR
+```
+
+So the dossier is not blocked and never was. What survives is the
+**post-resolution ask**: the graph carries a wrong edge that will propagate to
+every other consumer next round. Verbatim:
+
+```json
+{
+  "ask": "resolve_link",
+  "target": "L1",
+  "depth": "deep",
+  "question": "POST-RESOLUTION, NOT BLOCKING — we have already answered this for our own purposes and are reporting the answer, not requesting one. L1 asserts obefazimod (ABX464) acts on TL1A. Both supporting findings are review text: PMC10762860 'One prototype of TL1A, ABX464, is an oral small molecule…' and PMC11642585 'ABX464, a prototype of TL1A, is an oral small molecule…'. These two are NOT independent — they share senior author Atilla Ertan. Against: ChEMBL curates obefazimod (molregno 2335315) as 'Cap binding complex modulator' (MODULATOR), not any TNF-superfamily ligand; the primary characterisation is as a quinoline miR-124 upregulator (Vautrin et al., Drug Discov Today 2021, doi 10.1016/j.drudis.2020.12.019, PMID 33387693); and PMC11858795 lists 'anti-TL1A, obefazimod' as separate agents in one enumeration. What would settle it: any primary report of ABX464 binding or antagonising TNFSF15/TL1A protein. We found none. Recommend L1 be retyped or dropped."
+}
+```
+
+Note what the ask carries that a bare question would not: **the two reviews
+share an author**, so the graph's `independence: 0.5` on that link is generous
+and "two sources agree" is really one source twice. That is a literature-provenance
+fact, it is exactly their domain, and we found it by reading the metadata.
+
+**VTP-43742 on RORgt — DOES NOT FIRE (gate 3).** A Phase 3 claim dated
+2023-08-28 is three months *newer* than a termination report dated 2023-05-20,
+and "trust the newer paper" gets it backwards. But the registry settles it: ctgov
+shows exactly two VTP-43742 studies, both Phase 1, latest posted 2018, no Phase 3
+anywhere. The tiebreak is ours and `terminated-programs` Rule 3 already
+prescribes it. The underlying stale-review phenomenon is a literature-provenance
+question in the abstract; it is not one for *this* claim, because we resolved it.
+Report both sources with their dates, per Rule 3. No ask.
+
+**LY3509754's trial ID — DOES NOT FIRE (gate 3), and it was never a conflict.**
+Reported unresolved on the grounds that two sources disagreed, NCT04586920
+versus NCT04152382. They do not disagree. There are **two trials**, and one
+query returns both in 418 ms:
+
+```
+NCT04152382 | Terminated | Phase 1 | 30  | Terminated due to liver findings
+NCT04586920 | Terminated | Phase 1 | 104 | Terminated due to safety findings
+```
+
+PMC13149041 still listing the compound as "currently in clinical development" is
+the same stale-review pattern, settled the same way — both NCTs have read
+Terminated since 2022. This was a retrieval failure wearing an ambiguity's
+clothes, and an ask-back button would have made it permanent by giving it
+somewhere respectable to go. **Two identifiers in two sources is not a
+contradiction until you have checked whether they name the same thing.**
+
+**IRAK4's contested efficacy claim — DOES NOT FIRE (gate 1).** PMC12325316
+argues kinase inhibition "cannot completely block TLR signalling"; the registry
+shows Pfizer's Phase 2 programme as Completed — NCT02996500 (n=269), NCT04092452
+(n=194), NCT04413617 (n=460) — plus NCT04575610 terminated for lack of
+enrollment, which is OPERATIONAL and not a safety or efficacy stop. The claim
+fails at gate 1: per dossier rule 7 an efficacy argument does not touch a
+tractability number, so it changes no dossier value and there is nothing to ask
+about. Reporting it unresolved was correct and remains correct.
+
+**Why obefazimod and not IRAK4.** The asymmetry is not about which claim is
+better supported. Obefazimod's claim asserts a *target relationship* — it would
+have put a compound into `clinical_stage_small_molecules` and invented a
+programme. IRAK4's claim asserts an *efficacy ceiling* — it bears on whether the
+drug works, which is another station's question entirely, and touches no field
+we own. Gate 1 is about which axis a claim lands on, not how true it is. A
+false claim that lands on nothing we report is still not our problem.
+
+#### And one that fires cleanly
+
+The shape the rule is actually for, exercised in
+`fixtures/upstream_graph_askback.json` as link `L3`: a pipeline review asserts an
+oral small-molecule antagonist of the target reached Phase 2. If true it fills
+`target_precedent.clinical_stage_small_molecules`. The compound has no
+`drug_mechanism` row, no registry record, and a corpus grep on the code returns
+only the review that made the claim. All five gates pass, and the answer is
+genuinely somewhere we cannot reach — `coverage.stop_reason` is `max_papers`, so
+the literature the graph has not read is where it lives.
+
+```bash
+python3 .claude/skills/graph-intake/graph_read.py \
+        fixtures/upstream_graph_askback.json --allow-fixture --ask-context
+# L1 and L3 clear the mechanical gates; L2/L4 fail on primary basis,
+# L5/L6 on mixed, L7 because rounds already carries the ask.
+```
+
 ## Failure modes
+
+### An ask instead of a query
+
+The regression this skill's ninth check introduces, and the one to watch for.
+Every one of the four real cases above turned out to be answerable inside the
+pipeline — two by `ctgov.studies`, one by `chembl.drug_mechanism`, one by not
+being a tractability question at all. A rule written from those cases and not
+tested against them would have fired on all four and forwarded, upstream, four
+questions we answer in well under a second each.
+
+**Symptom:** a sweep that ends with more asks than findings, or an ask whose
+`not_found` neighbours do not include the null results from ChEMBL, the registry
+and a grep on the exact identifiers. **Fix:** run the lookups, write the nulls,
+*then* consider the ask. Gate 3 exists to be expensive.
 
 ### Reporting only what you found
 
@@ -238,7 +450,14 @@ citation is how a dossier becomes untrustworthy.
 
 Populate `falsification`:
 
-- `checks_run` — every check from this skill, by name, whether or not it fired
+- `checks_run` — every check from this skill, by name, whether or not it fired.
+  Check 9 is included on every run; "ran, did not fire" is its normal result
 - `findings` — what came back, each with its source
 - `survived` — true only if no finding materially undercuts the precedent claim;
   false with an explanation otherwise; never null after a run
+
+An ask issued by check 9 does **not** go in `findings` — it is not a finding,
+it is an open question. It goes in the dossier's `not_found[]`, one entry,
+`field` naming the dossier field it would have improved and `reason` beginning
+`ASK[<verb>:<target id>]` followed by the question text. `survived` is computed
+as if the ask does not exist, because it might never be answered.

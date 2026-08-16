@@ -4,10 +4,13 @@ description: >
   Reads an upstream literature evidence graph and extracts the dossier's input
   contract from it — which things are protein targets, what the molecule is
   meant to stop, and which UniProt accession that is. Emits follow-up asks back
-  to the graph when the answer is missing or rests only on review citations. It
-  does NOT assess tractability, does NOT rank targets against each other, does
-  NOT decide a mechanism the evidence has not stated, and does NOT treat a
-  computed result as literature evidence.
+  to the graph using the graph's own four ask verbs — at intake, and later in
+  the build when a falsification finding turns out to be a literature-provenance
+  question. It does NOT assess tractability, does NOT rank targets against each
+  other, does NOT decide a mechanism the evidence has not stated, does NOT treat
+  a computed result as literature evidence, and does NOT ask upstream anything a
+  local table, a registry, a structure or arithmetic can settle. A pending ask
+  never blocks a verdict and never justifies a null.
 ---
 
 # graph-intake
@@ -48,30 +51,6 @@ Never report zero nominations without quoting `status` alongside it.
 ```bash
 python3 graph_read.py <graph.json>
 ```
-
-If you were handed a `graph_id` rather than a file, load it from the mapper's
-store first. SCHEMA.md's contract is that Stage 1 owns storage and Stage 2 sends
-an id, never a graph; the MCP transport for that does not exist yet, but the
-store does, on disk in the documented layout:
-
-```bash
-python3 graph_store.py <store_dir> --list                 # what graphs exist
-python3 graph_store.py <store_dir> --graph-id g_1a4f > g.json
-```
-
-`graph_store.py` reassembles `meta/things/papers/links/gaps` plus the per-round
-`findings/r<N>.json` chunks. **It dedupes findings by id rather than
-concatenating them**, because the shipped store does not behave the way the
-schema documents: SCHEMA.md says rounds append and never rewrite, but on
-`g_1a4f` r1 holds 7 findings and r2 holds 12 *including all 7 of r1's*. Each
-chunk is a full snapshot. Concatenating gives 19, and the seven duplicates would
-land in the `yes`/`no` counts that feed `agreement` and `independence`.
-
-It also reports two things worth reading before you trust the graph.
-`_undocumented_fields` lists fields the store emits that the schema does not
-describe — currently `papers.pmid` and `findings.claim`. `_dangling_refs` lists
-ids that do not resolve, which the schema guarantees cannot happen, so any entry
-there means you are reading a torn write rather than a sparse graph.
 
 Stdlib only, no dependencies. It returns `nominations`, `rejected` and
 `needs_adjudication`. Read all three. `rejected` is where a wrongly-dropped
@@ -154,27 +133,6 @@ If two accessions both fit, populate `ambiguity` with both and leave
 `uniprot_accession` null. An unresolved target is a correct output. A confidently
 wrong accession poisons every number downstream of it.
 
-#### Verifying `symbol_candidates`
-
-When no node is typed `protein` or `gene`, the helper scans names and aliases and
-hands you `symbol_candidates` — each with the thing it came from, the matched
-token and the action word beside it. Those are proposals, not nominations. Run
-the SQL above over the proposed symbols in one `IN` list and keep only what comes
-back with a human accession: `MYD88` returns Q99836 and verifies, `ST2825` and
-`TLR` return nothing and do not.
-
-A phrase carrying several candidates stays ambiguous unless exactly one verifies
-**and** the rest were false regex hits — compound codes, assay names, anything
-that was never a biological entity. A candidate that fails because it names a
-complex or a family is not eliminated, it is unresolved, and one unresolved
-candidate keeps the whole phrase ambiguous. That is why `t5` stays ambiguous
-though MYD88 alone resolves: NF-kB and TLR failed as a complex and a family, not
-as noise. Populate `ambiguity` with all three and leave `uniprot_accession` null.
-
-The rule above applies unchanged, and it is what makes this route safe to add at
-all: an unresolved target is a correct output, a confidently wrong accession
-poisons every number downstream of it.
-
 ### 5. Emit
 
 One object per nomination, matching the dossier's Contract table:
@@ -220,6 +178,214 @@ ran out of budget, so absence proves nothing. The helper surfaces this as
 
 At `depth: "quick"` absence never means anything at all: SCHEMA.md note 2 says
 `quick` reads page 1, and page 1 lies.
+
+## Asking back after intake
+
+Intake is not the only moment a literature question arises. A falsification
+sweep three steps later can turn up a claim that changes the dossier and rests
+on nothing but review text — and until now the pipeline either burned its own
+effort on it, reported it unresolved, or dropped it. It can now issue the same
+four asks, mid-build, under a much narrower rule than the one intake uses.
+
+**Same four verbs, same id-pointing rule, same one-ask-one-round rule. No fifth
+ask type and no new schema.** The upstream team consumes what it already
+consumes. The only field reused beyond intake's usage is `question`, which
+SCHEMA.md already defines on `new_question`; populate it on every ask type,
+because an ask that is only a verb and an id is unanswerable (see "Make the ask
+carry its own evidence" below). That reuse is the entire schema footprint. If
+you find yourself wanting a fifth verb, the thing you want to ask is almost
+certainly on the never-ask list.
+
+### The trigger — all five gates, no exceptions
+
+A finding becomes an ask only when **every one** of these holds. Four is not
+enough; the gates are conjunctive because each one alone is satisfied by large
+numbers of claims we must handle ourselves.
+
+| # | gate | fails when |
+| --- | --- | --- |
+| 1 | **It changes a dossier value.** If true, the claim fills or alters a field in the template — a precedent list entry, a count, a mechanism, a structure choice. | it is an efficacy, outcome or clinical-success argument. Dossier rule 7: clinical failure is not evidence against tractability, so an efficacy claim touches no tractability number and is out at gate 1. |
+| 2 | **Its support is secondary-only.** The link's `basis` is `background_only` or `hedged_only`. | `basis` is `primary` or `mixed`. A primary-supported claim is either usable or contradicted by something we can measure; neither is an ask. |
+| 3 | **We tried, we failed, and the failures are written down.** ChEMBL, the registry, the structure and a `grep` on the exact identifiers were all actually run, all abstained, and each null is in `not_found` **before** the ask is drafted. | any of them was not run. This is the gate that does all the work — see the never-ask list. |
+| 4 | **There is a row to point at, and nobody has asked yet.** A `links[]`, `things[]` or `gaps[]` id, or a genuinely new question; and no matching entry in `rounds`. | `rounds` already carries the same verb at the same target. Re-asking costs a round and returns the same evidence. |
+| 5 | **There is literature left to find.** `coverage.stop_reason != "complete"`, or `coverage.truncated` is true. | `stop_reason` is `complete`. The graph has exhausted the literature; another round returns what you already have. |
+
+Gate 5 is the one that is easy to skip and cheap to check. It is also the only
+gate that can make a *perfectly reasoned* ask worthless, so check it first — it
+costs one field read and it retires the whole question.
+
+```bash
+python3 graph_read.py <graph.json> --ask-context
+python3 graph_read.py <graph.json> --check-ask '<ask json>'
+```
+
+`--ask-context` reports gates 2, 4 and 5 per link. `--check-ask` gates one
+proposed ask and exits 1 on any failure. **Neither checks gates 1 or 3, and it
+says so in its own output.** Those are judgment, they are the two that stop this
+becoming a way to avoid work, and no green result from a script substitutes for
+them. Treat an all-green `--check-ask` as permission to *consider* an ask.
+
+### The one ask that may skip gate 3
+
+When we **did** settle a claim ourselves and the settlement **contradicts a row
+in the graph**, issue `resolve_link` on that row anyway, carrying our answer.
+
+This is the only ask allowed past gate 3, and only because it inverts it: gate 3
+exists to stop us outsourcing work we did not do, and here the work is done. The
+ask has no bearing on our dossier — that field is already filled — and exists so
+the wrong row does not propagate to every other consumer of the graph on the
+next round. Mark it plainly as post-resolution so nobody upstream reads it as a
+blocker. An ask of this kind must state our answer and its source, not just the
+doubt.
+
+### Make the ask carry its own evidence
+
+*"Is obefazimod a TL1A agent?"* is not an ask, it is a shrug with an id attached.
+The answering team cannot see our run, so an ask that does not carry the dispute
+makes them redo the search that produced it.
+
+Every ask states four things in `question`:
+
+1. **the claim**, as the graph has it;
+2. **the sources asserting it**, by id;
+3. **the sources against it**, by id, and what we measured ourselves;
+4. **what would settle it** — named, and phrased as something primary literature
+   could actually contain.
+
+`--check-ask` enforces a weak floor on this: at least two source identifiers
+(`PMC…`, `NCT…`, a DOI, a `CHEMBL…` id, a PDB code) must appear in `question`.
+Two identifiers is a floor, not a target, and it cannot see whether they sit on
+opposite sides of the dispute. Clearing it is not the same as writing an
+answerable ask.
+
+### Where a pending ask lives, and why it can never block
+
+**In the dossier: one entry in `not_found[]`.** No template change is required
+and none should be made — `not_found[]` already exists, already carries
+`{field, reason}`, and is already the place a reader looks for what the dossier
+could not establish. Prefix the reason so it is machine-findable:
+
+```json
+{
+  "field": "target_precedent.clinical_stage_small_molecules",
+  "reason": "ASK[resolve_link:L3] issued to graph g_tl1a1 round 3. Not blocking: the field is filled from what we could verify and this entry records the residual question. <the question text>"
+}
+```
+
+**In the graph: nothing.** This skill does not write to the upstream graph, and
+that has not changed — `rounds` is the upstream team's record of asks they have
+serviced, and they append to it when they answer. We emit the ask object in the
+nomination's existing `asks: []` and stop there. Writing our own entry into
+`rounds` would claim a round that was never run.
+
+**The rule, and it is absolute:**
+
+> An outstanding ask never blocks a verdict and never licenses a null.
+
+Complete the dossier as if the ask will never be answered. Every field the ask
+would have improved is filled from what we do have, or nulled with a reason that
+stands on its own — a reason that would still be true if the ask had never been
+written. If the *only* reason a field is null is that an ask is pending, the ask
+is illegitimate: it means gate 3 was skipped and the resolution work was not
+done. And `verdict: insufficient_evidence` may never be reached by counting a
+pending ask as missing evidence. Rule 11 makes insufficient evidence a correct
+answer; it does not make it a waiting room.
+
+## What must never become an ask
+
+Longer than the trigger on purpose, and the more important half. The trigger
+describes a rare event. This list describes what an agent holding a new button
+will actually reach for.
+
+The failure is not that a bad ask gets sent. It is that **the moment an agent
+can ask, the cheapest way to finish any hard sub-problem is to ask** — and the
+result is a pipeline that has kept its verdict and given away its judgement. We
+are the structural and chemical instrument. Everything below is ours.
+
+**1. What a drug actually hits.** `chembl.drug_mechanism`, joined on `molregno`.
+This is the single most tempting ask and it is a local table. Measured: the
+obefazimod/TL1A trap — the case that motivated this whole section — is settled
+by one query returning one row in 6 ms:
+
+```sql
+SELECT molregno, tid, mechanism_of_action, action_type
+FROM chembl.drug_mechanism WHERE molregno = 2335315
+-- 2335315 | 120082 | Cap binding complex modulator | MODULATOR
+```
+
+Not TL1A. Never ask "what does compound X target".
+
+**2. Modality.** `chembl.molecule_dictionary.molecule_type`, read per drug
+(dossier rule 1). Authoritative for `Small molecule`, `Antibody`, `Protein`. A
+returned `Unknown` is *still* not an ask — it maps to modality-unknown, goes in
+`not_found`, counts toward neither block, and the optional Open Targets
+corroboration (rule 10b) is also ours to run.
+
+**3. Trial status, phase, and why a program stopped.** `ctgov.studies`, and the
+`terminated-programs` skill exists entirely for this. Measured on the two cases
+that looked like they needed help: LY3509754's "conflicting" trial IDs are two
+distinct trials, both `Terminated`, both carrying a `why_stopped`, returned by
+one query in 418 ms; zimlovisertib's Phase 2 record is three `Completed` studies
+plus one terminated for lack of enrollment, in 437 ms. Neither was ever a
+literature question.
+
+**4. Assay provenance.** Whether an actives count collapses to one assay, and
+whether that assay measures a different protein. Falsification check 1, one
+`GROUP BY`. The IRAK4-assay-inside-TNF-alpha finding came from that query, not
+from a review.
+
+**5. Anything structural.** Pocket volume, druggability range, cryptic mechanism
+and its apo census, interface classification, chain selection, ligand identity,
+whether a holo ligand is a frequent hitter. This is the axis we exist to
+compute. An ask here is not delegation, it is abdication — and the graph team
+has no structures anyway.
+
+**6. Anything computable.** A fraction, a CV, a spread, a distance, a count, a
+ratio. Arithmetic is never a literature question. If the inputs are in hand the
+answer is too.
+
+**7. Accession resolution.** `uniprot_v.proteins`. Where two accessions both fit
+the quotes, step 4 already gives the correct output: populate `ambiguity`, leave
+`uniprot_accession` null. That is a finished answer, not a pending one. Note the
+narrow legitimate case that *sounds* the same: asking `resolve_link` because the
+**evidence** on a link is review-only is fine; asking "which accession is it" is
+not. The first is about what the literature says, the second is a lookup.
+
+**8. A verdict, a score, a ranking, or an interpretation.** They map literature
+relationships; they do not assess tractability, and they have never claimed to.
+"Is this target druggable?" is a category error in both directions — it asks
+them for our output using their input. This also rules out the softer forms:
+"how strong is this evidence", "should we count this", "which of these matters
+more".
+
+**9. Efficacy and clinical-outcome arguments.** Gate 1. PMC12325316's claim that
+IRAK4 kinase inhibition "cannot completely block TLR signalling" is a real and
+interesting argument that bears on whether the drug works, and bears on no
+number in this dossier. Reporting it unresolved is the correct output and always
+was.
+
+**10. Anything already in `rounds`.** Gate 4. Check before drafting, not after.
+
+**11. Anything against a `complete` graph.** Gate 5.
+
+**12. A question whose failed attempts are not written down.** Gate 3, stated as
+a prohibition because it is the one that gets rationalised away. If `not_found`
+does not already carry the null results from ChEMBL, the registry and the grep,
+there is no ask — there is an unfinished lookup. Write the nulls first; often
+the act of writing them produces the answer.
+
+**13. Retraction status.** `papers[].retracted` is in the graph already and
+`graph_read.py` surfaces it in `retracted_papers`. Read the field.
+
+**14. An unknown verb at intake.** "Adjudicating an unknown verb" already routes
+this to `resolve_link` at intake. Do not issue a second, build-time ask for the
+same link — that is one question consuming two rounds, and `rounds` will show it.
+
+**15. Anything you have not yet finished reading.** The obefazimod trap was
+caught by reading further, in our own run, in the corpus we already had. An
+agent with an ask button would have pressed it at precisely the moment before
+the reading that solved it. Before any ask: is this unresolvable, or merely
+unread?
 
 ## Adjudicating an unknown verb
 
@@ -293,54 +459,6 @@ answer's clothes. This is the same rule as accession ambiguity in step 4 — an
 unresolved target is a correct output, and a confidently wrong one poisons every
 number downstream of it. A refused edge costs one round. A wrong one costs the
 whole dossier.
-
-## Reading the evidence floor
-
-Every nomination carries an `evidence_floor` computed from the links and gaps
-that justified it. Three tiers:
-
-| tier | means | do |
-| --- | --- | --- |
-| `actionable` | at least one nominating edge is `primary` or `mixed` | proceed |
-| `non_actionable` | every nominating edge is `background_only` or `hedged_only` | issue the `resolve_link` it names, first |
-| `gap_only` | nominated solely because a gap named it | a proposal, same standing as the 0.6 gap cap |
-
-The nomination still happens in all three cases — a review-only target may well
-be worth running. What changes is that you can see which it is.
-
-`non_actionable` is the tier that catches a modality trap. Two review papers
-asserting that a small molecule "is a prototype of" some target manufacture
-small-molecule precedent that does not exist; review-sourced means
-`is_own_result: false`, which surfaces as `background_only`. The dossier would
-eventually return `insufficient_evidence` and fail safe, but only after a full
-run, and the nomination's provenance would rest on an error nobody looked at.
-One `resolve_link` costs a round and settles it.
-
-## Calibrating before you trust a batch
-
-```bash
-python3 calibrate.py <graph.json> [...]      # or --store <dir>
-```
-
-This skill is two things wearing one coat. The parts derived from `SCHEMA.md` —
-the `kind` and `basis` enums, orphan and dangling-reference checks, findings
-dedup, drift detection — are as correct on the five-hundredth graph as the
-first. The word lists are not: the relation verbs, quote terms, assay contexts
-and symbol stop-list were hand-written against one real graph and three fixtures
-we wrote ourselves, and they cannot be complete.
-
-The design makes that safe rather than correct. An unrecognised verb goes to
-`needs_adjudication`, an unverified symbol is never nominated, a multi-symbol
-phrase stays ambiguous, a failed lookup is recorded as a failed retrieval and
-not as absence. So an under-tuned list costs **recall, not accuracy** — the
-intake refuses more and asserts less.
-
-`calibrate.py` counts that. Read `unseen_verbs` first: relation words the corpus
-used that neither list knows, each one an adjudication somebody had to resolve
-by hand. It also separates synthetic fixtures from real graphs, because a rate
-computed over fixtures we authored measures our own assumptions, and flags
-graphs with zero nominations — which look identical whether the graph names no
-target or the heuristics simply failed to reach it, and mean opposite things.
 
 ## Failure modes
 
@@ -476,56 +594,34 @@ silently drops every null result. And when the shared `Evidence.direction`
 mapping is settled, argue for a third value rather than mapping `no_effect` onto
 `contradicts`.
 
-### 11. The target lives in an intervention node, not an entity node
+### 11. The ask becomes the thing you do instead of the work
 
-The first real graph the upstream mapper produced — `upstream_graph_real.json`,
-`g_1a4f`, round 2, status `ok` — made this intake nominate nothing. Its five
-things are the whole graph:
+This is the failure mode the ask-back mechanism introduces, and it is worse than
+the gap it closes, because it is invisible in the output. A dossier with a
+well-formed pending ask and a null beside it looks *more* rigorous than one with
+a null and no ask. It reads as diligence. It can be the opposite.
 
-| id | kind | name |
-| --- | --- | --- |
-| `t1` | `small_molecule` | IRAK4 inhibition |
-| `t2` | `process` | myeloid inflammatory signalling |
-| `t3` | `process` | synovial fibroblast driven inflammation |
-| `t4` | `small_molecule` | MyD88 dimerization inhibition |
-| `t5` | `process` | TLR/MyD88/NF-kB signalling axis |
+Three symptoms, all measured against the real cases this section was built from:
 
-Not one node is typed `protein` or `gene`, so the first half of the nomination
-rule is false for all five and the intake returned an empty list against a graph
-whose own `question` names IRAK4. Every protein is present — IRAK4, MyD88, NF-kB
-— but only inside intervention names and aliases (`PF-06650833`, `ST2825`).
+- **An ask on a question a local table answers.** Every one of the four cases
+  that motivated this mechanism turned out to be answerable inside the pipeline
+  — obefazimod by `chembl.drug_mechanism`, both trial cases by `ctgov.studies`,
+  the IRAK4 efficacy claim by not being a tractability question at all. A rule
+  written from those cases and *not tested against them* would have fired on all
+  four and offloaded four questions we can answer in under a second each.
+- **`not_found` growing while `sources` does not.** If a run's asks outnumber
+  its newly-sourced numbers, the sweep stopped retrieving and started
+  forwarding.
+- **An ask drafted before the nulls are written.** Gate 3 requires the failed
+  attempts in `not_found` first. Drafting the ask first and backfilling the
+  nulls to justify it produces an identical-looking dossier and inverts the
+  reasoning.
 
-`kind: small_molecule` on "IRAK4 inhibition" is not a lie. The mapper is naming
-what the experiments manipulated, and what they manipulated was an intervention:
-a compound class defined by its mechanism of action. That is one level coarser
-than the entity we expected, and our expectation came from reading SCHEMA.md
-rather than from data. It survived until first contact with a real graph.
-
-The second nomination route exists for this — scan `name` and `aliases` for
-gene-symbol-shaped tokens, capture the adjacent action word, emit
-`symbol_candidates` with provenance. **The regex only proposes. UniProt
-confirms.** A token that looks like a symbol is not a protein until an accession
-comes back; `ST2825` and `KIC-0101` are symbol-shaped and are compound codes.
-Nominating off a regex hit alone is failure mode 3 with a new entry point.
-
-`t5` is where that has to hold. "TLR/MyD88/NF-kB signalling axis" yields three
-candidates, and three is the answer — it stays ambiguous. TLR is a receptor
-family, MYD88 resolves cleanly to Q99836, and NF-kB is a transcription factor
-complex — a dimer of subunits such as RELA and NFKB1 — with no single gene to
-resolve to. NF-kB failing verification is the correct outcome, not a gap to paper
-over by picking RELA, and one clean resolution among three does not collapse the
-phrase onto MYD88. Same refusal as failure mode 7, one node-kind over.
-
-The action word carries the rest. `t1` says "IRAK4 **inhibition**" and stops
-there; `t4` says "MyD88 **dimerization** inhibition", which names the interaction
-rather than just the intent. Disrupting a dimerization interface is the
-oligomeric-state shape from step 2, and `f3` states it verbatim: *"the effect of
-disrupting MyD88 dimerization by ST2825"*. So `t4` supports
-`interaction_to_disrupt: "dimerization interface (oligomeric state)"` and,
-unusually, a real `mechanism_hypothesis` rather than `unknown` — the rare case
-where the graph hands us mechanism failure mode 5 would otherwise force us to
-leave unstated. Take it, but only after MYD88 verifies as Q99836. The action word
-never substitutes for the accession.
+The defence is gate 3 and it is deliberately expensive: you must have run the
+lookups and recorded their nulls before you may write the ask. If that feels
+like it defeats the purpose, that is the correct feeling. The mechanism is meant
+to fire rarely — a handful of times a year, on claims that genuinely have no
+answer inside our instruments — not to be a routing layer for hard questions.
 
 ## What this skill does not do
 
@@ -533,4 +629,7 @@ never substitutes for the accession.
 - It does not rank nominations against each other.
 - It does not choose between two plausible accessions.
 - It does not assign a mechanism the evidence has not stated.
-- It does not write anything back into the upstream graph.
+- It does not write anything back into the upstream graph, `rounds` included.
+- It does not ask upstream anything a local table, the registry, a structure or
+  arithmetic can answer, and it does not let a pending ask block a verdict or
+  justify a null.

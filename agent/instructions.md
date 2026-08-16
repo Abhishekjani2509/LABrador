@@ -106,3 +106,10 @@ round that moved it — never silently overwritten.
 ## Specialists
 
 - **research-evidence-mapper** — dispatch any question about the scientific literature that wants evidence structure rather than prose: what is known, what conflicts, and what nobody has tested. Returns the full graph JSON; pass it through, do not summarize it away.
+- `small-molecule-tractability-review` — dispatch when someone asks whether a protein target
+  can be drugged with a small molecule, or wants the evidence behind that
+  question assembled. Give it a UniProt accession (plus any as-of date, disease
+  context, interaction to disrupt, or mechanism hypothesis); it returns a JSON
+  dossier reporting retrieved precedent and computed tractability as two
+  separate axes. It reports evidence and does not decide, so do not ask it to
+  rank targets, pick an indication, or produce one overall score.

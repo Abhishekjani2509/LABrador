@@ -6,16 +6,14 @@ each link's `basis`, and — where the verb is unrecognised — an adjudication
 packet carrying every deterministic signal the graph offers. Reading a mechanism
 out of a quote is judgment and stays with the agent; see SKILL.md.
 
-Also proposes gene-symbol candidates found inside thing names, because a real
-upstream graph can carry its proteins only there. Those are PROPOSALS for
-UniProt verification, never nominations.
-
 Nothing here decides tractability, ranks targets, or picks an accession.
 
 Usage:
     python3 graph_read.py <graph.json>
     python3 graph_read.py <graph.json> --thing t1
     python3 graph_read.py <graph.json> --allow-fixture
+    python3 graph_read.py <graph.json> --ask-context
+    python3 graph_read.py <graph.json> --check-ask '<ask json>'
 """
 
 import argparse
@@ -33,21 +31,6 @@ TARGET_KINDS = {"protein", "gene"}
 # else's work. Both produce a confident-looking answer from evidence that has
 # not asserted anything.
 NON_ACTIONABLE_BASIS = {"background_only", "hedged_only"}
-
-# The floor applied to the NOMINATION rather than to the mechanism. An allowlist,
-# not the complement of NON_ACTIONABLE_BASIS: a link whose `basis` is absent or
-# unrecognised has asserted nothing either, and must not outrank a hedged link by
-# being unnamed.
-ACTIONABLE_BASIS = {"primary", "mixed"}
-
-# Strongest first. A basis outside this tuple -- absent, or a value SCHEMA.md v1.1
-# does not define -- ranks below every value in it.
-BASIS_STRENGTH = ("primary", "mixed", "hedged_only", "background_only")
-
-# Nominations are emitted strongest-evidence-first so a review-only nomination is
-# not visually indistinguishable from one backed by primary experiments. Tier
-# never adds or removes a nomination; it only orders the same set.
-TIER_ORDER = {"actionable": 0, "gap_only": 1, "non_actionable": 2}
 
 # `how` has NO enum in SCHEMA.md. Every other categorical field there carries an
 # explicit a|b|c comment; `how` does not. It is open vocabulary written by the
@@ -84,69 +67,6 @@ DOWNSTREAM_TERMS = [
 DIRECT_CONTEXTS = ["biochemical", "cell-free", "cell free", "purified", "in vitro binding"]
 
 NS_WORD = re.compile(r"[^a-z0-9]+")
-
-# --- Second nomination route: symbols buried in entity names -----------------
-#
-# The kind-based route needs a `protein` or `gene` node. A real upstream graph
-# may have none: "IRAK4 inhibition" is typed `small_molecule` because it names an
-# intervention, and the protein exists only as a substring of that name.
-#
-# This route PROPOSES ONLY. A regex cannot know that a token is a gene, so every
-# symbol below is emitted for verification against uniprot_v.proteins (SKILL.md
-# step 4) and nothing here enters `nominations`. The script stays stdlib-only and
-# offline by construction -- it must not call paperclip.
-
-# One token, 2-10 chars, alphanumeric with internal hyphens.
-SYMBOL_SHAPE = re.compile(r"^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*$")
-
-# Compound codes are symbol-shaped (ST2825, PF-06650833, KIC-0101). No human gene
-# symbol carries a run of four digits, so that run separates the two.
-COMPOUND_CODE = re.compile(r"\d{4,}")
-
-# Separators that join DISTINCT symbols. Hyphen is NOT one of them: NF-kB, IL-6
-# and IRAK-4 are single symbols that happen to carry a hyphen.
-SYMBOL_SEPARATORS = re.compile(r"[/,+&]")
-
-TRIM = " \t\"'()[]{}.,;:!?"
-
-# The action word sitting next to a symbol seeds `interaction_to_disrupt`:
-# "MyD88 dimerization inhibition" implies disrupting a dimerization interface,
-# "IRAK4 inhibition" implies catalytic function. Carried verbatim -- turning it
-# into a mechanism is the agent's call, not this script's.
-ACTION_WORDS = {
-    "inhibition", "inhibitor", "inhibitors", "inhibiting", "inhibited",
-    "blockade", "blocking", "blocker", "block",
-    "knockdown", "knockout", "silencing", "depletion", "ablation", "deletion",
-    "degradation", "degrader", "degrading",
-    "agonism", "agonist", "antagonism", "antagonist",
-    "dimerization", "dimerisation", "oligomerization", "oligomerisation",
-    "activation", "activator", "stabilization", "stabilisation",
-    "engagement", "occupancy", "disruption", "suppression", "modulation",
-    "deficiency", "loss",
-}
-
-# Stop-list: symbol-SHAPED tokens that are never gene symbols -- disease and
-# tissue abbreviations, cell lines, reagents, assays, clinical endpoints, plus
-# the action vocabulary itself. Matched case-insensitively, so an extractor that
-# writes AXIS or SIGNALLING in caps still proposes nothing.
-#
-# Deliberately NOT here: TNF, TLR, IL-6 and friends. They are real symbols; the
-# UniProt lookup, not this set, decides whether they resolve.
-NOT_SYMBOLS = {
-    "ra", "oa", "sle", "ibd", "copd", "gvhd", "as", "ms", "cd",
-    "acr20", "acr50", "acr70", "das28", "pasi", "sdai", "cdai", "rct",
-    "fls", "sf", "sfs", "pbmc", "pbmcs", "thp1", "thp", "hek", "hek293",
-    "hela", "jurkat", "u937", "k562", "cho", "mcf7", "a549", "raw264",
-    "bmdm", "huvec", "ipsc",
-    "lps", "pma", "cfa", "atp", "adp", "gtp", "dmso", "pbs", "fbs",
-    "dna", "rna", "mrna", "sirna", "shrna", "crispr", "cas9",
-    "ic50", "ec50", "kd", "ki", "elisa", "facs", "pcr", "qpcr", "nmr",
-    "hplc", "lcms", "msd", "spr", "itc", "auc", "cmax",
-    "wt", "ko", "usa", "uk", "eu", "fda", "ema", "nih",
-    "axis", "pathway", "signalling", "signaling", "inflammation", "disease",
-    "protein", "kinase", "receptor", "complex", "cells", "cell",
-}
-NOT_SYMBOLS |= ACTION_WORDS
 
 
 def index(graph):
@@ -367,314 +287,10 @@ def nominate(graph, idx):
     return nominated, rejected, adjudicate
 
 
-def basis_strength(basis):
-    return (BASIS_STRENGTH.index(basis) if basis in BASIS_STRENGTH
-            else len(BASIS_STRENGTH))
-
-
-def evidence_floor(reasons, idx):
-    """The evidence tier of the NOMINATION, read from the links that justified it.
-
-    NON_ACTIONABLE_BASIS already stops a review-sourced finding from setting
-    `interaction_to_disrupt`. Nothing read `basis` at nomination time, so a target
-    whose only supporting edge was a review citation arrived looking exactly like
-    one backed by primary experiments, and downstream could not separate them.
-
-    This does NOT reject anything. A review-only nomination may still be worth a
-    run; it must not be worth one silently.
-
-    Three tiers, not two. A gap carries no `basis` because a gap is by definition
-    unstated, so gap-only nominations are neither actionable nor review-backed --
-    they are proposals, the same reading SCHEMA.md's 0.6 cap on gaps[].confidence
-    already applies to them.
-    """
-    links, gaps = [], []
-    for reason in reasons:
-        via = reason.get("via")
-        if via in idx["links"]:
-            basis = idx["links"][via].get("basis") or "unknown"
-            links.append({
-                "link": via,
-                "basis": basis,
-                "actionable": basis in ACTIONABLE_BASIS,
-            })
-        elif via in idx["gaps"]:
-            gaps.append(via)
-
-    strongest = min(links, key=lambda l: basis_strength(l["basis"]),
-                    default=None)
-    strongest_basis = strongest["basis"] if strongest else None
-    actionable = any(l["actionable"] for l in links)
-
-    if not links:
-        tier = "gap_only"
-    elif actionable:
-        tier = "actionable"
-    else:
-        tier = "non_actionable"
-
-    warning, asks = None, []
-    if tier == "non_actionable":
-        weak = ", ".join(l["link"] for l in links)
-        warning = (
-            f"NOT ACTIONABLE: no edge nominating this target ({weak}) is primary "
-            f"or mixed -- the strongest carries basis '{strongest_basis}'. The "
-            f"nomination rests only on review citations or hedged claims, and no "
-            f"edge here asserts that a small molecule acts on this target. This "
-            f"is how a modality trap enters -- "
-            f"a review calling a compound 'a prototype of' a target whose real "
-            f"precedent is antibodies only manufactures small-molecule precedent "
-            f"that does not exist, and review-sourced means is_own_result: false, "
-            f"which surfaces as exactly this basis. Issue resolve_link on {weak} "
-            f"and read what comes back BEFORE spending a dossier run."
-        )
-        asks = [{"ask": "resolve_link", "target": l["link"], "depth": "deep"}
-                for l in links]
-    elif tier == "gap_only":
-        named = ", ".join(gaps)
-        warning = (
-            f"PROPOSAL, NOT EVIDENCE: nominated by {named} and by no link, so "
-            f"there is no `basis` to read -- a gap states that nobody "
-            f"wrote the edge, which is neither primary support nor a review "
-            f"citation. SCHEMA.md caps gaps[].confidence at 0.6 for this reason: "
-            f"a proposal, not a finding. This is the route that carries undrugged "
-            f"candidates, so the missing edge is not evidence against the target; "
-            f"issue test_gap on {named} before spending a dossier run."
-        )
-        asks = [{"ask": "test_gap", "target": g, "depth": "deep"} for g in gaps]
-
-    return {
-        "tier": tier,
-        "strongest_basis": strongest_basis,
-        "actionable": actionable,
-        "supporting_links": links,
-        "supporting_gaps": gaps,
-        "warning": warning,
-        # SKILL.md: one ask per request, one round per request. Listed here as
-        # candidates, not as a batch to fire.
-        "asks": asks,
-    }
-
-
-def symbol_shaped(token):
-    """Shape test only. Says nothing about whether the token names a gene."""
-    if not (2 <= len(token) <= 10):
-        return False
-    if not SYMBOL_SHAPE.match(token):
-        return False
-    if COMPOUND_CODE.search(token):
-        return False
-    # Two capitals is the floor. One is ordinary prose capitalisation (Rho,
-    # Toll-like, Matrigel); symbols carry their case (MyD88, NF-kB, IRAK4).
-    if sum(1 for c in token if c.isupper()) < 2:
-        return False
-    return token.lower() not in NOT_SYMBOLS
-
-
-def symbol_key(symbol):
-    """Dedupe key only. IRAK-4 and IRAK4 are one candidate; the spelling the
-    extractor used is kept verbatim on every mention."""
-    return symbol.upper().replace("-", "")
-
-
-def query_forms(symbol):
-    """Spellings to put in the SQL `IN` list, in order. Not a rewrite of the
-    symbol -- each form is a separate lookup that may return nothing."""
-    forms = []
-    for form in (symbol, symbol.upper(), symbol.upper().replace("-", "")):
-        if form not in forms:
-            forms.append(form)
-    return forms
-
-
-def action_near(tokens, i):
-    """The action word adjacent to tokens[i], as (text, position).
-
-    Suffix first ("MyD88 dimerization inhibition"), then prefix, optionally
-    across "of" ("knockdown of MYD88"). Contiguous runs only, so an action word
-    elsewhere in the phrase is not attached to this symbol.
-    """
-    after = []
-    j = i + 1
-    while j < len(tokens) and tokens[j].strip(TRIM).lower() in ACTION_WORDS:
-        after.append(tokens[j].strip(TRIM))
-        j += 1
-    if after:
-        return " ".join(after), "suffix"
-
-    j = i - 1
-    if j >= 0 and tokens[j].strip(TRIM).lower() == "of":
-        j -= 1
-    before = []
-    while j >= 0 and tokens[j].strip(TRIM).lower() in ACTION_WORDS:
-        before.insert(0, tokens[j].strip(TRIM))
-        j -= 1
-    if before:
-        return " ".join(before), "prefix"
-    return None, None
-
-
-def scan_phrase(phrase):
-    """Every symbol in one verbatim string, with its adjacent action word.
-
-    A multi-symbol phrase returns EVERY symbol. "TLR/MyD88/NF-kB signalling
-    axis" is three candidates; collapsing it to one is the failure this route
-    exists to avoid.
-    """
-    tokens = phrase.split()
-    hits, seen = [], set()
-    for i, token in enumerate(tokens):
-        for part in SYMBOL_SEPARATORS.split(token):
-            part = part.strip(TRIM)
-            if not symbol_shaped(part) or symbol_key(part) in seen:
-                continue
-            seen.add(symbol_key(part))
-            action, position = action_near(tokens, i)
-            hits.append({"symbol": part, "action": action,
-                         "action_position": position})
-
-    spellings = [h["symbol"] for h in hits]
-    for hit in hits:
-        hit["co_occurring_symbols"] = [
-            s for s in spellings if symbol_key(s) != symbol_key(hit["symbol"])
-        ]
-    return hits
-
-
-def thing_symbols(thing):
-    """Scan `name` and every alias, whatever the thing's `kind`. Kind is exactly
-    what this route cannot trust -- the target may be typed small_molecule."""
-    fields = [("name", thing.get("name"))]
-    fields += [("aliases[%d]" % n, a)
-               for n, a in enumerate(thing.get("aliases") or [])]
-
-    found, order = {}, []
-    for field, phrase in fields:
-        if not phrase:
-            continue
-        for hit in scan_phrase(phrase):
-            mention = {
-                "as_written": hit["symbol"],
-                "field": field,
-                # Whole-field means the extractor gave the symbol; parsed-out
-                # means this regex inferred it from a longer phrase.
-                "whole_field": hit["symbol"] == phrase.strip(TRIM),
-                "phrase": phrase,
-                "action": hit["action"],
-                "action_position": hit["action_position"],
-                "co_occurring_symbols": hit["co_occurring_symbols"],
-            }
-            key = symbol_key(hit["symbol"])
-            if key not in found:
-                found[key] = {"symbol": hit["symbol"], "mentions": []}
-                order.append(key)
-            found[key]["mentions"].append(mention)
-    return [found[k] for k in order]
-
-
-def symbol_candidates(idx, nominated_ids, only=None):
-    """Symbols proposed from entity names, for UniProt verification.
-
-    Never a nomination and never asserted. A candidate that resolves to no row
-    is the lookup answering -- "NF-kB" names a complex, not a gene, so it is
-    EXPECTED to fail and that failure is the result, not an error.
-    """
-    candidates = []
-    for thing in idx["things"].values():
-        if only and thing["id"] != only:
-            continue
-        for entry in thing_symbols(thing):
-            mentions = entry["mentions"]
-            # An action word is the point of this route, so a mention carrying
-            # one leads even if a bare mention came first.
-            lead = next((m for m in mentions if m["action"]), mentions[0])
-            co = []
-            for m in mentions:
-                for s in m["co_occurring_symbols"]:
-                    if symbol_key(s) not in {symbol_key(x) for x in co}:
-                        co.append(s)
-            candidates.append({
-                "symbol": entry["symbol"],
-                "query_forms": query_forms(entry["symbol"]),
-                "action": lead["action"],
-                "action_position": lead["action_position"],
-                "thing": thing["id"],
-                "thing_kind": thing.get("kind"),
-                "thing_name": thing.get("name"),
-                "already_nominated": thing["id"] in nominated_ids,
-                "field": lead["field"],
-                "whole_field": lead["whole_field"],
-                "phrase": lead["phrase"],
-                # True whenever the symbol shared a phrase with another symbol.
-                # The agent resolves which one the dossier is about; picking one
-                # here would be a guess.
-                "ambiguous": bool(co),
-                "co_occurring_symbols": co,
-                "other_mentions": [m for m in mentions if m is not lead],
-                # Filled by the agent from the SQL. Left null on purpose.
-                "verified": None,
-                "uniprot_accession": None,
-            })
-
-    # Symbols scraped from ONE thing's name + aliases are alternative names for
-    # what the extractor thought was one entity, so verification must confirm
-    # they agree on an accession -- not stop at the first that resolves.
-    #
-    # Measured on the modality-trap fixture: t1 yields TL1A, TNFSF15, TNF and
-    # VEGI. TL1A and VEGI return no row, TNFSF15 returns O95150, and TNF -- a
-    # substring of the descriptive alias "TNF ligand superfamily member 15" --
-    # returns P01375, a different and heavily drugged protein. A resolver that
-    # takes the first symbol that verifies picks TNF and hands the dossier an
-    # accession with thousands of small-molecule actives against it. That is
-    # failure mode 3 with a clean-looking row behind it.
-    per_thing = {}
-    for c in candidates:
-        per_thing.setdefault(c["thing"], []).append(c["symbol"])
-    for c in candidates:
-        siblings = [x for x in per_thing[c["thing"]] if x != c["symbol"]]
-        c["sibling_symbols"] = siblings
-        # Sharing a phrase means different proteins; sharing a thing means
-        # possibly-different names for one. Both block a unilateral pick, for
-        # different reasons, so keep them as separate fields.
-        c["needs_agreement_check"] = bool(siblings)
-
-    return {
-        "note": (
-            "PROPOSED, NOT CONFIRMED. Regex over thing `name` and `aliases`, run "
-            "because a graph can carry its proteins only inside intervention "
-            "names -- 'IRAK4 inhibition' is typed small_molecule. Nothing here is "
-            "a nomination. Verify every symbol against uniprot_v.proteins before "
-            "using it; a symbol naming a complex rather than a gene (NF-kB) is "
-            "expected to return no row, and that is the answer, not a failure."
-        ),
-        "verify_with": (
-            "SELECT accession, gene_name, protein_name, organism, sequence_length "
-            "FROM uniprot_v.proteins WHERE gene_name IN (<query_forms>) "
-            "AND organism = 'Homo sapiens'"
-        ),
-        "agreement_rule": (
-            "Symbols from one thing are alternative names for one entity, so "
-            "verify ALL of them and require they agree on an accession. Two "
-            "symbols off the same thing resolving to DIFFERENT accessions is an "
-            "unresolved conflict, never a majority vote -- one of them is a "
-            "substring of a descriptive alias. Do not stop at the first that "
-            "resolves."
-        ),
-        "ambiguous_things": sorted({c["thing"] for c in candidates
-                                    if c["ambiguous"]}),
-        "things_needing_agreement": sorted({c["thing"] for c in candidates
-                                            if c["needs_agreement_check"]}),
-        "candidates": candidates,
-    }
-
-
 def build(graph, only=None):
     idx = index(graph)
     things = idx["things"]
     nominated, rejected, adjudicate = nominate(graph, idx)
-    # Captured before the --thing filter: `already_nominated` reports the graph,
-    # not the slice being printed.
-    nominated_ids = set(nominated)
 
     if only:
         nominated = {k: v for k, v in nominated.items() if k == only}
@@ -689,8 +305,6 @@ def build(graph, only=None):
             "aliases": t.get("aliases", []),
             "mentions": t.get("mentions"),
             "nominated_by": reasons,
-            # Tier of the nomination itself. Never gates it -- see evidence_floor().
-            "evidence_floor": evidence_floor(reasons, idx),
             # Filled by the agent. Left null on purpose -- see SKILL.md.
             "gene_symbol": None,
             "uniprot_accession": None,
@@ -699,31 +313,6 @@ def build(graph, only=None):
             "mechanism_hypothesis": None,
             "evidence": neighbourhood(tid, idx),
         })
-
-    # Stable over the thing-id order above, so the SET is identical and only the
-    # order changes. A tier is a display rank, never an admission test.
-    out.sort(key=lambda n: TIER_ORDER.get(n["evidence_floor"]["tier"], 99))
-
-    # `links` summarises `findings`, but nothing guarantees every finding is
-    # summarised BY one. On the real g_1a4f, f6 is referenced by no link and is
-    # also the graph's only is_own_result: false row -- so a link-walking intake
-    # sees 11 of 12 findings and never sees the one background-flavoured item.
-    linked = set()
-    for l in idx["links"].values():
-        for arr in ("yes", "no", "no_effect"):
-            linked |= set(l.get(arr) or [])
-    orphans = [
-        {
-            "finding": f["id"],
-            "relation": f"{things.get(f.get('from'), {}).get('name')} "
-                        f"{f.get('how')} {things.get(f.get('to'), {}).get('name')}",
-            "says": f.get("says"),
-            "quote": f.get("quote"),
-            "is_own_result": f.get("is_own_result"),
-            "why": "referenced by no link -- invisible to link traversal, read it directly",
-        }
-        for fid, f in idx["findings"].items() if fid not in linked
-    ]
 
     coverage = graph.get("coverage", {})
     status = graph.get("status")
@@ -759,17 +348,229 @@ def build(graph, only=None):
             else None
         ),
         "retracted_papers": retracted,
-        "orphan_findings": orphans,
         "nominations": out,
         "rejected": [
             {"thing": tid, "name": things.get(tid, {}).get("name"), "why": why}
             for tid, why in sorted(rejected.items())
         ],
         "needs_adjudication": adjudicate,
-        # Second route. Independent of `nominations` -- it neither adds to nor
-        # subtracts from them, and a graph with entity nodes still nominates on
-        # kind exactly as before.
-        "symbol_candidates": symbol_candidates(idx, nominated_ids, only),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ask-back gating. MECHANICAL ONLY.
+#
+# SCHEMA.md defines FOUR ask verbs and nothing here adds a fifth. What this
+# section does is refuse the asks that are mechanically wrong -- malformed,
+# unactionable, already issued, or pointed at a graph that has nothing left to
+# give. It CANNOT check the three gates that matter most (does the claim affect
+# the dossier, is its support secondary-only, did we try to resolve it
+# ourselves). Those are judgment and they stay with the agent; see SKILL.md
+# "Asking back after intake". A green result here is permission to consider an
+# ask, never permission to issue one.
+# ---------------------------------------------------------------------------
+
+ASK_TYPES = {"expand_node", "resolve_link", "test_gap", "new_question"}
+
+# Which index an ask's `target` must resolve into. `new_question` points at
+# nothing by design -- it is the ask for a claim the graph has no row for.
+ASK_TARGET_INDEX = {
+    "expand_node": "things",
+    "resolve_link": "links",
+    "test_gap": "gaps",
+    "new_question": None,
+}
+
+# An ask has to be answerable by somebody who cannot see our run. "is obefazimod
+# a TL1A agent?" is not; naming the sources on both sides is. We cannot judge
+# prose, but we can insist the question carries identifiers -- two of them, so
+# both sides of the disagreement are reachable.
+SOURCE_TOKEN = re.compile(r"(PMC\d{5,}|NCT\d{8}|10\.\d{4,}/\S+|CHEMBL\d+|\b[0-9][A-Z0-9]{3}\b)")
+
+MIN_SOURCE_TOKENS = 2
+
+
+def is_secondary(finding, papers):
+    """A finding that restates someone else's work rather than reporting one.
+
+    Three independent signals, any of which is enough. `flags: [background]` is
+    the extractor's own call, `is_own_result: false` is the schema's, and a
+    review paper is the journal's. They disagree often enough that reading only
+    one of them misses cases -- f1/f2 in the ask-back fixture carry all three,
+    but a class table inside a primary trial report carries only the first.
+    """
+    if "background" in (finding.get("flags") or []):
+        return True
+    if finding.get("is_own_result") is False:
+        return True
+    study = (papers.get(finding.get("paper"), {}) or {}).get("study_type") or ""
+    return study in {"review", "meta_analysis"}
+
+
+def already_asked(graph, ask_type, target):
+    """Rounds already issued against this graph, matched on (verb, target).
+
+    Re-asking is not harmless. It costs a round, returns the same evidence, and
+    -- because `rounds` is the only record of what was tried -- makes the graph
+    look like it was interrogated twice as hard as it was.
+    """
+    hits = []
+    for r in graph.get("rounds", []):
+        if r.get("ask") == ask_type and r.get("target") == target:
+            hits.append(r)
+    return hits
+
+
+def check_ask(graph, ask):
+    """Mechanical gates on one proposed ask. Returns (gates, unchecked).
+
+    `gates` is a list of {gate, ok, detail}. `unchecked` names the judgment
+    gates this function deliberately does not evaluate, so a caller cannot read
+    an all-green result as approval.
+    """
+    idx = index(graph)
+    gates = []
+
+    def gate(name, ok, detail):
+        gates.append({"gate": name, "ok": bool(ok), "detail": detail})
+
+    ask_type = ask.get("ask")
+    target = ask.get("target")
+    question = (ask.get("question") or "").strip()
+
+    gate(
+        "ASK_TYPE_IS_ONE_OF_FOUR",
+        ask_type in ASK_TYPES,
+        f"{ask_type!r}; SCHEMA.md defines exactly {sorted(ASK_TYPES)}. "
+        "Inventing a fifth verb makes the ask unconsumable upstream.",
+    )
+
+    if ask_type in ASK_TARGET_INDEX:
+        want = ASK_TARGET_INDEX[ask_type]
+        if want is None:
+            gate(
+                "TARGET_SHAPE",
+                target is None,
+                "new_question takes target: null -- it is the ask for a claim "
+                f"the graph has no row for. Got {target!r}.",
+            )
+        else:
+            gate(
+                "TARGET_RESOLVES_TO_A_ROW",
+                target in idx[want],
+                f"{ask_type} must point at an id in `{want}`. "
+                f"{target!r} {'resolves' if target in idx[want] else 'does NOT resolve'}. "
+                "Pointing in prose instead of by id is how an ask becomes unroutable.",
+            )
+    else:
+        gate("TARGET_RESOLVES_TO_A_ROW", False, "unknown ask type; target not checked")
+
+    tokens = sorted(set(SOURCE_TOKEN.findall(question)))
+    gate(
+        "QUESTION_IS_ACTIONABLE",
+        len(tokens) >= MIN_SOURCE_TOKENS,
+        f"found {len(tokens)} source identifier(s) {tokens} in `question`; need "
+        f"at least {MIN_SOURCE_TOKENS}. An ask must name the sources on BOTH "
+        "sides and what would settle it, or the answering team reruns our search.",
+    )
+
+    prior = already_asked(graph, ask_type, target)
+    gate(
+        "NOT_ALREADY_ASKED",
+        not prior,
+        f"rounds already carries {len(prior)} ask(s) of {ask_type} at {target!r}"
+        + (f" (round {prior[0].get('n')}, outcome {prior[0].get('outcome')!r})" if prior else ""),
+    )
+
+    coverage = graph.get("coverage", {}) or {}
+    stop = coverage.get("stop_reason")
+    gate(
+        "LITERATURE_NOT_EXHAUSTED",
+        stop != "complete",
+        f"coverage.stop_reason is {stop!r}. Only 'complete' means the literature "
+        "was exhausted; against a complete graph another round returns the same "
+        "evidence, so the ask is noise.",
+    )
+
+    return gates, [
+        "AFFECTS_THE_DOSSIER -- does this claim change a value in the template? "
+        "An efficacy or clinical-outcome argument does not touch a tractability "
+        "number (dossier rule 7) and fails this gate.",
+        "SUPPORT_IS_SECONDARY_ONLY -- is every source a review, class table or "
+        "citing paraphrase? A primary or mixed basis is never an ask.",
+        "WE_TRIED_AND_FAILED -- were ChEMBL, the registry, the structure and a "
+        "corpus grep on the exact identifiers all run and all silent, and is "
+        "each null recorded in not_found BEFORE the ask was written?",
+    ]
+
+
+def ask_context(graph):
+    """Per-link evidence for the ask-back decision. Evidence, not a verdict.
+
+    Same discipline as `signals()`: every field here is a deterministic fact
+    about the graph, and none of them decides. In particular
+    `support_is_secondary_only` is necessary and nowhere near sufficient -- most
+    secondary-only links are resolvable from ChEMBL or the registry in one
+    query, and those must never become asks.
+    """
+    idx = index(graph)
+    coverage = graph.get("coverage", {}) or {}
+    stop = coverage.get("stop_reason")
+
+    rows = []
+    for link in idx["links"].values():
+        fids = link_findings(link)
+        findings = [idx["findings"][f] for f in fids if f in idx["findings"]]
+        secondary = [f["id"] for f in findings if is_secondary(f, idx["papers"])]
+        prior = already_asked(graph, "resolve_link", link["id"])
+        rows.append({
+            "link": link["id"],
+            "relation": (
+                f"{idx['things'].get(link.get('from'), {}).get('name')} "
+                f"{link.get('how')} "
+                f"{idx['things'].get(link.get('to'), {}).get('name')}"
+            ),
+            "basis": link.get("basis"),
+            "n_findings": len(findings),
+            "secondary_findings": secondary,
+            "support_is_secondary_only": bool(findings) and len(secondary) == len(findings),
+            "distinct_papers": sorted({f.get("paper") for f in findings if f.get("paper")}),
+            "already_asked_rounds": [r.get("n") for r in prior],
+            # The basis test comes FIRST and is the one that decides, exactly as
+            # in step 3: the tier comes from the link's `basis`, never from the
+            # findings' own properties. The two can disagree -- in the RA graph
+            # L6 (IL-6 drives RA) is `basis: primary` while its only finding is
+            # a meta-analysis, so `support_is_secondary_only` is true and the
+            # basis is not. `basis` wins, L6 is not an ask, and the divergence
+            # is worth reading rather than smoothing over.
+            "mechanical_gates_clear": (
+                link.get("basis") in NON_ACTIONABLE_BASIS
+                and bool(findings)
+                and len(secondary) == len(findings)
+                and not prior
+                and stop != "complete"
+            ),
+        })
+
+    return {
+        "graph_id": graph.get("graph_id"),
+        "round": graph.get("round"),
+        "stop_reason": stop,
+        "literature_not_exhausted": stop != "complete",
+        "asks_already_issued": [
+            {"n": r.get("n"), "ask": r.get("ask"), "target": r.get("target"),
+             "outcome": r.get("outcome")}
+            for r in graph.get("rounds", [])
+        ],
+        "links": sorted(rows, key=lambda r: r["link"]),
+        "_warning": (
+            "mechanical_gates_clear is NOT permission to ask. It says only that "
+            "the link is secondary-only, unasked, and against a non-exhausted "
+            "graph. The three gates that matter -- does it affect the dossier, "
+            "and did WE try ChEMBL / the registry / the structure first, and is "
+            "each failed attempt recorded -- are not evaluated here and cannot "
+            "be. See SKILL.md 'What must never become an ask'."
+        ),
     }
 
 
@@ -782,6 +583,16 @@ def main():
         action="store_true",
         help="permit a graph carrying _fixture: true (test runs only)",
     )
+    ap.add_argument(
+        "--ask-context",
+        action="store_true",
+        help="per-link mechanical facts bearing on whether to ask back",
+    )
+    ap.add_argument(
+        "--check-ask",
+        metavar="JSON",
+        help="gate one proposed ask; exits 1 if any mechanical gate fails",
+    )
     args = ap.parse_args()
 
     with open(args.graph) as fh:
@@ -792,6 +603,17 @@ def main():
             "refusing: graph carries _fixture: true, so its papers and quotes are "
             "synthetic. Re-run with --allow-fixture for a test."
         )
+
+    if args.check_ask:
+        gates, unchecked = check_ask(graph, json.loads(args.check_ask))
+        json.dump({"gates": gates, "not_checked_here": unchecked}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        sys.exit(0 if all(g["ok"] for g in gates) else 1)
+
+    if args.ask_context:
+        json.dump(ask_context(graph), sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return
 
     json.dump(build(graph, args.thing), sys.stdout, indent=2)
     sys.stdout.write("\n")

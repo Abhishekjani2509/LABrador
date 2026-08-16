@@ -6,6 +6,29 @@ ligand comp_id `307`) -- and prints a got-vs-expected table.
 
     CRYPTIC_FIXTURES=/path/to/structures python3 test_cryptic_analysis.py
 
+THESE ARE CALIBRATION-PROTOCOL EXPECTATIONS. THEY ARE NOT WHAT THE PIPELINE
+OUTPUTS, AND THE TWO MUST NOT BE READ AS EACH OTHER.
+
+``run_kras`` and ``run_tnf`` deliberately drive the HAND-CALIBRATION protocol:
+``auto_trim=False``, ``match_residue_names=False``, and for KRAS an explicit
+switch I / switch II exclusion with a fixed 1-166 fit range. Under that protocol
+the displacements are 8.8 A and 1.62 A, which is what the assertions below pin.
+
+The DEPLOYED default -- what ``modal_app.pocket_scan`` actually runs, with
+auto-trim on and residue-name matching on, and with no target-specific region
+list, because none is hardcoded -- lands 0.1-0.2 A BELOW those figures:
+**8.65 A for KRAS and ~1.55 A for TNF-alpha**. A bare ``1.62 +/- 0.03`` in this
+file reads as "this is what the pipeline outputs" and it is not; the deployed
+run would fail that tolerance, correctly.
+
+Nothing about the science turns on it. ``run_kras_auto`` and ``run_tnf_auto``
+run the default and assert the only things that carry a decision -- ``mechanism``
+and ``is_cryptic`` -- and those are IDENTICAL under both protocols. The risk this
+note exists to close is purely that someone quotes 8.83 or 1.62 as a figure this
+pipeline reproduces. ``pocket_scan`` reports the default in
+``cryptic.max_backbone_ca_displacement_a`` and re-runs the calibration protocol
+separately into ``calibration_protocol``; say which one you are quoting.
+
 Two notes on how the expectations are pinned:
 
 * The two hand calibrations used *different* superposition protocols. KRAS
@@ -80,7 +103,12 @@ def run_kras():
     disp = {p["resi"]: p["ca_displacement"] for p in rw["site"]["per_residue"]}
     for resi, exp in [(60, 3.1), (62, 4.4), (63, 8.8), (64, 4.3), (68, 3.6)]:
         check(c, f"CA displacement res {resi} (A)", disp.get(resi), exp, 0.1, "{:.2f}")
-    check(c, "max CA displacement (A)", site["max_ca_displacement"], 8.8, 0.1, "{:.2f}")
+    # CALIBRATION PROTOCOL, not the deployed default. The default measures
+    # 8.65 A on this pair and would fail this tolerance. See the module
+    # docstring; `mechanism` and `is_cryptic` below are protocol-independent.
+    check(c, "max CA displacement (A) [calibration protocol, NOT the "
+             "deployed default, which gives 8.65]",
+          site["max_ca_displacement"], 8.8, 0.1, "{:.2f}")
     check(c, "mechanism", r["mechanism"], "loop_or_backbone_motion")
     check(c, "is_cryptic", r["is_cryptic"], True)
     check(c, "self-control passed", sc["passed"], True)
@@ -130,8 +158,13 @@ def run_tnf():
           [("A", 119), ("B", 119)])
     check(c, "self-control pairs <2.0 A", sc["contact_pairs"], 0)
     check(c, "self-control min dist (A)", sc["min_distance"], 2.60, 0.02, "{:.2f}")
-    check(c, "max site CA displacement (A)", site["max_ca_displacement"],
-          1.62, 0.03, "{:.2f}")
+    # CALIBRATION PROTOCOL, not the deployed default. The default measures
+    # ~1.55 A on this pair and would fail this +/-0.03 tolerance. That is not a
+    # regression; the two protocols are different measurements and only the
+    # mechanism call, asserted below, is shared between them.
+    check(c, "max site CA displacement (A) [calibration protocol, NOT the "
+             "deployed default, which gives ~1.55]",
+          site["max_ca_displacement"], 1.62, 0.03, "{:.2f}")
     check(c, "ligand vdW volume (A^3)", fv["ligand_vdw_volume_A3"], 426, 3, "{:.0f}")
     check(c, "free vol, holo (%)", fv["holo"] * 100, 100.0, 0.5, "{:.1f}")
     check(c, "free vol, apo trimer (%)", fv["apo_intact"] * 100, 62.1, 1.0, "{:.1f}")

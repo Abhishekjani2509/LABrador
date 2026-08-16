@@ -3,6 +3,64 @@
   "_retrieved": "2026-08-15",
   "_expected_output": "What a correct dossier must say. This is the grading key for the fixture run.",
 
+  "_measurement_definitions": {
+    "_why": "A grading key with no stated definition drifts. Every count below was re-measured 2026-08-15 against Paperclip (sql -s proteins) with the definitions in this block. If you change a definition, re-measure the whole file — do not patch one number.",
+    "audited": "2026-08-15",
+    "distinct_compounds": "COUNT(DISTINCT molregno) FROM chembl_v.bioactivities_by_accession WHERE accession=<ACC> AND n_target_components = 1. The n_target_components=1 predicate is LOAD-BEARING and is the single most common way to get these numbers wrong — see _audit_2026_08_15.",
+    "total_activities": "COUNT(*) over the same view with the same n_target_components = 1 predicate.",
+    "best_potency_nm": "MAX(pchembl_value) over the same filtered set, converted 10^(9-pchembl), AND THEN rejected if the source assay description is uncharacterised per CLAUDE.md rule 6 ('Inhibition of X (unknown origin)', 'Binding affinity to X (unknown origin)'). Where the raw maximum is rejected on that ground the entry says so explicitly. standard_relation must be '='.",
+    "pdb_total": "COUNT(DISTINCT entry_id) FROM pdb_v.structures_by_accession WHERE accession=<ACC>. NOTE: this view has one row per (accession, entry, entity), so COUNT(*) overcounts — KRAS is 534 rows for 522 entries.",
+    "pdb_holo": "structure-select SKILL.md §1 as written 2026-08-15: an entry is HOLO if it has >=1 non-polymer ligand with formula_weight BETWEEN 250 AND 1200 whose comp_id is not in the skill's $EXCL cofactor/additive list. Cofactors and cryo-EM additives are excluded BY IDENTITY, not by size. This replaced an earlier '>=300 Da, no upper bound' rule; the two rules disagree on 6 of the 11 targets here and every pre-audit holo count in this file was generated with the OLD rule.",
+    "known_limits_of_the_holo_rule": [
+      "The 1200 Da CEILING drops genuine PROTAC/degrader co-crystals — BCL-2 8FY1 (YF8, 1640 Da) and 8FY2 (YFH, 1682 Da) are real bivalent BCL-2 degrader structures and are scored APO by this rule.",
+      "$EXCL is comp_id-keyed and leaks. Confirmed leaks in this file: TNF-alpha 5UUI (MTN = MTSL nitroxide spin label, 264 Da) and RORgt 4NIE (DMX = NDSB-256 sulfobetaine crystallisation additive, 257 Da). Both pass the filter and both are FALSE HOLO. Read ligand names, never comp_ids alone.",
+      "drugbank_id is not a druglikeness signal — MTN carries DB08217."
+    ],
+    "data_validity_comment_is_NOT_usable_here": "chembl_v.bioactivities_by_accession exposes a data_validity_comment column that is NULL for EVERY row, on all 11 accessions in this file, exactly like the already-documented always-NULL `modality` column. The raw chembl.activities table does carry it (345,635 'Outside typical range' rows overall; 91 on JAK1) but the VIEW does not propagate it, and the view is not pre-filtered — JAK1 returns all 48,836 raw activity_ids. Separately, JAK1's 91 flagged raw rows carry NO pchembl_value at all, so flagged rows can never be the top-potency rows. Any fixture note claiming top potencies 'were flagged Outside typical range and excluded' is describing a filter that did nothing."
+  },
+
+  "_audit_2026_08_15": {
+    "headline": "The precedent axis is TRUSTWORTHY and does not need regeneration. The structure axis DOES — every holo count in this file was generated with a superseded rule. ChEMBL drift is not the problem and never was: all 11 compound counts and 6 of 7 activity counts re-measured EXACT.",
+    "the_challenge_that_failed": "JAK1 14,342 was reported as stale against a 'measured' 14,472. The fixture was RIGHT and the challenge was WRONG. 14,472 is the same view with the n_target_components = 1 predicate dropped, which pools inherited hits from multi-component targets (complexes, PPI pairs, PROTAC ternary complexes). Verified by reproducing the fixture value exactly on all eleven accessions with the predicate and the inflated value exactly on all eleven without it. Had this been blessed it would have silently corrupted six of the eleven targets.",
+    "the_challenge_that_succeeded": "TNF 15 -> 17 is a real DEFINITION CHANGE from the '>=300 Da' holo rule to the '250-1200 Da + $EXCL' rule. Both rules were re-run and reproduce 15 and 17 exactly. But the right answer is 16, not 17: of the two added entries, 6OOY (A7M, a real benzimidazole from an already-counted series) belongs and 5UUI (MTN = MTSL nitroxide spin label on an engineered T77C cysteine) does not.",
+    "the_second_challenge_that_succeeded": "JAK1 0.032 -> 0.010 nM is a FIXTURE QUERY DEFECT. The fixture excluded all IC50s as 'flagged Outside typical range'; the view never populates that column, and JAK1's genuinely-flagged raw rows carry no pchembl at all. The 0.010 nM value traces to a 2016 document, so data growth cannot explain it, and it is corroborated by 2 compounds x 2 independent assays with 60 compounds above the old value.",
+    "counts_that_moved_and_why": {
+      "definition_change_holo_rule": [
+        "TNF 15->17",
+        "IL-17A 19->20",
+        "RORgt 152->154",
+        "BCL-2 41->40",
+        "TYK2 domain split 29/21 -> 28/20 exclusive"
+      ],
+      "fixture_query_defect": ["JAK1 best potency 0.032->0.010 nM"],
+      "raised_on_re-measurement": [
+        "BCL-2 best potency 0.015->0.010 nM",
+        "RORgt best potency 0.1->0.017 nM"
+      ],
+      "source_mismatch_rcsb_vs_paperclip": [
+        "KRAS pdb_total 531->522",
+        "EGFR pdb_total 392->388"
+      ],
+      "unreproducible_replaced": [
+        "MYC total_activities 2768->1249",
+        "JAK1 pdb_holo 40->42"
+      ],
+      "factually_wrong_corrected": [
+        "IL-11 'ALL 15 from a single assay' -> two assays",
+        "MYC max nonpolymer 120->122 Da",
+        "EGFR and JAK1 'Outside typical range' notes removed as no-ops"
+      ],
+      "held_against_challenge": [
+        "JAK1 distinct_compounds 14342",
+        "KRAS best potency 0.1 nM (rule 6)",
+        "STAT3 best IC50 2.4 nM"
+      ]
+    },
+    "verified_exact_no_change": "distinct_compounds on all 11 targets; total_activities on KRAS/EGFR/BCL-2/TNF/IL-17A/IL-11; best potency on EGFR/MYC/TYK2/IL-17A/TNF/IL-11/STAT3; pdb_total on 9 of 11; TNF's full assay-concentration story (IRAK4 2,901 rows = 45.0%); TNF assay_type split B 5,830 / F 617; MYC holo 0; STAT3 6 entries / 3 holo; earliest-holo dates for TNF 2AZ5, JAK1 3EYG, RORgt 3KYT, IL-17A 5HI3.",
+    "known_inconsistency_left_in_place": "structure-select SKILL.md §1 asserts TNF-alpha is '17 holo / 35 apo'. That matches the rule as written but includes the 5UUI spin label. The skill was not edited (out of scope for this task) and should be corrected separately — the count is right for the rule and the rule is slightly wrong.",
+    "residual_risk": "One number in this file still reproduces from nothing: MYC total_activities, formerly 2,768. It has been replaced with the measured 1,249 but the origin of 2,768 was never explained. Treat any MYC activity count as the least reliable figure here."
+  },
+
   "method_validation": [
     {
       "target": "KRAS",
@@ -12,13 +70,16 @@
       "total_activities": 17042,
       "best_potency_nm": 0.1,
       "best_potency_assay": "CHEMBL4845550 (KRAS G12D tracer displacement), compound CHEMBL4855757",
+      "best_potency_note": "VERIFIED 2026-08-15 and deliberately NOT raised. The raw MAX(pchembl) is 10.70 = 0.020 nM (Kd, compound CHEMBL6146469, assay_id 2615464), but that assay's whole description is 'Binding affinity to KRAS (unknown origin) assessed as dissociation constant' — uncharacterised, and CLAUDE.md rule 6 forbids a potency claim from it. 0.1 nM is the best CHARACTERISED value: assay CHEMBL4845550, 'Displacement of Cy5-labelled tracer from biotinylated GDP-loaded human recombinant KRAS', confidence 9. A second characterised 0.1 nM IC50 corroborates it (CHEMBL5741049, assay_id 2595813, 'KRas G12D Binding Assay'). An agent that reports 0.020 nM here has skipped rule 6.",
       "approved_small_molecules": [
-        {"name": "Sotorasib", "year": 2021, "chembl": "CHEMBL4535757"},
-        {"name": "Adagrasib", "year": 2022, "chembl": "CHEMBL4594350"}
+        { "name": "Sotorasib", "year": 2021, "chembl": "CHEMBL4535757" },
+        { "name": "Adagrasib", "year": 2022, "chembl": "CHEMBL4594350" }
       ],
       "approved_biologics": [],
-      "pdb_total": 531,
-      "pdb_holo_note": "at least 280 of first 300 sampled have a >=300 Da nonpolymer; lower bound, not exact",
+      "pdb_total": 522,
+      "pdb_holo": 301,
+      "pdb_total_note": "was 531 pre-audit, an RCSB-sourced figure. Re-measured 2026-08-15 as COUNT(DISTINCT entry_id) in pdb_v.structures_by_accession = 522 (the view returns 534 ROWS — one per accession/entry/entity — which is the trap). 522 is what the agent's own skill retrieves, so 522 is the grading value.",
+      "pdb_holo_note": "was an unquantified lower bound ('at least 280 of first 300 sampled have a >=300 Da nonpolymer'). Now exact: 301 holo of 522 under the structure-select §1 rule (250-1200 Da, $EXCL applied). For comparison the old >=300 Da rule gives 287 and a naive >=300 Da with NO exclusion list gives 358 — the 71-entry gap is GNP/GDP/GTP nucleotide-bound KRAS misread as holo, which is exactly why $EXCL is load-bearing.",
       "holo_exemplar": "6OIM (sotorasib, ligand MOV, released 2019-11-06)",
       "why_in_set": "Held undruggable ~30 years. The switch-II pocket is INVISIBLE on apo structures (see pocket_calibration.json). Tests that absence of precedent is not read as evidence against tractability.",
       "expected_output": {
@@ -34,16 +95,25 @@
       "distinct_compounds": 19118,
       "total_activities": 58847,
       "best_potency_nm": 0.01,
-      "best_potency_assay": "CHEMBL683040, compound CHEMBL176582 (top IC50s carry 'Outside typical range' flags and were excluded)",
-      "approved_small_molecules": [{"name": "Gefitinib", "year": 2003, "chembl": "CHEMBL939"}],
-      "approved_biologics": [
-        {"name": "Cetuximab", "year": 2004, "modality": "antibody"},
-        {"name": "Panitumumab", "year": 2006, "modality": "antibody"}
+      "best_potency_assay": "CHEMBL683040 (assay_id 66580), compound CHEMBL176582, IC50 0.01 nM, pchembl 11.00",
+      "best_potency_note": "Value CONFIRMED 2026-08-15; the parenthetical justification it used to carry was wrong and has been removed. The old note said 'top IC50s carry Outside typical range flags and were excluded'. No row returned by chembl_v.bioactivities_by_accession for P00533 carries any data_validity_comment — the view never populates that column (see _measurement_definitions). The exclusion described was a no-op. It happened not to change the answer here, and it DID change the answer on JAK1.",
+      "best_potency_corroboration": "three independent compounds at pchembl 11.00 — CHEMBL176582 (assay 66580, characterised EGFR tyrosine-kinase inhibition), CHEMBL5270693 (assay 2613397) and CHEMBL4650319 (assay 2299670). The latter two are 'unknown origin' descriptions and are rule-6 unusable on their own; CHEMBL176582 carries the claim.",
+      "approved_small_molecules": [
+        { "name": "Gefitinib", "year": 2003, "chembl": "CHEMBL939" }
       ],
-      "pdb_total": 392,
+      "approved_biologics": [
+        { "name": "Cetuximab", "year": 2004, "modality": "antibody" },
+        { "name": "Panitumumab", "year": 2006, "modality": "antibody" }
+      ],
+      "pdb_total": 388,
+      "pdb_holo": 283,
+      "pdb_total_note": "was 392 pre-audit, an RCSB-sourced figure. Re-measured 2026-08-15 as COUNT(DISTINCT entry_id) in pdb_v.structures_by_accession = 388 (here rows and distinct entries both equal 388). Holo 283 of 388 under the 250-1200 Da + $EXCL rule; the old >=300 Da rule gives 282.",
       "holo_exemplar": "1M17 (erlotinib, 390 Da, released 2002-09-04)",
       "why_in_set": "Positive control. Classic pre-formed ATP-site kinase, drugged within ~5 years of the first co-crystal. If this is wrong, nothing else matters.",
-      "expected_output": {"verdict": "small_molecule_tractable", "cryptic_pocket_risk_on_apo": "low"}
+      "expected_output": {
+        "verdict": "small_molecule_tractable",
+        "cryptic_pocket_risk_on_apo": "low"
+      }
     },
     {
       "target": "BCL-2",
@@ -51,33 +121,43 @@
       "chembl_target": "CHEMBL4860",
       "distinct_compounds": 4073,
       "total_activities": 15736,
-      "best_potency_nm": 0.015,
-      "best_potency_assay": "CHEMBL5738376, compound CHEMBL5764611",
-      "approved_small_molecules": [{"name": "Venetoclax", "year": 2016, "chembl": "CHEMBL3137309"}],
+      "best_potency_nm": 0.01,
+      "best_potency_assay": "Ki 0.01 nM (pchembl 11.00), compounds CHEMBL3952489 / CHEMBL5955498 / CHEMBL4228713, each measured in BOTH assay_id 2595502 and assay_id 2590280 (TR-FRET). Corroborated: 3 compounds x 2 assays.",
+      "best_potency_was": "0.015 nM (IC50, compound CHEMBL5764611, assay CHEMBL5738376 = assay_id 2595677, 'Bcl-2/Bcl-X TR-FRET Assay'). That row is REAL and still present — it simply is not the maximum. Raised to 0.01 nM 2026-08-15.",
+      "best_potency_note": "Both the old and the new value sit at or below the TR-FRET floor, so this field should be read as 'at the assay floor', not as a discriminating measurement. The caveat below is the operative statement, not the number.",
+      "approved_small_molecules": [
+        { "name": "Venetoclax", "year": 2016, "chembl": "CHEMBL3137309" }
+      ],
       "approved_biologics": [],
       "pdb_total": 63,
-      "pdb_holo": 41,
+      "pdb_holo": 40,
+      "pdb_holo_was": 41,
+      "pdb_holo_note": "DEFINITION CHANGE, and this is the one target where the NEW rule is arguably worse. 41 was the old >=300 Da rule. 40 is the current 250-1200 Da + $EXCL rule. The delta is -2 +1: the ceiling drops 8FY1 (YF8, 1640 Da) and 8FY2 (YFH, 1682 Da), which are genuine bivalent BCL-2 PROTAC/degrader co-crystals and real beyond-rule-of-5 small-molecule precedent; the 250 Da floor gains 7YB7 (IQ8, 291 Da), a real drug-like fragment. 40 is the grading value because it is what the skill as written produces. An agent that reports 42 and names the two degraders has arguably done better science and must not be marked wrong for it.",
+      "earliest_holo": "1YSW 2005-06-07",
       "holo_exemplar": "6O0K (venetoclax, 870 Da, released 2019-05-22)",
       "why_in_set": "PPI groove called undruggable until SAR-by-NMR fragment linking revealed an induced hydrophobic cleft. Tests that target class is not used to over-penalize.",
       "caveats": [
         "sub-0.1 nM values sit at the TR-FRET assay floor",
         "several P10415-mapped PDB entries are actually Bcl-xL constructs (9IGG, 9IGH) — accession mapping is not sufficient, check the entry title"
       ],
-      "expected_output": {"verdict": "small_molecule_tractable"}
+      "expected_output": { "verdict": "small_molecule_tractable" }
     },
     {
       "target": "MYC",
       "uniprot": "P01106",
       "chembl_target": "CHEMBL1250348",
       "distinct_compounds": 1079,
-      "total_activities": 2768,
+      "total_activities": 1249,
+      "total_activities_was": 2768,
+      "total_activities_note": "FLAGGED — 2768 could not be reproduced by ANY query tried on 2026-08-15 and has been replaced. Measured: 1,249 activities on the clean single-protein target (tid 103481, n_target_components=1); 1,675 across all seven P01106-mapped ChEMBL targets; 1,685 through the (assay_id, molregno) fan-out join. None is 2,768. MYC is the only chembl figure in this file that reproduces from nothing, and it is the one number here I would regenerate rather than trust. Note the internal contradiction that exposed it: the old pair (1,079 compounds / 2,768 activities) implies 2.6 activities per compound, while the actual single-protein target has 1,249 activities for 1,079 compounds = 1.16.",
+      "multi_target_caveat": "P01106 maps to SEVEN ChEMBL targets: the clean single protein (103481) plus c-Myc/Max, c-Myc/c-Max, WDR5-MYC, MAP2K3/MYC, VHL/MYC and cereblon/MYC. The last two are PROTAC ternary complexes. Dropping n_target_components=1 pools all of them and inflates compounds 1,079 -> 1,249.",
       "best_potency_nm": 0.2,
       "best_potency_assay": "CHEMBL5029808, compound CHEMBL5089688 — description is only 'Inhibition of c-MYC (unknown origin)', UNCHARACTERIZED",
       "approved_small_molecules": [],
       "approved_biologics": [],
       "pdb_total": 25,
       "pdb_holo": 0,
-      "pdb_holo_note": "max nonpolymer across ALL 25 entries is 120 Da — there is no drug-like ligand anywhere",
+      "pdb_holo_note": "CONFIRMED 2026-08-15 and rule-independent: max nonpolymer formula_weight across ALL 25 entries is 122.1 Da (was stated as 120). Holo is 0 under every rule tried — 250-1200+$EXCL, >=300+$EXCL, and naive >=300 with no exclusion list all return 0. There is no drug-like ligand anywhere. This is the strongest, least fragile number in the file.",
       "why_in_set": "Intrinsically disordered bHLH-LZ, still undrugged. Originally the true negative control — the research revealed it is ALSO a precedent/structure conflict case: 1,079 compounds with zero holo structures means the actives are indirect or cellular, not direct binders.",
       "expected_output": {
         "verdict": "not_tractable",
@@ -96,14 +176,33 @@
       "best_potency_nm": 0.01,
       "best_potency_assay": "CHEMBL5365708 — TYK2 JH2 575-869 tracer displacement, compound CHEMBL5427107",
       "approved_small_molecules": [
-        {"name": "Deucravacitinib", "year": 2022, "chembl": "CHEMBL4435170", "mechanism": "TYK2 negative allosteric modulator (JH2 pseudokinase domain)"}
+        {
+          "name": "Deucravacitinib",
+          "year": 2022,
+          "chembl": "CHEMBL4435170",
+          "mechanism": "TYK2 negative allosteric modulator (JH2 pseudokinase domain)"
+        }
       ],
       "approved_biologics": [],
       "pdb_total": 52,
       "domain_split": {
-        "JH1_kinase_897_1176": {"entries": 29, "earliest": "3LXN/3LXP 2010-06-02", "holo": "28/29"},
-        "JH2_pseudokinase_575_869": {"entries": 21, "earliest": "3ZON 2013-04-10 (260 Da ligand)", "first_druglike_holo": "4OLI 2014-05-28 (320 Da)", "holo": "18/21"},
-        "other": "1 spans JH2+JH1, 2 are the 1048-1062 fragment, 1 is FERM-through-JH2 (23-583)"
+        "_definition": "structure-select SKILL.md §3 overlap-fraction method (>=0.7 of the domain span), JH1 = 897-1176, JH2 = 575-869. Re-measured 2026-08-15. The counts below are EXCLUSIVE — the one JH1+JH2 tandem entry (4OLI) is reported in its own bucket and not added to either domain.",
+        "JH1_kinase_897_1176": {
+          "entries": 28,
+          "earliest": "3LXN/3LXP 2010-06-02"
+        },
+        "JH2_pseudokinase_575_869": {
+          "entries": 20,
+          "earliest": "3ZON 2013-04-10 (IK1, 261 Da, 5-phenyl-2-ureidothiophene-3-carboxamide)",
+          "first_druglike_holo": "4OLI 2014-05-28 (320 Da)"
+        },
+        "BOTH_JH1_and_JH2": { "entries": 1, "which": "4OLI 2014-05-28" },
+        "other": {
+          "entries": 3,
+          "which": "2 are the 1048-1062 fragment, 1 is FERM-through-JH2 (23-583)"
+        },
+        "_reconciles_to": "28 + 20 + 1 + 3 = 52 = pdb_total",
+        "_note": "was 29 / 21 pre-audit. That was the INCLUSIVE convention (4OLI counted in both domains), which is defensible on the biology — 4OLI genuinely contains both — but it double-counts and made the buckets sum to 54 against a pdb_total of 52. The exclusive numbers above are what the skill's own query returns and what the skill's documented control states. Accept either from an agent that says which convention it used; reject one that does not."
       },
       "why_in_set": "The non-obvious pocket. Deucravacitinib binds the pseudokinase JH2 domain, not the ATP site. The allosteric site was structurally enabled ~3 years AFTER the conventional one, and approval followed the first JH2 structure by ~9 years.",
       "expected_output": {
@@ -117,19 +216,29 @@
       "uniprot": "P23458",
       "chembl_target": "CHEMBL2835",
       "distinct_compounds": 14342,
-      "best_potency_nm": 0.032,
-      "best_potency_assay": "CHEMBL5736542 LanthaScreen Ki, compound CHEMBL5828027. Top IC50s all flagged 'Outside typical range' — no clean IC50 retrieved.",
+      "total_activities": 47757,
+      "distinct_compounds_note": "HELD AT 14,342 — this value was CHALLENGED and survived. A parallel run reported 14,472 and that number is WRONG: it is the same view without the n_target_components = 1 predicate, so it pools inherited hits from multi-component JAK1 targets. 14,342 is the clean single-protein count. The identical error inflates KRAS 3,158->3,597, EGFR 19,118->19,490, BCL-2 4,073->4,350, MYC 1,079->1,249, TYK2 10,499->10,603 and STAT3 2,370->2,427. Do not bless it. (total_activities likewise: 47,757 single-protein vs 48,836 all-tid.)",
+      "best_potency_nm": 0.01,
+      "best_potency_was": 0.032,
+      "best_potency_assay": "IC50 0.01 nM (pchembl 11.00), on the single-protein target, in TWO independent assays: compound CHEMBL3896068 in assay CHEMBL3888428 (assay_id 1641705, 'HTRF Biochemical Assay', confidence 8) and compound CHEMBL5945428 in assay CHEMBL5736620 (assay_id 2593921, 'Caliper Enzyme Assay', confidence 9). Both standard_relation '=', neither flagged.",
+      "best_potency_note": "CORRECTED 2026-08-15 — the old 0.032 nM was a FIXTURE QUERY DEFECT, not data drift. The old note claimed 'Top IC50s all flagged Outside typical range — no clean IC50 retrieved'. That is false twice over: (1) the view never populates data_validity_comment at all, so nothing was flagged for it to exclude; (2) JAK1's 91 genuinely-flagged rows in raw chembl.activities carry NO pchembl_value, so they were never in contention for the maximum. The exclusion removed the entire IC50 population on a false premise and fell back to a Ki. Data growth CANNOT explain this: CHEMBL3888428 is a 2016 document ('Cyanomethylpyrazole carboxamides as janus kinase inhibitors'), so a clean 0.010 nM IC50 predated the fixture by a decade.",
+      "best_potency_is_not_an_outlier": "Explicitly checked, because a best-potency resting on one unreplicated row would be a bad grading key regardless of magnitude. It rests on 2 compounds x 2 independent assays at pchembl 11.00, 15 compounds at >=10.90, and 60 compounds at or above the OLD value of 0.032 nM. The top of the distribution is a dense congeneric series (N-methyl-deazapurine cyclobutyl sulfones), not a spike. The superseded 0.032 nM row (CHEMBL5828027, assay CHEMBL5736542 LanthaScreen Ki) is real and still present — it was simply never the maximum.",
       "approved_small_molecules": [
-        {"name": "Ruxolitinib", "year": 2011, "chembl": "CHEMBL1789941"},
-        {"name": "Upadacitinib", "year": 2019, "note": "JAK1-selective"},
-        {"name": "Abrocitinib", "year": 2021, "note": "JAK1-selective"}
+        { "name": "Ruxolitinib", "year": 2011, "chembl": "CHEMBL1789941" },
+        { "name": "Upadacitinib", "year": 2019, "note": "JAK1-selective" },
+        { "name": "Abrocitinib", "year": 2021, "note": "JAK1-selective" }
       ],
       "approved_biologics": [],
       "pdb_total": 52,
-      "pdb_holo": 40,
-      "holo_range": "earliest 3EYG 2009-02-03, latest 10PI (povorcitinib) 2026-06-10",
+      "pdb_holo": 42,
+      "pdb_holo_was": 40,
+      "pdb_holo_note": "FLAGGED then replaced. 40 reproduces under NO rule tried on 2026-08-15: 250-1200+$EXCL gives 42, >=300+$EXCL gives 37, naive >=300 gives 39, naive >=250 gives 44, >=200+$EXCL gives 43. 42 is the current-skill value and is adopted. The 5 entries the 250 Da floor adds over the old 300 Da floor were inspected by ligand identity and ALL FIVE are genuine JAK-inhibitor chemotypes, not additives: 4EHZ (JAK, 255 Da, imidazo[4,5-d]pyrrolo[2,3-b]pyridine), 4EI4 (0Q2, 270), 5KHX (6TE, 295, the pyrrolo[2,3-d]pyrimidine tofacitinib/ruxolitinib core), 6TPE (NTW, 270), 8S85 (A1H5R, 266). The old 300 Da floor was discarding real precedent.",
+      "holo_range": "earliest 3EYG 2009-02-03, latest 10PI (povorcitinib) 2026-06-10 — both confirmed 2026-08-15",
       "why_in_set": "Immunology positive control. Pre-formed ATP-site kinase, heavily drugged.",
-      "expected_output": {"verdict": "small_molecule_tractable", "cryptic_pocket_risk_on_apo": "low"}
+      "expected_output": {
+        "verdict": "small_molecule_tractable",
+        "cryptic_pocket_risk_on_apo": "low"
+      }
     },
     {
       "target": "IL-17A",
@@ -142,17 +251,35 @@
       "best_potency_assay": "CHEMBL5038279 — HDF IL-6 release, CELLULAR readout, compound CHEMBL5091495, MW 619",
       "approved_small_molecules": [],
       "approved_biologics": [
-        {"name": "Secukinumab", "year": 2015, "modality": "antibody"},
-        {"name": "Ixekizumab", "year": 2016, "modality": "antibody"},
-        {"name": "Bimekizumab", "year": 2021, "modality": "antibody, IL-17A/F"}
+        { "name": "Secukinumab", "year": 2015, "modality": "antibody" },
+        { "name": "Ixekizumab", "year": 2016, "modality": "antibody" },
+        {
+          "name": "Bimekizumab",
+          "year": 2021,
+          "modality": "antibody, IL-17A/F"
+        }
       ],
       "biologic_note": "Brodalumab 2017 targets IL-17RA, the receptor, NOT the ligand — do not attribute it to Q16552",
       "pdb_total": 44,
-      "pdb_holo": 19,
-      "holo_range": "earliest 5HI3 2016-08-31 (macrocycle), latest 9SQX/9SR8 2025-12-17",
+      "pdb_holo": 20,
+      "pdb_holo_was": 19,
+      "pdb_holo_note": "DEFINITION CHANGE, and the new value is right. 19 was the old >=300 Da rule; 20 is the current 250-1200 Da + $EXCL rule. The single added entry is 8DYG, ligand U5Q, 279 Da, (5P)-2-hydroxy-5-(6-methylquinolin-5-yl)benzoic acid — a genuine drug-like fragment, not an additive. The old 300 Da floor was dropping it. (8DYG is also the entry structure-select uses for its IL-17A Foldseek control, so the file was calling the same structure holo in one place and apo in another.)",
+      "holo_range": "earliest 5HI3 2016-08-31 (macrocycle) — confirmed 2026-08-15; latest 9SQX/9SR8 2025-12-17",
       "clinical_small_molecules": [
-        {"name": "LY3509754", "sponsor": "Lilly", "phase": 1, "outcome": "TERMINATED — drug-induced liver injury, 4 participants with raised transaminases/acute hepatitis despite strong target engagement", "source": "PMID 38294091, Clin Pharmacol Ther 2024"},
-        {"name": "DC-806", "sponsor": "DICE", "phase": "1c PoC psoriasis", "outcome": "adjusted mean PASI reduction 43.7% (800 mg BID) vs 13.3% placebo at Day 29, well tolerated", "source": "NCT05896527"}
+        {
+          "name": "LY3509754",
+          "sponsor": "Lilly",
+          "phase": 1,
+          "outcome": "TERMINATED — drug-induced liver injury, 4 participants with raised transaminases/acute hepatitis despite strong target engagement",
+          "source": "PMID 38294091, Clin Pharmacol Ther 2024"
+        },
+        {
+          "name": "DC-806",
+          "sponsor": "DICE",
+          "phase": "1c PoC psoriasis",
+          "outcome": "adjusted mean PASI reduction 43.7% (800 mg BID) vs 13.3% placebo at Day 29, well tolerated",
+          "source": "NCT05896527"
+        }
       ],
       "false_positive_trap": "icotrokinra / JNJ-77242113 is an oral PEPTIDE against IL-23R — not an IL-17A small molecule. Easy false positive.",
       "why_in_set": "THE TRAP, and the highest-value row in the set. Three approved antibodies all reporting action_type INHIBITOR with NULL canonical_smiles. Verified live: an agent reading drugs_by_accession concludes 'three approved inhibitors' and is wrong.",
@@ -169,20 +296,40 @@
       "uniprot": "P51449",
       "chembl_target": "CHEMBL1741186",
       "distinct_compounds": 12900,
-      "best_potency_nm": 0.1,
-      "best_potency_assay": "CHEMBL4623385, compound CHEMBL4635823; best Ki 1.1 nM CHEMBL3598140",
+      "best_potency_nm": 0.017,
+      "best_potency_was": 0.1,
+      "best_potency_assay": "Kd 0.017 nM (pchembl 10.77), compound CHEMBL3929357, assay_id 1641535 'ThermoFluor(R) Assay', confidence 8. Corroborated by a tight cluster at 0.019-0.020 nM (CHEMBL5821593, CHEMBL4441287, CHEMBL5848238, CHEMBL5766445, CHEMBL5948510) across three further ThermoFluor assays (2588630, 1841433, 2589897).",
+      "best_potency_note": "RAISED 2026-08-15. The old 0.1 nM (CHEMBL4635823 IC50 in assay CHEMBL4623385, 'Binding affinity to recombinant human RORgammat transfected in HEK293T', confidence 9) is real, characterised and remains the best cell-context IC50 — it simply was not the maximum. The maximum is a thermal-shift-derived Kd. Both survive rule 6 (neither is an 'unknown origin' description), so the maximum governs. CAVEAT worth carrying: a 17 pM Kd from a ThermoFluor melt is an extrapolation well below what a thermal-shift assay resolves directly, and the same compound CHEMBL4635823 carries an even lower Kd of 0.003 nM in assay 1989649 that ChEMBL declines to assign a pchembl_value to at all. Sub-0.1 nM on this target should be read as 'at the biophysical floor'. The verdict is unaffected: sub-nanomolar either way.",
       "approved_small_molecules": [],
       "approved_biologics": [],
       "pdb_total": 162,
-      "pdb_holo": 152,
-      "earliest_holo": "3KYT 2010-03-16",
+      "pdb_holo": 154,
+      "pdb_holo_was": 152,
+      "pdb_holo_note": "DEFINITION CHANGE with a KNOWN FALSE POSITIVE — read before grading. 152 was the old >=300 Da rule; 154 is the current 250-1200 Da + $EXCL rule. The 3 added entries are NOT all real: 5G44 (YTZ, 255 Da, 4-amino-N-(1,3-thiazol-2-yl)benzenesulfonamide = sulfathiazole) is a legitimate drug-like fragment; 29OB (AND, 288 Da, 3-beta-hydroxy-5-androsten-17-one = DHEA) is an ENDOGENOUS STEROL, the native-ligand class for this nuclear receptor, and is target validation rather than small-molecule precedent; 4NIE (DMX, 257 Da, 3-[benzyl(dimethyl)ammonio]propane-1-sulfonate = NDSB-256) is a NON-DETERGENT SULFOBETAINE CRYSTALLISATION ADDITIVE and is a straightforward false holo that $EXCL does not catch. 154 is the grading value because it is what the skill produces; the defensible count is 152-153. Accept 152, 153 or 154 from an agent that names the DHEA and NDSB-256 entries; the failure mode to catch is an agent that reports 154 without inspecting the three ligands.",
+      "earliest_holo": "3KYT 2010-03-16 — confirmed 2026-08-15",
       "terminated_programs": [
-        {"program": "VTP-43742", "sponsor": "Vitae/Allergan", "phase": "2a", "outcome": "clear psoriasis efficacy but REVERSIBLE TRANSAMINASE ELEVATIONS in 4 patients at 700 mg — development terminated"},
-        {"program": "TAK-828F", "sponsor": "Takeda", "phase": 1, "outcome": "discontinued on preclinical toxicology and TERATOGENICITY findings"},
-        {"program": "GSK2981278", "outcome": "NOT_FOUND — appears in reviews as a clinical RORgt agent but no specific discontinuation reason retrieved"}
+        {
+          "program": "VTP-43742",
+          "sponsor": "Vitae/Allergan",
+          "phase": "2a",
+          "outcome": "clear psoriasis efficacy but REVERSIBLE TRANSAMINASE ELEVATIONS in 4 patients at 700 mg — development terminated"
+        },
+        {
+          "program": "TAK-828F",
+          "sponsor": "Takeda",
+          "phase": 1,
+          "outcome": "discontinued on preclinical toxicology and TERATOGENICITY findings"
+        },
+        {
+          "program": "GSK2981278",
+          "outcome": "NOT_FOUND — appears in reviews as a clinical RORgt agent but no specific discontinuation reason retrieved"
+        }
       ],
       "class_risk": "RORg1/RORgt cross-reactivity and thymic/T-cell lymphoma risk",
-      "sources": ["https://www.sciencedirect.com/science/article/pii/S2095177923000977", "https://www.tandfonline.com/doi/full/10.1080/13543776.2017.1262350"],
+      "sources": [
+        "https://www.sciencedirect.com/science/article/pii/S2095177923000977",
+        "https://www.tandfonline.com/doi/full/10.1080/13543776.2017.1262350"
+      ],
       "why_in_set": "Tractability != success. 152 holo structures, 12,900 compounds, 0.1 nM potency, ZERO approvals — failure was toxicity, not chemistry. Any agent scoring on pocket quality alone gets this wrong.",
       "expected_output": {
         "verdict": "small_molecule_tractable",
@@ -199,31 +346,57 @@
     "chembl_target": "CHEMBL1825",
     "distinct_compounds": 2582,
     "total_activities": 6447,
-    "assay_type_split": {"B": 5830, "F": 617},
+    "assay_type_split": { "B": 5830, "F": 617 },
+    "_chembl_reverified": "2026-08-15 — all four figures above re-measured EXACT, and the IRAK4 concentration below re-measured exact at 2,901 rows / 45.0%. P01375 maps to only single-protein ChEMBL targets, so the n_target_components=1 predicate is a no-op here and these numbers are stable under both query forms. This is what makes TNF a clean test of the holo definition: the precedent axis did not move, only the structure count did.",
     "THE_CONFLICT": {
       "dominant_assay": "IRAK4 Monocyte TNFalpha Cell Based Assay",
       "activities_from_it": 2901,
       "fraction_of_all_tnf_bioactivity": "~45%",
       "problem": "that assay measures a DIFFERENT TARGET (IRAK4) with TNF as the cellular readout. Naive precedent retrieval reads thousands of potent TNF actives; almost none are direct binders.",
-      "next_largest": ["THP-1 TNF secretion (321)", "HEK-Blue TNF-induced (312)"]
+      "next_largest": [
+        "THP-1 TNF secretion (321)",
+        "HEK-Blue TNF-induced (312)"
+      ]
     },
     "best_potency_nm": 0.03,
     "best_potency_caveat": "Ki 0.03 nM (CHEMBL3640299, assay CHEMBL3705047) description is only 'Inhibition assay using TNF-alpha' — UNCHARACTERIZED",
     "best_credible_direct_binding": "Kd 1.3 nM (CHEMBL4793441, assay CHEMBL4775686, SPR vs biotinylated TNF-alpha trimer 77-233)",
     "approved_small_molecules": [],
     "approved_biologics": [
-      {"name": "Infliximab", "year": 1998, "modality": "antibody"},
-      {"name": "Etanercept", "year": 1998, "modality": "fusion protein"},
-      {"name": "Adalimumab", "year": 2002, "modality": "antibody"},
-      {"name": "Certolizumab pegol", "year": 2008, "modality": "antibody"},
-      {"name": "Golimumab", "year": 2009, "modality": "antibody"}
+      { "name": "Infliximab", "year": 1998, "modality": "antibody" },
+      { "name": "Etanercept", "year": 1998, "modality": "fusion protein" },
+      { "name": "Adalimumab", "year": 2002, "modality": "antibody" },
+      { "name": "Certolizumab pegol", "year": 2008, "modality": "antibody" },
+      { "name": "Golimumab", "year": 2009, "modality": "antibody" }
     ],
     "pdb_total": 52,
-    "pdb_holo": 15,
-    "earliest_holo": "2AZ5 2005-11-29, 550 Da ligand SPD304",
+    "pdb_holo": 17,
+    "pdb_holo_was": 15,
+    "pdb_holo_defensible": 16,
+    "pdb_holo_note": "DEFINITION CHANGE — diagnosed, not guessed. 15 was the old '>=300 Da, no upper bound' rule; 17 is the current structure-select §1 rule (250-1200 Da + $EXCL). Both rules were run side by side on 2026-08-15 and reproduce 15 and 17 exactly, so the cause is the rule change and nothing else. TNF's ChEMBL numbers did NOT move at all (2,582 compounds / 6,447 activities / B 5,830 / F 617 all still exact), which rules out data drift. The apo/holo split 17/35 also matches structure-select's own documented control.",
+    "pdb_holo_the_two_added_entries": {
+      "_why_this_matters": "The task was to name them and judge them by chemical identity, not to accept the count. One is real and one is not.",
+      "6OOY": {
+        "ligand": "A7M",
+        "formula_weight": 266.3,
+        "identity": "{1-[(2,5-dimethylphenyl)methyl]-1H-benzimidazol-2-yl}methanol",
+        "entry_title": "Asymmetric hTNF-alpha",
+        "verdict": "REAL drug-like ligand — count it. It is the des-pyridyl parent of a genuine congeneric series deposited the same day: A6Y (343 Da, 6OOZ) and A7A (424 Da, 6OP0) were ALREADY counted under the old rule. The 300 Da floor was splitting one chemical series across the holo/apo boundary."
+      },
+      "5UUI": {
+        "ligand": "MTN",
+        "formula_weight": 264.4,
+        "identity": "S-[(1-oxyl-2,2,5,5-tetramethyl-2,5-dihydro-1H-pyrrol-3-yl)methyl] methanesulfonothioate = MTSL, the standard nitroxide spin label for EPR/DEER",
+        "entry_title": "Crystal Structure of Spin-Labeled T77C TNFa",
+        "verdict": "NOT a drug-like ligand — FALSE HOLO. It is a covalent biophysical probe conjugated to an ENGINEERED cysteine (the T77C mutation is in the entry title). This is the same failure class as the cryo-EM lipid additives (cholesterol hemisuccinate Y01, phosphatidylcholine) that produced a phantom holo count of 3 on CD20 where the truth was 0. Note it carries drugbank_id DB08217, which is precisely why drugbank_id must never gate holo."
+      }
+    },
+    "pdb_holo_grading": "17 is the value the skill as written produces and is the grading value. 16 is the scientifically defensible count (17 minus the MTSL spin label). NEITHER the old 15 nor the raw 17 is the honest answer. Full credit for 16 with 5UUI named; accept 17 if the agent flags 5UUI; mark down 17 reported as a clean count with no ligand inspection, and mark down 15.",
+    "earliest_holo": "2AZ5 2005-11-29, ligand comp_id 307, formula_weight 548 (stated as 550 pre-audit) — SPD304. Confirmed earliest holo under both rules 2026-08-15.",
     "structure_caveat": "SPD304 is a bis-electrophilic compound widely regarded as a promiscuous/cytotoxic frequent hitter. There IS a holo structure and it is exactly the misleading kind.",
     "why_in_set": "Carries THREE failure modes at once: modality trap (5 approved biologics, 0 small molecules), assay artifact (45% of bioactivity is a different target's assay), and misleading structure (holo ligand is a known frequent hitter). Also the second pocket-detection regime — a cavity PRESENT BUT SMALL in the apo trimer, versus KRAS where it is absent.",
-    "backup": "STAT3 (P40763, CHEMBL4026) — 2,370 compounds, best IC50 2.4 nM, only 6 PDB entries and 3 holo, top assays are EMSA/ChIP/reporter. Better if we want thin structural evidence rather than misleading evidence."
+    "backup": "STAT3 (P40763, CHEMBL4026) — 2,370 compounds, best IC50 2.4 nM, only 6 PDB entries and 3 holo, top assays are EMSA/ChIP/reporter. Better if we want thin structural evidence rather than misleading evidence.",
+    "backup_reverified": "2026-08-15 — ALL FOUR STAT3 figures exact and unchanged: 2,370 compounds (n_target_components=1; the unfiltered view gives 2,427), best IC50 exactly 2.40 nM (compound CHEMBL5437070, assay_id 2371997, 'Inhibition of IL-23 induced STAT3 phosphorylation in human Jurkat cells', confidence 9), 6 PDB entries, 3 holo under BOTH the old and the new rule. Note the phrasing 'best IC50' is doing real work and is correct as written: the best pchembl of ANY type is 8.98 = 1.05 nM, but that is an EC50 from a PubChem HTS probe campaign (assay_id 737318), and the best direct-binding value is a Kd of 4.7 nM by microscale thermophoresis (CHEMBL3392776). Do not 'correct' 2.4 to 1.05."
   },
 
   "slot_6_recent_orphan": {
@@ -234,14 +407,20 @@
     "chembl_id_note": "very high target ID, i.e. recently created",
     "total_activities": 15,
     "distinct_compounds": 15,
-    "assay_provenance": "ALL 15 from a single assay CHEMBL6115567, 'Binding affinity to CAP chip-immobilized IL-11', all assay_type B",
+    "assay_provenance": "TWO assays, not one: 11 rows from CHEMBL6115567 (assay_id 2636530, 'Binding affinity to CAP chip-immobilized IL-11 (unknown origin) assessed as dissociation constant by SPR analysis', all standard_type Kd) and 4 rows from CHEMBL6115571 (assay_id 2636534, 'Binding affinity to CAP chip-immobilized IL-11 (unknown origin) by SPR analysis', all standard_type Activity). Both assay_type B, both SPR on the same CAP-chip construct.",
+    "assay_provenance_was": "'ALL 15 from a single assay CHEMBL6115567' — CORRECTED 2026-08-15. The two assay descriptions are near-identical, which is presumably why they were collapsed. The single-provenance ARGUMENT is unaffected and if anything strengthened: one method, one chip, one deposition.",
+    "only_2_of_15_rows_carry_a_number": "Re-measured 2026-08-15 and NEW — this strengthens the insufficient_evidence verdict more than anything already in this entry. Thirteen of the fifteen rows have standard_value NULL and pchembl_value NULL. The ENTIRE numeric footprint of IL-11 in ChEMBL is two Kd values: 140 nM and 2,600 nM. An agent that reports '15 activities' as if 15 numbers exist has already overstated the evidence by 7.5x.",
     "best_potency_nm": 140,
     "second_best_nm": 2600,
+    "_potency_reverified": "2026-08-15 — 140 nM (pchembl 6.85) and 2,600 nM (pchembl 5.58) both exact, both in assay 2636530, both standard_relation '='.",
     "approved_small_molecules": [],
     "approved_biologics": [],
     "pdb_total": 8,
     "why_in_set": "The right shape for insufficient_evidence: JUST enough data to tempt a confident score (a 140 nM Kd exists) while single-assay provenance, 15 compounds, and no clinical program make any confident call unjustified.",
-    "expected_output": {"verdict": "insufficient_evidence", "must_not": "produce a confident tractability number from a 15-compound single-assay screening series"},
+    "expected_output": {
+      "verdict": "insufficient_evidence",
+      "must_not": "produce a confident tractability number from a 15-compound single-assay screening series"
+    },
     "OPEN_CAVEAT": "The 'proposed in the last 3 years' framing was NOT independently verified against a primary source. ChEMBL target-ID recency and the 15-activity footprint are retrieved; the timeline is inference. Confirm against the 2024 Nature IL-11/healthspan literature before locking this fixture.",
     "rejected_alternatives": {
       "TL1A / TNFSF15 (O95150)": "zero ChEMBL targets, 7 PDB entries all apo-or-DcR3, but Phase 3 antibodies (tulisokibart, duvakitug) give an agent real precedent to latch onto — it would score confidently and arguably be right, which defeats the purpose",

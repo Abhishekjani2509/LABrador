@@ -5,18 +5,42 @@ Runs the whole ensemble in ONE invocation: every PDB entry, every clustering
 value, and holo ligand-site derivation. One call, one cold start. Four separate
 calls would pay four.
 
-NOT IMPLEMENTED HERE — do not assume the output contains these:
-  * the apo/holo cryptic comparison (superposition, C-alpha displacement, clash
-    attribution). Those live only in the calibration scripts. Consequently, on
-    an apo structure with no ligand site, `site_pocket` is simply the most
-    druggable pocket ANYWHERE in the chain — for 4OBE at D 1.6 that is the
-    nucleotide site, NOT the collapsed switch-II site the dossier's rule 3 is
-    about. Read `site_pocket_selected_by` on every value before using it.
+WHAT THIS RETURNS, in five independently-reported stages. Each stage after
+fpocket is NON-FATAL and carries its own `<stage>_status` in {ok, failed,
+not_run} plus a reason, following the `prank_status` pattern — a stage that
+dies must cost that stage and nothing else:
+
+  1. fpocket + PRANK per structure per clustering value (`by_clustering`).
+  2. `disorder`      — metapredict disorder fraction for the target sequence.
+  3. `cryptic`       — apo/holo superposition, C-alpha displacement, clash
+                       attribution, free volume (`cryptic_analysis.py`).
+  4. `interface`     — pocket vs partner epitope, orthosteric / allosteric /
+                       destabiliser (`interface_analysis.py`).
+  5. `mdpocket`      — THE SITE FIXED BY CONSTRUCTION. One grid definition
+                       applied to every superposed structure, replacing
+                       post-hoc residue-number matching.
+
+STILL NOT IMPLEMENTED — do not assume the output contains it:
   * site transfer from a structural neighbour. Requires a residue-numbering
     equivalence policy; 6OIM and 4OBE happen to share numbering, which is not
     general.
-Pooled ensemble volume/druggability may therefore span DIFFERENT sites; see
-`_pooling_caveat` in the returned `ensemble` block.
+
+Pooled ensemble volume/druggability from the fpocket path may still span
+DIFFERENT sites; see `_pooling_caveat` in the returned `ensemble` block. The
+`mdpocket` block does not have that problem, because the site there is a fixed
+set of grid points rather than a per-structure match — on the five apo TNF-alpha
+structures that cut the across-ensemble volume CV from ~28% to ~10% (measured
+28.1% at D=1.6 against 9.9%). Both figures carry about 1 percentage point of
+fpocket Monte-Carlo volume noise, so quote them to two significant figures at
+most; the improvement is real, the third digit is not.
+
+BUT `mdpocket` RETURNS TWO SITE DEFINITIONS AND ONLY ONE IS THE LIGAND SITE.
+`sites.site_from_ligand` is the site the dossier asks about.
+`sites.site_from_density` is the most PERSISTENT cavity, which on apo TNF-alpha
+is 7.73 A away — the on-axis cavity, i.e. exactly the pocket the retracted
+residue-number matcher reported as "the SPD304 site". Read
+`ligand_anchored` and `distance_to_donor_ligand_centroid_a` on every site entry
+before calling it the pocket. See `_mdpocket_ensemble`.
 
 Deploy (workspace MUST be rafwiewiora):
     MODAL_PROFILE=rafwiewiora modal deploy modal_app.py
@@ -31,10 +55,21 @@ decides to call it.
 """
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import urllib.request
 from pathlib import Path
+
+# `ligand_filter` lives in the sibling structure-select skill, not here. It has
+# to be IMPORTABLE AT DEPLOY TIME for `add_local_python_source` below to find
+# and ship it, so its directory goes on sys.path before the image is built.
+# Nothing at runtime depends on this line: in the container the module is
+# mounted at the top level.
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent / "structure-select")
+)
 
 import modal
 
@@ -48,10 +83,18 @@ P2RANK_HOME = f"/opt/p2rank_{P2RANK_VERSION}"
 
 image = (
     modal.Image.micromamba(python_version="3.12")
+    # fpocket the conda-forge package ships mdpocket, tpocket and dpocket
+    # alongside fpocket, all on PATH. mdpocket is what makes the site
+    # fixed-by-construction measurement possible; there is no separate install.
     .micromamba_install("fpocket", channels=["conda-forge"])
     # JDK 17 is a hard floor for P2Rank 2.5.1 — Java 11 dies with
     # UnsupportedClassVersionError (class file v61).
-    .apt_install("git", "curl", "openjdk-17-jre-headless")
+    #
+    # build-essential is for metapredict, NOT for anything Java. metapredict
+    # publishes no Linux wheel, so pip builds it from the sdist and the build
+    # needs a C compiler; without gcc the pip_install below fails and, because
+    # it is its own layer, takes the whole deploy down.
+    .apt_install("git", "curl", "openjdk-17-jre-headless", "build-essential")
     .run_commands(
         f"curl -sL -o /tmp/p2rank.tar.gz https://github.com/rdk/p2rank/releases/"
         f"download/{P2RANK_VERSION}/p2rank_{P2RANK_VERSION}.tar.gz",
@@ -64,13 +107,35 @@ image = (
         # means a proto-tools dependency change cannot fail every structure at
         # stage "prepare".
         "gemmi>=0.7",
-        # NOT metapredict. It is the right disorder tool on merit — MIT, CPU,
-        # and it separates MYC (0.828 disordered) from folded controls (0.015)
-        # where IUPred3's licence forbids commercial use — but a bare
-        # `metapredict` pin FAILS TO BUILD A WHEEL in this image and takes the
-        # whole deploy down with it. Needs its own build investigation; do not
-        # re-add it untested.
+        # numpy is likewise transitive but load-bearing: the Kabsch
+        # superposition, the .dx grid handling, cryptic_analysis and
+        # interface_analysis are all numpy and nothing else.
+        "numpy>=1.26",
         "proto-tools[mcp] @ git+https://github.com/evo-design/proto-tools.git",
+    )
+    # CPU TORCH, ITS OWN LAYER, BEFORE metapredict. A bare `pip install torch`
+    # resolves to the CUDA build and drags in >500 MB of nvidia-* wheels that
+    # this function can never use — it has no GPU. The pytorch CPU index serves
+    # a torch that is ~10x smaller. metapredict declares `torch` as a plain
+    # dependency, so it MUST be satisfied first from this index or pip will
+    # pull the CUDA one while resolving metapredict.
+    .pip_install("torch", index_url="https://download.pytorch.org/whl/cpu")
+    # metapredict is the right disorder tool on merit — MIT (IUPred3's licence
+    # forbids commercial use), CPU-only, and it separates MYC P01106 (~0.83
+    # disordered) from CDK2 P24941 (~0.00). An earlier version of this file
+    # dropped it because a bare `metapredict` pin failed to build a wheel and
+    # broke the deploy. The cause was the missing compiler above, not the
+    # package: it has no Linux wheel and builds from sdist. Pinned to 3.0.2 so a
+    # new sdist upstream cannot silently change the numbers or the build needs.
+    .pip_install("metapredict==3.0.2")
+    # Modal 1.x does not automount sibling modules. These three are imported
+    # INSIDE the function body, but they still have to exist in the container.
+    # `ligand_filter` replaces the comp_id denylist and the heavy-atom floor
+    # that used to decide holo vs apo here. It is stdlib-only by design — this
+    # image has no RDKit and a toolkit dependency would make the verdict vary
+    # by environment.
+    .add_local_python_source(
+        "cryptic_analysis", "disorder", "interface_analysis", "ligand_filter"
     )
 )
 
@@ -81,35 +146,65 @@ app = modal.App("druggability-pocket-scan", image=image)
 # nucleotide and switch-II sites into one meaningless 1540 A^3 mega-pocket.
 D_VALUES = (1.6, 2.4)
 
-# Below this a "ligand" is a buffer component, cryoprotectant or ion, not
-# evidence of drug-like binding.
-DRUGLIKE_MIN_HEAVY_ATOMS = 18
+# ---------------------------------------------------------------------------
+# HOLO vs APO IS A CHEMISTRY QUESTION AND IT IS ANSWERED BY CHEMISTRY.
+#
+# What used to be here: DRUGLIKE_MIN_HEAVY_ATOMS = 18, a NON_LIGANDS denylist of
+# buffers and ions, and a COFACTORS denylist of nucleotides, sugars and lipids.
+# All three are DELETED. A size threshold cannot work and no list can be
+# complete, and both halves of that are measured:
+#
+#   * ADP has 27 heavy atoms. So does `A1IPJ`, the genuine inhibitor in 9GU4.
+#     No floor separates them, ever.
+#   * Identity filtering gave 16 holo / 8 apo on NLRP3 where a naive size window
+#     gave 19 / 5 — three false holo entries, a 19% overstatement. And `CPS`
+#     (CHAPS, 615 Da) was simply missing from the list and sailed through.
+#   * The same shape produced wrong answers on CD20 (sterol tails), KRAS
+#     neighbours (2UK: purine + ribose + phosphate) and IL-17A neighbours
+#     (L44's 21-carbon chain).
+#
+# `ligand_filter.classify_record` reads the actual structure of the component:
+# 259/262 on ground truth, 61/70 on a blind held-out set with ZERO false
+# positives, and it reproduces the deleted COFACTORS set without having been
+# shown it. Every remaining error is conservative — it calls a drug a cofactor
+# rather than the reverse.
+#
+# Two of its behaviours are load-bearing here and must not be collapsed:
+#   1. `unknown` IS NOT `apo`. An unclassifiable component leaves the entry's
+#      state UNDETERMINED, which is a third tier, not a quiet apo.
+#   2. A lookup failure is not a CCD miss. A component whose record could not be
+#      retrieved carries `lookup_failed` and lands in `undetermined`, so a flaky
+#      network cannot render a holo structure apo.
 
-# Buffer components, cryoprotectants, ions. Excluded by identity because they
-# are noise in the ligand list even when they are too small to be drug-like.
-NON_LIGANDS = frozenset(
-    """HOH DOD SO4 PO4 GOL EDO PEG PG4 1PE P6G MPD ACT ACY CIT FLC TRS EPE MES
-    IMD DMS BME DTT TLA FMT NO3 AZI IOD BR CL NA K CA MG MN ZN FE FE2 CU NI CD
-    CO CS RB SR BA HG NH4 UNX UNL UNK""".split()
-)
+# Waters are the one thing still dropped by name, and only because a structure
+# has hundreds of them: one payload row per water copy is a payload problem, not
+# a classification problem. Everything else goes through the classifier.
+WATER_COMP_IDS = frozenset({"HOH", "DOD", "WAT"})
 
-# Endogenous cofactors, nucleotides, sugars and lipids. These clear the
-# heavy-atom threshold on SIZE ALONE — GDP is 28 heavy atoms — so a pure size
-# cut calls apo KRAS (4OBE: GDP + Mg, no inhibitor) "holo", and the whole
-# cryptic-pocket argument in the dossier depends on 4OBE being apo. Size cannot
-# separate a cofactor from a drug; only identity can. A curated set is chosen
-# over a runtime chemical-component lookup deliberately: the lookup adds a
-# network dependency inside the Modal function and fails open, whereas this is
-# deterministic and auditable. It is a denylist, so the failure mode is a
-# never-seen cofactor slipping through as "drug-like" — visible in the reported
-# comp_id, not silent.
-COFACTORS = frozenset(
-    """GDP GTP GNP GSP GCP G2P GGL GGZ ADP ATP AMP ANP ACP AGS APC ADX CDP CTP
-    CMP UDP UTP UMP TTP TMP TDP IDP ITP NAD NAI NAP NDP NAJ FAD FMN FDA SAM SAH
-    SFG COA ACO MCA HEM HEC HEA HDD BCL CLA PLP TPP B12 COB BTN MTA APR PRP 3PG
-    F6P G6P G1P UPG NAG NDG BMA MAN GAL GLA GLC BGC FUC SIA XYS XYP SUC TRE
-    MYR PLM OLA STE DAO D12 LDA LMT CHD CLR PEE PC1 PGV""".split()
-)
+# RCSB's public Chemical Component REST endpoint. The classifier's own default
+# source shells out to the `paperclip` binary, which is NOT in this image; this
+# is the same data (type, name, formula, formula_weight and — the field that
+# matters — SMILES) over the network path this function already uses for
+# structures. Verified: MOV druglike, GDP cofactor, ADP cofactor, CPS
+# lipid_or_detergent, 307 druglike + promiscuity_advisory, A1JPS druglike,
+# N5S (the 5QQE fragment) druglike, Y01/CLR/PC1/L44 lipid_or_detergent.
+RCSB_CHEMCOMP_URL = "https://data.rcsb.org/rest/v1/core/chemcomp/{}"
+
+# How many pockets come back per structure per clustering value. fpocket routinely
+# detects >100 (134 on an IRAK4 assembly at D=1.6), the great majority of which
+# are sub-100 A^3 surface dimples, and returning all of them for every structure
+# at every D makes the payload unusable. The cut is by fpocket rank, the selected
+# site pocket is always included whatever its rank, and `pockets_omitted_summary`
+# bounds the volume, druggability and site overlap of everything left out — so
+# the truncation is checkable rather than merely declared. PROPOSED, NOT
+# CALIBRATED: it is a payload-size choice, not a statement about pockets.
+MAX_POCKETS_RETURNED = 30
+
+# How many pockets get the full interface classification. Lower than
+# MAX_POCKETS_RETURNED because enclosure casts 512 rays per probe point per
+# chain and is the expensive step, whereas returning a pocket is nearly free.
+# The selected site pocket is always classified whatever its rank.
+MAX_POCKETS_CLASSIFIED = 10
 
 # Legal single-character PDB chain identifiers, in the order they get handed
 # out when an mmCIF chain name will not fit column 22.
@@ -326,33 +421,210 @@ def _prep(st, dest: Path, stem: str, chains: list[str] | None) -> tuple[Path, li
     return out, sorted(seen_chains)
 
 
-def _ligands(st) -> list[dict]:
-    """Nonpolymer ligands with heavy-atom counts, so 'holo' can be checked
-    rather than assumed. A PEG or a cryoprotectant is not a holo ligand.
+class LigandSourceError(RuntimeError):
+    """The chemical-component source cannot support a holo/apo call at all.
+
+    RAISED, NOT RETURNED, AND DELIBERATELY NOT CAUGHT BY THE PER-STRUCTURE
+    HANDLER. This is the most dangerous failure the ligand stage has, because
+    its symptom is a clean-looking run:
+
+    `ligand_filter` classifies on the component's SMILES graph. Handed records
+    with no SMILES it correctly returns `unknown` for EVERY component — and
+    `unknown` is not `druglike`, so every structure comes back apo (or, under
+    the lookup-failure rule, `undetermined`). The payload is well-formed, every
+    status says ok, and the entire ensemble is silently holo-free. Verified
+    directly: MOV, GDP, ADP, CPS and `307` all return `unknown` with
+    "the CCD row has no SMILES, so no chemistry test can run" when the record
+    carries only type/name/formula/weight.
+
+    WHICH SOURCES CARRY SMILES:
+      * RCSB `data.rcsb.org/rest/v1/core/chemcomp/<ID>` — YES, in
+        `pdbx_chem_comp_descriptor` (type SMILES_CANONICAL or SMILES). This is
+        what this module uses.
+      * Paperclip `pdb_v.chemcomps` — YES, in the `smiles` column. The
+        classifier's own default source.
+      * The RCSB CCD ligand file `files.rcsb.org/ligands/download/<ID>.cif` —
+        YES.
+      * THE ENTRY'S OWN mmCIF `_chem_comp` BLOCK — **NO**. It carries id, type,
+        name, formula and formula_weight and nothing else. It is the obvious
+        source to reach for, because the file is already parsed and on disk, and
+        it is the one that does not work.
+
+    So the check is not "did classification succeed" but "does this source
+    return the field classification needs", and it is answered by looking at the
+    records rather than at the verdicts.
+    """
+
+
+def _assert_records_carry_smiles(src, distinct: list[str]) -> None:
+    """Refuse a record source that returns rows without SMILES.
+
+    Only fires when records WERE retrieved and none of them has a SMILES string.
+    A 404 (component genuinely absent from the CCD) caches as `None` and is not
+    a record, so a structure whose components are all unknown to the CCD does
+    not trip this; nor does a network failure, which has its own `lookup_failed`
+    path and its own `undetermined` tier.
+    """
+    have = [
+        r for r in (src.get_many(distinct) or {}).values() if isinstance(r, dict)
+    ]
+    if not have:
+        return
+    if any((r.get("smiles") or "").strip() for r in have):
+        return
+    raise LigandSourceError(
+        f"the chemical-component source returned {len(have)} record(s) for "
+        f"{', '.join(distinct[:8])} and NOT ONE carries a SMILES string. "
+        "ligand_filter classifies on the SMILES graph, so every component "
+        "would come back `unknown`, nothing would be `druglike`, and this run "
+        "would report an entirely holo-free ensemble while looking healthy. "
+        "That is a misconfigured record source, not a result. The entry's own "
+        "mmCIF `_chem_comp` block is the usual cause: it has type, name, "
+        "formula and weight but no SMILES. Use RCSB "
+        "data.rcsb.org/rest/v1/core/chemcomp/<ID>, Paperclip "
+        "pdb_v.chemcomps, or the CCD ligand file — all three carry it."
+    )
+
+
+def _lf_verdicts():
+    """`ligand_filter` itself, for provenance in the method block."""
+    import ligand_filter as LF
+
+    return LF
+
+
+def _chemcomp_source():
+    """`ligand_filter.ChemCompSource` backed by RCSB instead of Paperclip.
+
+    The classifier's default source shells out to the `paperclip` binary, which
+    this image does not carry. Overriding the fetch keeps every other behaviour
+    of the class — the process cache, the batching, and above all the
+    `fetch_errors` bookkeeping that separates A LOOKUP THAT FAILED from A
+    COMPONENT THAT IS NOT IN THE CCD. Collapsing those two is the same
+    fail-open shape as reporting a credential error as "no data", and it would
+    turn a flaky network into a run full of apo structures.
+    """
+    import ligand_filter as LF
+
+    class _RcsbChemComps(LF.ChemCompSource):
+        def _fetch_batch(self, batch: list[str], *, attempts: int = 3) -> None:
+            for cid in batch:
+                err = None
+                doc = None
+                for _ in range(max(1, attempts)):
+                    try:
+                        with urllib.request.urlopen(  # noqa: S310
+                            RCSB_CHEMCOMP_URL.format(cid), timeout=30
+                        ) as r:
+                            doc = json.load(r)
+                        err = None
+                        break
+                    except urllib.error.HTTPError as exc:
+                        if exc.code == 404:
+                            # A GENUINE CCD MISS. Cached as absent, no error.
+                            err, doc = None, None
+                            break
+                        err = f"HTTP {exc.code}"
+                    except Exception as exc:  # noqa: BLE001
+                        err = f"{type(exc).__name__}: {exc}"
+                if err:
+                    self.last_error = err
+                    self.fetch_errors[cid] = err
+                    self._cache.setdefault(cid, None)
+                    continue
+                if doc is None:
+                    self._cache[cid] = None
+                    continue
+                cc = doc.get("chem_comp") or {}
+                desc = doc.get("pdbx_chem_comp_descriptor") or []
+                def _pick(*types):
+                    for t in types:
+                        for d in desc:
+                            if d.get("type") == t and d.get("descriptor"):
+                                return d["descriptor"]
+                    return None
+                self._cache[cid] = {
+                    "comp_id": cc.get("id") or cid,
+                    "type": cc.get("type"),
+                    "formula": cc.get("formula"),
+                    "formula_weight": cc.get("formula_weight"),
+                    "drugbank_id": None,
+                    "inchikey": _pick("InChIKey"),
+                    "smiles": _pick("SMILES_CANONICAL", "SMILES"),
+                    "name": cc.get("name"),
+                }
+
+    return _RcsbChemComps()
+
+
+def _ligands(st, src) -> tuple[list[dict], dict]:
+    """Nonpolymer components, CLASSIFIED BY CHEMISTRY rather than by list.
 
     comp_id comes from the mmCIF, so it is the FULL component ID: `A1JPS`, not
-    the first three characters of it.
+    the first three characters of it — the legacy PDB truncation is a
+    documented wrong answer on IL-17A.
+
+    Returns (per-copy ligand list, entry-level holo call). The `druglike` and
+    `cofactor` keys are kept so nothing downstream changes shape, but they are
+    now derived from `ligand_filter`'s verdict:
+
+        druglike  <- verdict == "druglike"
+        cofactor  <- verdict == "cofactor"
+
+    The other six verdicts (lipid_or_detergent, crystallisation_additive,
+    sugar_or_glycan, ion_or_solvent, peptide_or_polymer, unknown) are neither,
+    and each is reported with the reason it was given.
     """
+    import ligand_filter as LF
+
     counts: dict[tuple[str, str, str], int] = {}
     for chain in st[0]:
         for res in chain:
-            if res.het_flag != "H" or res.name in NON_LIGANDS or not len(res):
+            if res.het_flag != "H" or not len(res):
+                continue
+            if res.name.upper() in WATER_COMP_IDS:
                 continue
             key = (res.name, chain.name, str(res.seqid.num))
             counts[key] = counts.get(key, 0) + len(res)
-    return [
-        {
+    distinct = sorted({c for c, _ch, _rs in counts})
+    if distinct:
+        # BEFORE any verdict is read. A source with no SMILES produces a
+        # perfectly well-formed, entirely holo-free run; see LigandSourceError.
+        _assert_records_carry_smiles(src, distinct)
+    verdicts = LF.classify_ligands(distinct, chemcomps=src) if distinct else {}
+    holo = LF.holo_call(distinct, chemcomps=src) if distinct else {
+        "is_holo": False, "druglike_ligands": [], "by_verdict": {},
+        "unknown_ligands": [], "undetermined": [], "determined": True,
+        "verdicts": {}, "flags": [],
+    }
+    ligs = []
+    for (c, ch, rs), n in sorted(counts.items(), key=lambda kv: -kv[1]):
+        v = verdicts.get(c.upper())
+        ligs.append({
             "comp_id": c,
             "chain": ch,
             "resseq": rs,
             "heavy_atoms": n,
             # Reported, not dropped: the dossier has to be able to say "apo,
             # but carrying GDP" rather than "apo" full stop.
-            "cofactor": c in COFACTORS,
-            "druglike": n >= DRUGLIKE_MIN_HEAVY_ATOMS and c not in COFACTORS,
-        }
-        for (c, ch, rs), n in sorted(counts.items(), key=lambda kv: -kv[1])
-    ]
+            "cofactor": bool(v and v.verdict == "cofactor"),
+            "druglike": bool(v and v.verdict == "druglike"),
+            "verdict": v.verdict if v else "unknown",
+            "verdict_reason": v.reason if v else "no classification attempted",
+            "verdict_confidence": v.confidence if v else "none",
+            "verdict_flags": list(v.flags) if v else [],
+            "verdict_source": v.source if v else None,
+        })
+    # Ions and ordered solvent collapse to a distinct-comp_id summary: a
+    # structure can carry fifty sulfates and one row each is payload, not
+    # information. Nothing is silently dropped — the count is stated.
+    ions = [lig for lig in ligs if lig["verdict"] == "ion_or_solvent"]
+    ligs = [lig for lig in ligs if lig["verdict"] != "ion_or_solvent"]
+    holo = dict(holo)
+    holo["ion_or_solvent_copies"] = len(ions)
+    holo["ion_or_solvent_comp_ids"] = sorted({lig["comp_id"] for lig in ions})
+    holo["waters_excluded_by_name"] = sorted(WATER_COMP_IDS)
+    return ligs, holo
 
 
 def _ligand_site(
@@ -426,6 +698,57 @@ def _ligand_site(
         sorted(best, key=lambda s: (s.split("/")[0], int(s.split("/")[1]))),
         f"{best_key[0]}/{best_key[1]}" if best_key else None,
     )
+
+
+def _ligand_contact_chains(
+    st,
+    comp_id: str,
+    copy_key: str | None,
+    cutoff: float = 5.0,
+    min_fraction: float = 0.15,
+) -> tuple[list[str], dict[str, int]]:
+    """Chains that really line one ligand copy, counted in ATOMS not residues.
+
+    THE UNIT MATTERS AND GETTING IT WRONG IS A REAL BUG, not a nicety. Counting
+    RESIDUES within the shell and keeping any chain above 15% of the top
+    contributor kept 2AZ5's chain B — a crystal contact worth 4 atoms out of 46
+    — because 2 residues against 11 clears 15% while 4 atoms against 46 (8.7%)
+    does not. The donor then had THREE chains, no 2-of-3 mapping onto the
+    TNF-alpha trimer existed, the best superposition was 17.3 A, the ligand was
+    never transferred and the whole ligand-anchored mdpocket site vanished with
+    a fit-failed message. Atom counts are what cryptic_analysis uses for the
+    same decision, and they are what this uses.
+
+    Returns (kept chains, per-chain atom counts).
+    """
+    lig: list[tuple[float, float, float]] = []
+    for chain in st[0]:
+        for res in chain:
+            if res.het_flag != "H" or res.name != comp_id:
+                continue
+            if copy_key and f"{chain.name}/{res.seqid.num}" != copy_key:
+                continue
+            lig.extend((a.pos.x, a.pos.y, a.pos.z) for a in res)
+    if not lig:
+        return [], {}
+    c2 = cutoff * cutoff
+    counts: dict[str, int] = {}
+    for chain in st[0]:
+        n = 0
+        for res in chain:
+            if res.het_flag != "A":
+                continue
+            for a in res:
+                px, py, pz = a.pos.x, a.pos.y, a.pos.z
+                if any((px - lx) ** 2 + (py - ly) ** 2 + (pz - lz) ** 2 <= c2
+                       for lx, ly, lz in lig):
+                    n += 1
+        if n:
+            counts[chain.name] = n
+    if not counts:
+        return [], {}
+    top = max(counts.values())
+    return sorted(c for c, n in counts.items() if n >= min_fraction * top), counts
 
 
 def _chain_sequences(st, chains: list[str] | None = None) -> dict[str, dict[int, str]]:
@@ -694,6 +1017,7 @@ def _parse_pockets(out_dir: Path) -> list[dict]:
         # onto its neighbour and silently gave rank 1 no residues at all.
         atm = out_dir / "pockets" / f"pocket{p['rank']}_atm.pdb"
         res = set()
+        names: dict[str, str] = {}
         coords: list[tuple[float, float, float]] = []
         if not atm.exists():
             # Never expected. Say so rather than reporting an empty pocket.
@@ -701,10 +1025,26 @@ def _parse_pockets(out_dir: Path) -> list[dict]:
         else:
             for line in atm.read_text().splitlines():
                 if line.startswith(("ATOM", "HETATM")):
-                    res.add(f"{line[21]}/{line[22:26].strip()}")
+                    tag = f"{line[21]}/{line[22:26].strip()}"
+                    res.add(tag)
+                    names.setdefault(tag, line[17:20].strip())
             coords = _pdb_coords(atm, ("ATOM", "HETATM"))
         p["residues"] = sorted(
             res, key=lambda s: (s.split("/")[0], int(s.split("/")[1]))
+        )
+        # WHAT THE POCKET IS LINED WITH, not only where it is. fpocket's
+        # druggability regression rewards a hydrophobic, sealed shape, and the
+        # hydrophobic CORE of a folded domain is exactly that shape — measured
+        # on IRAK4's death domain, a buried core scored 0.890 at rank 1 of 134
+        # with nine Leu/Ile/Val/Phe, one Arg and one Tyr lining it. Composition
+        # is half of what tells a core apart from a site; enclosure is the
+        # other half (see `_buried_core_flag`).
+        p["lining_residue_names"] = [names.get(t) for t in p["residues"]]
+        p["n_apolar_lining_residues"] = sum(
+            1 for n in names.values() if n in APOLAR_RESIDUES
+        )
+        p["apolar_lining_fraction"] = (
+            round(p["n_apolar_lining_residues"] / len(names), 3) if names else None
         )
         # WHERE the pocket is, not just which residue numbers line it. An
         # overlap fraction cannot distinguish "the same site" from "a pocket
@@ -723,14 +1063,2315 @@ def _jaccard(a: list[str], b: list[str]) -> float | None:
     return round(len(sa & sb) / len(sa | sb), 3)
 
 
+# Conventional apolar side chains. GLY and PRO are deliberately excluded: they
+# are conformational rather than hydrophobic, and including them would let a
+# flexible loop look like a hydrophobic core.
+APOLAR_RESIDUES = frozenset(
+    "ALA VAL LEU ILE PHE MET TRP CYS".split()
+)
+
+
+def _unit_interval(value, field: str, context: str = ""):
+    """Refuse to emit a [0,1] score that is not in [0,1].
+
+    THIS EXISTS BECAUSE A REAL BUG SHIPPED THROUGH THIS GAP.
+    `mdpocket.sites.*.druggability_by_structure` reported fpocket's
+    `volume_score` descriptor — observed 3.35 to 4.00 — under a field name that
+    invites a reader to quote it as a druggability probability. Nothing checked
+    the range, so a 4.00 "druggability" left the function and was written into a
+    dossier. A number carrying a [0,1] name and a value of 4.00 is not a noisy
+    measurement; it is a different quantity wearing the wrong label, and the
+    cheapest place to catch that is at the point of emission.
+
+    `None` passes: a missing measurement is not an out-of-range one.
+    """
+    if value is None:
+        return None
+    v = float(value)
+    if not (0.0 <= v <= 1.0):
+        raise RuntimeError(
+            f"{field}={v!r} is outside [0,1]"
+            + (f" ({context})" if context else "")
+            + ". A field named as a [0,1] score must never carry a value "
+            "outside it: that is the signature of a wrong descriptor column, "
+            "not of a noisy estimate. Refusing to emit it."
+        )
+    return v
+
+
+# ===========================================================================
+# disorder — metapredict, with the cardinal rule preserved
+# ===========================================================================
+
+
+def _chain_accessions(cif: Path | None, renamed: dict[str, str]) -> dict[str, list[str]]:
+    """{chain id -> UniProt accessions}, from `_struct_ref` + `_struct_ref_seq`.
+
+    WHICH CHAIN IS THE TARGET IS A LOOKUP, NOT A GUESS. Everything that used to
+    pick the target by chain LENGTH is wrong the moment a partner is bigger than
+    the target, and on a GPCR-G-protein complex the partner always is. Measured
+    on S1PR1: G-beta-1 is 331-338 residues against the receptor's 278-290 in all
+    four entries, so `_one_letter`'s "longest chain" picked G-beta every time.
+    The interface stage then split 7TD4 into target ["B"] and partner
+    ["A","G","R"] — chain B is G-beta-1, chain R is S1PR1 — computed the
+    G-beta/G-alpha-G-gamma interface, and reported it as the target's epitope
+    with `interface_status: ok`, 93 interface residues and no warning at all.
+
+    Chain IDs are returned in THIS module's namespace, i.e. after `_load`'s
+    single-character renaming, so they can be compared against `used_chains`.
+    """
+    import gemmi
+
+    if cif is None:
+        return {}
+    try:
+        block = gemmi.cif.read(str(cif)).sole_block()
+    except Exception:  # noqa: BLE001
+        return {}
+    ref_acc: dict[str, str] = {}
+    for row in block.find("_struct_ref.", ["id", "db_name", "pdbx_db_accession"]):
+        if row.str(1).strip().upper() != "UNP":
+            continue
+        acc = row.str(2).strip()
+        if acc and acc not in ("?", "."):
+            ref_acc[row.str(0).strip()] = acc
+    out: dict[str, list[str]] = {}
+    for row in block.find("_struct_ref_seq.", ["ref_id", "pdbx_strand_id"]):
+        acc = ref_acc.get(row.str(0).strip())
+        if not acc:
+            continue
+        for raw in row.str(1).replace(",", " ").split():
+            ch = renamed.get(raw, raw)
+            if acc not in out.setdefault(ch, []):
+                out[ch].append(acc)
+    return out
+
+
+def _target_chains(
+    chain_acc: dict[str, list[str]],
+    accession: str | None,
+    fallback: list[str],
+) -> tuple[list[str], str]:
+    """The chains that ARE the target, by accession. Falls back audibly."""
+    if not accession or not chain_acc:
+        return list(fallback), (
+            "no accession available" if not accession
+            else "entry declares no _struct_ref UniProt mapping"
+        )
+    hits = [c for c in fallback if accession in chain_acc.get(c, [])]
+    if not hits:
+        return list(fallback), (
+            f"no chain of this entry maps to {accession}; using every chain "
+            "scored, which may include partners"
+        )
+    return hits, f"chains mapping to {accession} in _struct_ref_seq"
+
+
+def _one_letter(st, chains: list[str] | None = None) -> tuple[str | None, str | None]:
+    """Longest polymer chain as a one-letter sequence, and which chain it was.
+
+    `chains` MUST be the target's chains, not the whole assembly — see
+    `_chain_accessions`. Longest-wins is only correct inside one accession.
+    """
+    import gemmi
+
+    best_seq, best_chain = "", None
+    for chain in st[0]:
+        if chains and chain.name not in chains:
+            continue
+        names = [r.name for r in chain if r.het_flag == "A" and len(r)]
+        if len(names) < 20:
+            continue
+        seq = gemmi.one_letter_code(names).upper()
+        seq = "".join(c for c in seq if c.isalpha())
+        if len(seq) > len(best_seq):
+            best_seq, best_chain = seq, chain.name
+    return (best_seq or None), best_chain
+
+
+def _fetch_header(pdb_id: str, dest: Path) -> Path | None:
+    """The HEADER-ONLY mmCIF, which is the only copy carrying `_struct_ref`.
+
+    RCSB STRIPS `_struct_ref` FROM ASSEMBLY FILES. Verified on 6OIM: the
+    assembly1 CIF this module fetches for coordinates has no `_struct_ref`
+    category at all, so the UniProt accession — the thing that decides which
+    chain is the target and which sequence disorder is measured on — is simply
+    not in the file the rest of this module reads. `files.rcsb.org/header/<ID>.cif`
+    is ~100 kB, carries `_struct_ref` and `_struct_ref_seq` in full, and is
+    fetched once per entry.
+
+    Returns None rather than raising: an entry with no retrievable header costs
+    the accession and nothing else, and the loss is reported by its callers.
+    """
+    hdr = dest / f"{pdb_id}_header.cif"
+    if hdr.exists():
+        return hdr
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            f"https://files.rcsb.org/header/{pdb_id}.cif", timeout=60
+        ) as r:
+            text = r.read().decode("utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return None
+    # RCSB'S HEADER FILE IS NOT VALID mmCIF AS SERVED. It is the full entry with
+    # the coordinate loops deleted, and the deletion leaves the `_atom_site`
+    # loop's `loop_` keyword behind with no tags and no rows. gemmi rejects the
+    # whole document on it — "parse error" at the last line — so every
+    # accession lookup came back empty and every target chain fell back to
+    # longest-wins, which is the bug this file exists to close. Trimming the
+    # dangling keyword costs nothing and there is no other way to read the
+    # category we need.
+    # They occur mid-file as well as at the end — 4OBE has three consecutive
+    # `loop_` / `#` pairs at line 1031 where the coordinate, anisotropic-B and
+    # one other loop were removed — so this drops EVERY `loop_` not followed by
+    # a tag, not just a trailing one.
+    src_lines = text.splitlines()
+    keep: list[str] = []
+    for i, line in enumerate(src_lines):
+        if line.strip() == "loop_":
+            nxt = next(
+                (s for s in (x.strip() for x in src_lines[i + 1:])
+                 if s and s != "#"),
+                "",
+            )
+            if not nxt.startswith("_"):
+                continue  # a loop with no tags: not mmCIF, drop the keyword
+        keep.append(line)
+    hdr.write_text("\n".join(keep) + "\n")
+    return hdr
+
+
+def _uniprot_from_cif(cif: Path | None) -> list[str]:
+    """UniProt accessions the entry itself declares, from `_struct_ref`.
+
+    THE ACCESSION IS IN THE FILE. Not resolving it is what made disorder
+    silently measure the wrong molecule: with no `uniprot_accession` argument
+    the stage fell back to the crystallised construct, and IRAK4 came back
+    0.0 over 284 residues — the kinase domain — where the full 460-residue
+    protein is 0.1413 with a disordered region at 101-162. A deposited entry
+    is the ORDERED part of a protein by selection, so that fallback does not
+    understate the answer by a little, it answers a different question, and a
+    0.0 reads as "no disorder" rather than "not measured".
+
+    Returns [] when the entry declares none (a synthetic construct, a peptide),
+    which is a real state and is reported as such rather than guessed at.
+    """
+    import gemmi
+
+    if cif is None:
+        return []
+    try:
+        block = gemmi.cif.read(str(cif)).sole_block()
+    except Exception:  # noqa: BLE001
+        return []
+    found: list[str] = []
+    for row in block.find("_struct_ref.", ["db_name", "pdbx_db_accession"]):
+        if row.str(0).strip().upper() != "UNP":
+            continue
+        acc = row.str(1).strip()
+        if acc and acc not in ("?", ".") and acc not in found:
+            found.append(acc)
+    return found
+
+
+def _disorder_block(
+    accession: str | None, sequence: str | None, sequence_source: str | None,
+    accession_source: str | None = None,
+) -> dict:
+    """Disorder fraction for the target, never fatal, never silently zero.
+
+    THE CARDINAL RULE, which is disorder.py's and is preserved here: 0.0 means
+    genuinely folded. It must never mean "something went wrong". predict_disorder
+    returns None on failure, so a failure becomes disorder_status=failed with
+    disorder_fraction=None — never 0.0.
+
+    Validation targets: MYC P01106 ~0.83 disordered, CDK2 P24941 ~0.00. A run
+    that returns 0.0 for MYC has a broken metapredict, not a folded MYC.
+
+    An accession is strongly preferred over a structure-derived sequence. A
+    crystallised construct is, by selection, the ordered part of the protein —
+    MYC's deposited fragments are short helices — so a sequence lifted from a
+    PDB entry systematically UNDERSTATES disorder. When that path is used it is
+    labelled, and the caveat travels with the number.
+    """
+    out: dict = {
+        "disorder_status": "not_run",
+        "disorder_reason": None,
+        "disorder_fraction": None,
+        "accession": accession,
+        "accession_source": accession_source,
+        "sequence_source": sequence_source,
+        # WHAT WAS MEASURED, always, before any number is read. A fraction with
+        # no scope is not interpretable: 0.0 over a 284-residue crystallised
+        # kinase domain and 0.0 over a 460-residue protein are different claims
+        # and only one of them is about the target.
+        "scope": None,
+        "is_full_length_sequence": None,
+        "n_residues_measured": None,
+        "construct_disorder_fraction": None,
+    }
+    if not accession and not sequence:
+        out["disorder_reason"] = (
+            "no uniprot_accession supplied and no polymer sequence could be "
+            "read from any structure"
+        )
+        return out
+    try:
+        import disorder as _disorder
+
+        res = _disorder.predict_disorder(
+            sequence=sequence if not accession else None, accession=accession
+        )
+    except Exception as exc:  # noqa: BLE001
+        out.update(disorder_status="failed",
+                   disorder_reason=f"{type(exc).__name__}: {exc}")
+        return out
+    if res is None:
+        out.update(
+            disorder_status="failed",
+            disorder_reason=(
+                "predict_disorder returned None — every method failed. NOT 0.0: "
+                "a failed prediction is not a folded protein."
+            ),
+        )
+        return out
+    fraction = res.get("disorder_fraction")
+    full_length = bool(accession)
+    out.update(
+        disorder_status="ok",
+        method=res.get("method"),
+        confidence=res.get("confidence"),
+        length=res.get("length"),
+        n_residues_measured=res.get("length"),
+        disordered_regions=res.get("disordered_regions"),
+        n_disordered_regions=res.get("n_disordered_regions"),
+        longest_disordered_region=res.get("longest_disordered_region"),
+        fallback_from=res.get("fallback_from"),
+        source=res.get("source"),
+        is_full_length_sequence=full_length,
+        scope="full_length_uniprot" if full_length else "crystallised_construct",
+    )
+    if full_length:
+        out["disorder_fraction"] = _unit_interval(
+            fraction, "disorder_fraction", f"accession {accession}"
+        )
+        return out
+
+    # ---- construct-only path ---------------------------------------------
+    # `disorder_fraction` STAYS NULL. This is not squeamishness: the field is
+    # read straight into the dossier's `tractability.disorder_fraction`, which
+    # is a statement about the protein, and a construct measurement placed there
+    # is a statement about a different molecule. Measured on IRAK4: the
+    # crystallised kinase domain gives 0.0 over 284 residues while the full
+    # 460-residue protein is 0.1413 with a disordered region at 101-162. A bare
+    # 0.0 in that slot reads as "no disorder", not as "not measured", and it is
+    # the second reading that is true.
+    out["construct_disorder_fraction"] = _unit_interval(
+        fraction, "construct_disorder_fraction", str(sequence_source)
+    )
+    out["disorder_fraction"] = None
+    out["disorder_reason"] = (
+        f"NOT MEASURED ON THE FULL PROTEIN. No UniProt accession was supplied "
+        f"and none could be read from any entry's _struct_ref, so the only "
+        f"sequence available was the crystallised construct "
+        f"({sequence_source}), {res.get('length')} residues. That is the "
+        f"ordered part of the protein BY SELECTION, so its disorder fraction "
+        f"({fraction}) is a lower bound on the construct and says nothing "
+        f"about the rest of the chain. It is reported as "
+        f"construct_disorder_fraction; disorder_fraction is null because a "
+        f"number in that field would be read as the protein's."
+    )
+    out["_caveat"] = (
+        "Construct-only measurement. Quote it as "
+        "'disorder <value> over <n> residues of the crystallised construct "
+        "(<source>), not the full-length protein', or supply "
+        "uniprot_accession and re-run. Never quote it as the target's disorder "
+        "fraction, and never read a construct 0.0 as 'this protein is ordered'."
+    )
+    return out
+
+
+# ===========================================================================
+# cryptic mechanism — apo vs holo, the rule-5 measurement
+# ===========================================================================
+
+
+# Core C-alpha RMSD above which two entries are not superposed and every number
+# derived from the fit is measured in the wrong frame. THE SAME VALUE mdpocket
+# uses (`MDPOCKET_MAX_ACCEPTABLE_RMSD_A`), deliberately: the two stages were able
+# to return opposite verdicts on one pair in one payload because only one of them
+# had a gate.
+CRYPTIC_MAX_CORE_CA_RMSD_A = 5.0
+
+# A fit on a handful of atoms has a low RMSD because it has nothing to
+# disagree with. S1PR1's receptor was mapped onto a 25-residue peptide and
+# fitted on FIVE equivalent C-alpha; RMSD alone would never have caught it.
+CRYPTIC_MIN_EQUIVALENT_CA = 20
+
+# Fraction of fitted positions allowed to name a different residue in the two
+# entries. The same S1PR1 fit carried 15 name mismatches out of 5 positions'
+# worth of signal. Construct differences (KRAS G12C/C51S/C80L/C118S, TNF L143D)
+# are a handful; a tenth of the fit is a different sequence.
+CRYPTIC_MAX_NAME_MISMATCH_FRACTION = 0.1
+
+
+def _cryptic_block(
+    apo_path: Path, holo_path: Path, comp_id: str,
+    apo_pid: str, holo_pid: str,
+    apo_chains: list[str] | None, ligand_chain: str | None,
+) -> dict:
+    """Classify why the site is not visible in this apo structure.
+
+    `holo_chains` is deliberately NOT passed. The module infers it from ligand
+    contacts with a 15%-of-top-contributor floor, and that floor is exactly what
+    is needed here: 2AZ5's assembly is two independent TNF-alpha dimers and the
+    chain-A ligand brushes 3 atoms of chain D against 44 and 39 for the real
+    partners. Passing the four chains we scored would build an A/B/D
+    "assembly", leave no apo chain free to be displaced, and silently turn
+    subunit_occlusion into a confident loop_or_backbone_motion + cryptic:true on
+    a target that is neither.
+
+    `apo_chains` IS passed, and is the assembly this module actually scored:
+    any apo chain not mapped to a holo chain is treated as a chain the ligand
+    must displace, so leaving crystallographic extras in would invent subunits.
+
+    Regression, AS THIS FUNCTION RUNS IT (the module's zero-knowledge default:
+    auto-trim on, residue-name matching on):
+        4OBE vs 6OIM (MOV) -> loop_or_backbone_motion, cryptic, ~8.65 A
+        1TNF vs 2AZ5 (307) -> subunit_occlusion, NOT cryptic, ~1.55-1.58 A
+
+    THE HAND-CALIBRATION FIGURES ARE 8.83 A AND 1.62 A AND THIS PROTOCOL DOES
+    NOT REPRODUCE THEM. They came from a protocol that disabled both switches
+    and named the mobile regions by hand; the default lands 0.1-0.2 A below
+    them. Mechanism and is_cryptic are IDENTICAL under both, so nothing
+    downstream of the label changes — but the displacement figures are not
+    interchangeable and must not be quoted as each other. The calibration
+    protocol is re-run below and reported in `calibration_protocol`.
+    """
+    out: dict = {
+        "cryptic_status": "not_run",
+        "cryptic_reason": None,
+        "apo_pdb_id": apo_pid,
+        "holo_pdb_id": holo_pid,
+        "ligand_comp_id": comp_id,
+    }
+    try:
+        from cryptic_analysis import analyze_cryptic_mechanism
+
+        r = analyze_cryptic_mechanism(
+            str(apo_path), str(holo_path), comp_id,
+            apo_chains=apo_chains or None,
+            ligand_chain=ligand_chain,
+        )
+    except Exception as exc:  # noqa: BLE001
+        out.update(cryptic_status="failed",
+                   cryptic_reason=f"{type(exc).__name__}: {exc}")
+        return out
+
+    sc = r.get("self_control", {})
+    # ---- SUPERPOSITION-QUALITY GATE ---------------------------------------
+    # The self-control alone is not enough, and a real run proved it. On NLRP3
+    # the module returned cryptic_status "ok", is_cryptic true, 21.6 A
+    # displacement, mechanism loop_or_backbone_motion and a NANOMOLAR potency
+    # prior — on top of its own reported `core_ca_rmsd: 16.627` over 487 CA
+    # with `n_excluded_ca: 0`, and all four chain mappings at 16.629. A 16.6 A
+    # core RMSD is not a superposition. mdpocket REFUSED the identical pair in
+    # the same run ("8SWF: best chain mapping RMSD 16.22 A exceeds 5.0 A"), so
+    # one module rejected the alignment while this one built a confident
+    # mechanistic call on top of it.
+    #
+    # The same pair against a different apo entry (7ZGU) superposed at 1.248 A
+    # and gave the OPPOSITE answer: 0.95 A displacement, mechanism none,
+    # is_cryptic false. Without a manual control the dossier would have called a
+    # validated, clinically drugged, open ATP site cryptic with a 21.6 A
+    # conformational change.
+    #
+    # Same threshold as mdpocket's, for the same reason and so that the two
+    # stages cannot disagree about whether a pair is superposable.
+    # THREE GATES, NOT ONE. RMSD alone would not have caught S1PR1, which is
+    # the worst instance measured: the module mapped the S1PR1 receptor onto
+    # 8G94 chain F — CD69, a 25-residue peptide — fitted it on FIVE equivalent
+    # C-alpha with FIFTEEN residue-name mismatches, and reported the resulting
+    # `max_backbone_ca_displacement_a: 0.00` as a measurement with
+    # `mechanism: subunit_occlusion` and status ok. Rule 5 then maps
+    # subunit_occlusion to a micromolar-at-best ceiling — on a target with 600
+    # sub-nanomolar compounds and five approved drugs. Four log units wrong, in
+    # the damaging direction, from a block that carried every diagnostic of its
+    # own failure and gated on none of them. Hand re-measurement over 257 core
+    # C-alpha at 1.03 A gives 1.33 A displacement, zero clashes, mechanism none.
+    sup = r.get("superposition") or {}
+    sup_rmsd = sup.get("core_ca_rmsd")
+    n_equiv = sup.get("n_equivalent_ca")
+    if n_equiv is None:
+        n_equiv = sup.get("n_fitted_ca")
+    n_mismatch = sup.get("n_residue_name_mismatches") or 0
+    gate_fails: list[str] = []
+    if sup_rmsd is not None and sup_rmsd > CRYPTIC_MAX_CORE_CA_RMSD_A:
+        gate_fails.append(
+            f"core C-alpha RMSD {sup_rmsd} A exceeds "
+            f"{CRYPTIC_MAX_CORE_CA_RMSD_A} A"
+        )
+    if n_equiv is not None and n_equiv < CRYPTIC_MIN_EQUIVALENT_CA:
+        gate_fails.append(
+            f"only {n_equiv} equivalent C-alpha were fitted "
+            f"({CRYPTIC_MIN_EQUIVALENT_CA} needed); this is a fit onto the "
+            "wrong chain, not a superposition"
+        )
+    if n_equiv and n_mismatch / n_equiv > CRYPTIC_MAX_NAME_MISMATCH_FRACTION:
+        gate_fails.append(
+            f"{n_mismatch} of {n_equiv} fitted positions name a DIFFERENT "
+            "residue in the two entries; they are not the same sequence"
+        )
+    fit_ok = not gate_fails
+    out.update(
+        # `self_control.passed` False means the superposition or the ligand
+        # placement is broken and EVERY number below is noise. Reported as a
+        # failure rather than as a result, because a mechanism label from a
+        # broken fit is worse than no label.
+        cryptic_status="ok" if (sc.get("passed") and fit_ok) else "failed",
+        cryptic_reason=(
+            None if (sc.get("passed") and fit_ok)
+            else "cryptic_analysis self-control failed; result not interpretable"
+            if not sc.get("passed")
+            else (
+                "SUPERPOSITION REFUSED: " + "; ".join(gate_fails)
+                + ". These two entries are not superposed, so the "
+                "displacement, the clash attribution, the free volume and the "
+                "mechanism label are all measured in the wrong frame. "
+                "Refusing. Try a different apo entry, or pass apo_chains: on "
+                "NLRP3 the rejected pair gave 21.6 A / cryptic and a "
+                "superposable pair gave 0.95 A / not cryptic."
+            )
+        ),
+        superposition_gate={
+            "core_ca_rmsd_a": sup_rmsd,
+            "max_acceptable_a": CRYPTIC_MAX_CORE_CA_RMSD_A,
+            "n_equivalent_ca": n_equiv,
+            "min_equivalent_ca": CRYPTIC_MIN_EQUIVALENT_CA,
+            "n_residue_name_mismatches": n_mismatch,
+            "max_name_mismatch_fraction": CRYPTIC_MAX_NAME_MISMATCH_FRACTION,
+            "chain_mapping": sup.get("chain_mapping"),
+            "passed": fit_ok,
+            "failures": gate_fails,
+            "self_control_passed": sc.get("passed"),
+            "_why": (
+                "mdpocket applies a superposition gate and this stage did not, "
+                "so the two stages could return opposite verdicts on the same "
+                "pair in one payload. Three targets found it: NLRP3 (16.6 A "
+                "core RMSD reported as ok), TL1A (numbering offsets), S1PR1 "
+                "(5 equivalent C-alpha onto a 25-residue peptide, 15 name "
+                "mismatches). Count and identity are gated, not only RMSD — "
+                "the S1PR1 fit had a low RMSD precisely because it was fitted "
+                "on five atoms."
+            ),
+        },
+        mechanism=r.get("mechanism"),
+        secondary_mechanism=r.get("secondary_mechanism"),
+        is_cryptic=r.get("is_cryptic"),
+        rationale=r.get("rationale"),
+        max_backbone_ca_displacement_a=(r.get("site") or {}).get(
+            "max_ca_displacement"),
+        max_ca_displacement_at=(r.get("site") or {}).get("max_ca_displacement_at"),
+        site_ca_rmsd_a=(r.get("site") or {}).get("ca_rmsd"),
+        # CLASSIFY ON DISPLACEMENT, NOT ON CLASH COMPOSITION. Reported because
+        # it is informative; it must not drive the label. KRAS's switch-II loop
+        # moves 8.8 A and yet zero of the clashing atoms at 2.0 A are backbone —
+        # keying on composition would hand the canonical nanomolar target a
+        # micromolar prognosis.
+        clash_attribution=r.get("contacts"),
+        clash_attribution_wide=r.get("contacts_wide"),
+        free_volume=r.get("free_volume"),
+        crypticity=r.get("crypticity"),
+        superposition={
+            k: v for k, v in (r.get("superposition") or {}).items()
+            if k != "per_residue"
+        },
+        displaced_apo_chains=(r.get("inputs") or {}).get("displaced_apo_chains"),
+        bystander_apo_chains=(r.get("inputs") or {}).get("bystander_apo_chains"),
+        holo_chains_used=(r.get("inputs") or {}).get("holo_chains"),
+        self_control=sc,
+        warnings=r.get("warnings"),
+        cryptic_potency_prior=_potency_prior(r.get("mechanism")),
+    )
+
+    # SECOND PROTOCOL, reported alongside. The run above uses the module's
+    # zero-knowledge default — auto-trim finds mobile regions nobody named, and
+    # residue-name matching drops construct differences (KRAS G12C/C51S/C80L/
+    # C118S, TNF L143D) out of the fit. The hand calibrations did neither, and
+    # the two protocols disagree slightly on the DISPLACEMENT while agreeing
+    # exactly on the mechanism and on is_cryptic:
+    #
+    #     KRAS   default 8.65 A   calibration 8.79 A   (hand figure 8.83 A,
+    #                                                   which also excluded
+    #                                                   switch I 25-40 and
+    #                                                   switch II 57-75 and
+    #                                                   fitted 1-166)
+    #     TNF    default 1.55-1.58 A                   (hand figure 1.62 A)
+    #
+    # Both are shown because the default is the right production protocol and
+    # the calibration number is the one the dossier's rule 5 quotes. Neither is
+    # allowed to be presented as the other. The default runs 0.1-0.2 A BELOW the
+    # hand figures on both targets, so a dossier that quotes 8.83 or 1.62 as
+    # "what the pipeline measured" is quoting a protocol this function does not
+    # run. Quote `calibration_protocol.max_backbone_ca_displacement_a` if the
+    # calibration number is what is wanted, and say which protocol produced it.
+    try:
+        from cryptic_analysis import analyze_cryptic_mechanism as _acm
+
+        cal = _acm(
+            str(apo_path), str(holo_path), comp_id,
+            apo_chains=apo_chains or None, ligand_chain=ligand_chain,
+            auto_trim=False, match_residue_names=False,
+            compute_free_volume=False,
+        )
+        out["calibration_protocol"] = {
+            "_protocol": "auto_trim=False, match_residue_names=False",
+            "mechanism": cal.get("mechanism"),
+            "is_cryptic": cal.get("is_cryptic"),
+            "max_backbone_ca_displacement_a": (cal.get("site") or {}).get(
+                "max_ca_displacement"),
+            "site_ca_rmsd_a": (cal.get("site") or {}).get("ca_rmsd"),
+            "agrees_with_default": (
+                cal.get("mechanism") == out.get("mechanism")
+                and cal.get("is_cryptic") == out.get("is_cryptic")
+            ),
+        }
+    except Exception as exc:  # noqa: BLE001
+        out["calibration_protocol"] = {"error": f"{type(exc).__name__}: {exc}"}
+    return out
+
+
+def _potency_prior(mechanism: str | None) -> dict:
+    """Mechanism is a prior on achievable potency, not a taxonomy label.
+
+    CryptoSite set (Lazou, Kozakov, Joseph-McCarthy & Vajda, Drug Discov Today
+    2024): of 27 loop-motion sites all but two reached nanomolar; of 18
+    side-chain-motion sites only 10 had affinity data at all and every one of
+    those bound weakly, low micromolar at best. The timescale argument is why —
+    side chains reorient in 1e-11 to 1e-10 s and compete with the ligand, loops
+    move in 1e-9 to 1e-6 s and can be wedged open.
+    """
+    table = {
+        "loop_or_backbone_motion": (
+            "nanomolar",
+            "25 of 27 loop-motion sites in the CryptoSite set reached nanomolar",
+        ),
+        "sidechain_occlusion": (
+            "micromolar_at_best",
+            "every side-chain-occluded site in the CryptoSite set with affinity "
+            "data bound in the low micromolar at best (10 of 18 had any data)",
+        ),
+        "subunit_occlusion": (
+            "micromolar_at_best",
+            "occlusion by a displaced subunit is not a loop opening; the ligand "
+            "competes with a folded protein surface. TNF-alpha's SPD304 is the "
+            "case and it is micromolar",
+        ),
+    }
+    ceiling, basis = table.get(mechanism or "", ("unknown", None))
+    return {"expected_ceiling": ceiling, "basis": basis}
+
+
+# ===========================================================================
+# interface classification — orthosteric / allosteric / destabiliser
+# ===========================================================================
+
+
+def _kmers(seq: str, k: int = 5) -> set:
+    return {seq[i:i + k] for i in range(len(seq) - k + 1)} if len(seq) >= k else set()
+
+
+def _split_partner_chains(partner_st, target_seqs: list[str]) -> tuple[list, list]:
+    """Which chains of a complex are OUR protein and which are the partner.
+
+    By 5-mer set overlap against the target's own sequences, not by chain
+    letter and not by an annotation. 3ALQ's TNF-alpha chains are A,B,C and its
+    TNFR2 chains are R,S,T, but nothing in the file says which is which in a
+    way that generalises, and getting it backwards computes the epitope on the
+    wrong side of the interface.
+    """
+    ref = set()
+    for s in target_seqs:
+        ref |= _kmers(s)
+    ours, theirs = [], []
+    for chain in partner_st[0]:
+        names = [r.name for r in chain]
+        if len(names) < 20:
+            continue
+        import gemmi
+
+        seq = "".join(c for c in gemmi.one_letter_code(names).upper() if c.isalpha())
+        km = _kmers(seq)
+        share = (len(km & ref) / len(km)) if km else 0.0
+        (ours if share >= 0.5 else theirs).append(chain.name)
+    return ours, theirs
+
+
+def _interface_block(
+    partner_cifs: dict[str, Path], target_seqs: list[str]
+) -> dict:
+    """Partner epitope on the target side, from a real complex structure."""
+    out: dict = {
+        "interface_status": "not_run",
+        "interface_reason": None,
+        "partner_structures": sorted(partner_cifs),
+    }
+    if not partner_cifs:
+        out["interface_reason"] = (
+            "no partner_structures supplied; pocket classification needs a "
+            "complex containing the binding partner"
+        )
+        return out
+    try:
+        import interface_analysis as IA
+    except Exception as exc:  # noqa: BLE001
+        out.update(interface_status="failed",
+                   interface_reason=f"interface_analysis import: {exc}")
+        return out
+
+    chosen = None
+    per_partner: dict[str, dict] = {}
+    for pid, cif in sorted(partner_cifs.items()):
+        try:
+            st = IA.load_structure(str(cif))
+            ours, theirs = _split_partner_chains(st, target_seqs)
+            if not ours or not theirs:
+                per_partner[pid] = {
+                    "error": (
+                        f"could not split {pid} into target and partner chains "
+                        f"(target-like {ours}, other {theirs}); it may not be a "
+                        "complex, or it may be a homo-oligomer of the target only"
+                    )
+                }
+                continue
+            iface = IA.interface_residues(st, ours, theirs)
+            rec = {
+                "target_chains": ours,
+                "partner_chains": theirs,
+                **iface.as_dict(),
+            }
+            per_partner[pid] = rec
+            if chosen is None or len(iface.side_a) > len(chosen[1].side_a):
+                chosen = (pid, iface, st, ours)
+        except Exception as exc:  # noqa: BLE001
+            per_partner[pid] = {"error": f"{type(exc).__name__}: {exc}"}
+    out["per_partner"] = per_partner
+    if chosen is None:
+        out.update(interface_status="failed",
+                   interface_reason="no partner structure yielded an interface")
+        return out
+    pid, iface, _st, _ours = chosen
+    # THE PARTNER ENTRY'S NUMBERING, so a seqid match can be checked instead of
+    # assumed. `classify_pocket(match_by="seqid")` matches pocket residues to
+    # interface residues on number alone; whether that is legal depends on the
+    # two entries numbering the protein the same way, and two of five TL1A
+    # structures did not. Pooled over the target-side chains only.
+    resnames: dict[int, str] = {}
+    for chain in _st[0]:
+        if chain.name not in _ours:
+            continue
+        for res in chain:
+            if res.het_flag == "A" and len(res):
+                resnames.setdefault(res.seqid.num, res.name)
+    out.update(
+        interface_status="ok",
+        partner_pdb_id=pid,
+        n_interface_residues=len(iface.side_a),
+        interface_residues=[r.label for r in iface.side_a],
+        partner_target_chains=list(_ours),
+        _epitope=iface.side_a,  # popped before return; not JSON-serialisable
+        _partner_resnames=resnames,  # popped before return
+    )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Buried core detection. EVERY THRESHOLD BELOW IS A PROPOSAL, NOT CALIBRATED.
+# ---------------------------------------------------------------------------
+#
+# fpocket's shipped druggability score is a logistic regression on mean local
+# hydrophobic density, max alpha-sphere distance and polar VDW surface. That
+# combination is maximised by a large, sealed, hydrophobic void — which is a
+# precise description of the hydrophobic CORE of a folded domain, and cores are
+# not binding sites. They have no solvent mouth for a ligand to enter through,
+# and opening one costs the fold.
+#
+# Measured on IRAK4's death domain in a full two-mode run: the top-ranked pocket
+# of 134 scored druggability 0.890 with enclosure 0.998 (sealed — no mouth),
+# subunit_enclosure_gain 0.020 (partner chains contribute nothing to the burial,
+# so it is buried within ONE chain) and interface_coverage 0.026. Its lining was
+# nine Leu/Ile/Val/Phe, one Arg, one Tyr. Every supporting field said "core";
+# only the headline number said "site", and the headline number is the one that
+# gets quoted.
+#
+# THESE NUMBERS ARE A PROPOSAL FROM ONE CASE. They are not calibrated, there is
+# no held-out set behind them, and they are placed just inside the one
+# observation we have. They gate a FLAG and never a filter: no pocket is dropped,
+# reordered or rescored because of them. A buried core that is real is still
+# returned, still ranked where fpocket put it, and still carries its score.
+BURIED_CORE_ENCLOSURE_MIN = 0.98
+BURIED_CORE_SUBUNIT_GAIN_MAX = 0.05
+BURIED_CORE_APOLAR_FRACTION_MIN = 0.7
+
+
+def _buried_core_flag(
+    enclosure: float | None,
+    subunit_gain: float | None,
+    apolar_fraction: float | None,
+) -> dict:
+    """Is this "pocket" the hydrophobic core of a domain rather than a site?
+
+    Keyed on GEOMETRY (near-total enclosure with no solvent mouth, and burial
+    contributed by a single subunit) plus lining composition, never on the
+    druggability score itself — the score is the thing being questioned.
+
+    Returns a dict that is always present, so "not flagged" and "could not be
+    measured" are distinguishable.
+    """
+    have = [v for v in (enclosure, subunit_gain) if v is not None]
+    if not have:
+        return {
+            "buried_core_suspected": None,
+            "buried_core_reason": (
+                "enclosure was not measured for this pocket, so the core test "
+                "could not be applied. It needs the interface stage, which "
+                "needs a partner structure."
+            ),
+            "buried_core_criteria": None,
+        }
+    sealed = enclosure is not None and enclosure >= BURIED_CORE_ENCLOSURE_MIN
+    single = subunit_gain is not None and subunit_gain <= BURIED_CORE_SUBUNIT_GAIN_MAX
+    greasy = (
+        apolar_fraction is not None
+        and apolar_fraction >= BURIED_CORE_APOLAR_FRACTION_MIN
+    )
+    hit = bool(sealed and single and greasy)
+    return {
+        "buried_core_suspected": hit,
+        "buried_core_reason": (
+            (
+                f"enclosure {enclosure} >= {BURIED_CORE_ENCLOSURE_MIN} (sealed, "
+                f"no solvent mouth), subunit_enclosure_gain {subunit_gain} <= "
+                f"{BURIED_CORE_SUBUNIT_GAIN_MAX} (buried within one subunit, not "
+                f"by the assembly), apolar lining fraction {apolar_fraction} >= "
+                f"{BURIED_CORE_APOLAR_FRACTION_MIN}. This is the shape of a "
+                "hydrophobic core, and fpocket's druggability regression rewards "
+                "precisely that shape. TREAT THE DRUGGABILITY SCORE ON THIS "
+                "POCKET AS UNINTERPRETABLE, not as a high one."
+            )
+            if hit
+            else None
+        ),
+        "buried_core_criteria": {
+            "_status": "PROPOSED, NOT CALIBRATED — from a single observed case "
+                       "(IRAK4 death domain, druggability 0.890 at rank 1 of 134, "
+                       "enclosure 0.998, gain 0.020). Do not present these cut "
+                       "points as measured. They gate a flag, never a filter.",
+            "enclosure_min": BURIED_CORE_ENCLOSURE_MIN,
+            "subunit_enclosure_gain_max": BURIED_CORE_SUBUNIT_GAIN_MAX,
+            "apolar_lining_fraction_min": BURIED_CORE_APOLAR_FRACTION_MIN,
+            "enclosure": enclosure,
+            "subunit_enclosure_gain": subunit_gain,
+            "apolar_lining_fraction": apolar_fraction,
+            "sealed": sealed,
+            "buried_within_one_subunit": single,
+            "hydrophobic_lining": greasy,
+        },
+    }
+
+
+# Below this fraction of residue-name agreement, two entries are not on a common
+# residue numbering and a seqid-keyed comparison between them is meaningless.
+# PROPOSED, NOT CALIBRATED.
+NUMBERING_IDENTITY_MIN = 0.9
+
+
+def _numbering_agreement(
+    a: dict[int, str], b: dict[int, str], max_examples: int = 8
+) -> dict:
+    """Do two entries agree on what residue each number refers to?
+
+    THE CHECK THAT `match_by="seqid"` NEVER HAD. Matching pocket residues to
+    interface residues on residue NUMBER alone is only valid if both entries
+    number the same protein the same way, and PDB entries for one protein
+    routinely do not. Measured on TL1A: 2O0O numbers from the construct start
+    while 3K51 runs at +67, so 2O0O's "shared A:HIS118" was matched against
+    3K51's THR118 — non-homologous — and 2RE9's THR34/PRO35/THR36 were matched
+    against VAL34/VAL35/ARG36, producing a spurious overlap_fraction of 0.227
+    that was reported with a `borderline` flag and no numbering warning at all.
+
+    Two of five structures were silently wrong and nothing in the payload said
+    which two. Residue names cost one comparison and catch all of it.
+    """
+    shared = sorted(set(a) & set(b))
+    if not shared:
+        return {
+            "n_compared": 0,
+            "n_identical": 0,
+            "identity_fraction": None,
+            "numbering_agrees": None,
+            "mismatch_examples": [],
+            "reason": (
+                "the two entries share no residue number at all, so their "
+                "numbering conventions could not be compared"
+            ),
+        }
+    same = [r for r in shared if a[r] == b[r]]
+    frac = round(len(same) / len(shared), 3)
+    return {
+        "n_compared": len(shared),
+        "n_identical": len(same),
+        "identity_fraction": frac,
+        "numbering_agrees": frac >= NUMBERING_IDENTITY_MIN,
+        "mismatch_examples": [
+            f"{r}: {a[r]} vs {b[r]}" for r in shared if a[r] != b[r]
+        ][:max_examples],
+        "identity_threshold": NUMBERING_IDENTITY_MIN,
+        "_threshold_status": "PROPOSED, NOT CALIBRATED",
+        "reason": (
+            None
+            if frac >= NUMBERING_IDENTITY_MIN
+            else (
+                f"only {len(same)} of {len(shared)} shared residue numbers name "
+                "the same residue in both entries. The two are not on a common "
+                "numbering, so every seqid-keyed comparison between them "
+                "(overlap_fraction, interface_coverage, shared_residues) is "
+                "matching non-homologous positions. The geometric fields "
+                "(min_distance_to_interface_a, enclosure) are unaffected."
+            )
+        ),
+    }
+
+
+def _classify_site_pocket(
+    prepped: Path, used_chains: list[str], vert: Path, epitope,
+    partner_resnames: dict[int, str] | None = None,
+    apolar_fraction: float | None = None,
+) -> dict:
+    """One pocket, against the partner epitope, in the pocket's own structure.
+
+    The prepared PDB is used rather than a fresh read of the CIF, because it is
+    the exact file fpocket saw: same atoms, same chain IDs, same frame. The
+    alpha-sphere centres in `pocket<N>_vert.pqr` are the probe points, which is
+    what the module asks for — without them enclosure falls back to the lining
+    centroid and overstates burial on a shallow groove.
+
+    `match_by="seqid"` because the epitope comes from a DIFFERENT PDB entry.
+    The price is that on a homo-oligomer the interface set becomes the union
+    over protomers, which inflates overlap; an overlap of 0.00 under that
+    inflation, as TNF-alpha's SPD304 site gives against the TNFR2 epitope, is
+    therefore a strong statement rather than a weak one.
+
+    THE OTHER PRICE, WHICH USED TO BE PAID SILENTLY: matching on seqid assumes
+    the two entries number the protein the same way, and PDB entries for one
+    protein routinely do not. `partner_resnames` is the partner entry's
+    {seqid -> residue name} over its target chains, and it turns that assumption
+    into a reported measurement — see `_numbering_agreement`. Without it, two of
+    five TL1A structures produced overlap fractions computed against
+    non-homologous residues with nothing in the payload to say so.
+    """
+    import numpy as np
+
+    import interface_analysis as IA
+
+    st = IA.load_structure(str(prepped))
+    pts = np.asarray(_pdb_coords(vert, ("ATOM", "HETATM")), dtype=float)
+    if len(pts) == 0:
+        return {"error": f"no alpha-sphere centres in {vert.name}"}
+    # Enclosure casts 512 rays per probe point per chain; a 400-sphere pocket
+    # would dominate the runtime for no gain in the answer.
+    if len(pts) > 60:
+        pts = pts[np.linspace(0, len(pts) - 1, 60).astype(int)]
+    lining = IA.residues_within(st, pts, chains=used_chains or None)
+    if not lining:
+        return {"error": "no residue within 4.5 A of the alpha-sphere centres"}
+    res = IA.classify_pocket(
+        lining, epitope, st,
+        target_chains=used_chains or None,
+        probe_points=pts,
+        match_by="seqid",
+    )
+    d = res.as_dict()
+    d["summary"] = res.summary()
+
+    # ---- is the seqid match even legal between these two entries? ----------
+    if partner_resnames:
+        ours = _pdb_resnames_by_seqid(prepped, used_chains or None)
+        agree = _numbering_agreement(ours, partner_resnames)
+        d["numbering_check"] = agree
+        if agree.get("numbering_agrees") is False:
+            d["overlap_unreliable_numbering_mismatch"] = True
+            d["notes"] = list(d.get("notes") or []) + [
+                "OVERLAP IS NOT INTERPRETABLE: " + (agree.get("reason") or "")
+            ]
+        elif agree.get("numbering_agrees") is None:
+            d["overlap_unreliable_numbering_mismatch"] = None
+        else:
+            d["overlap_unreliable_numbering_mismatch"] = False
+        # Per-shared-residue names, so a reader can see the actual pairing
+        # rather than trusting a fraction. `shared_residues` labels come from
+        # the pocket side only, which is exactly how "shared A:HIS118" hid the
+        # fact that the partner's 118 is a THR.
+        pairs = []
+        for lbl in d.get("shared_residues") or []:
+            digits = "".join(ch for ch in lbl if ch.isdigit())
+            if not digits:
+                continue
+            n = int(digits)
+            pairs.append({
+                "seqid": n,
+                "pocket_residue": lbl,
+                "partner_residue_name": partner_resnames.get(n),
+                "name_agrees": (
+                    None if n not in partner_resnames or n not in ours
+                    else ours[n] == partner_resnames[n]
+                ),
+            })
+        d["shared_residue_name_check"] = pairs
+        d["n_shared_residues_name_mismatched"] = sum(
+            1 for p in pairs if p["name_agrees"] is False
+        )
+
+    # ---- buried core, keyed on geometry, never a filter --------------------
+    d.update(
+        _buried_core_flag(
+            d.get("enclosure"), d.get("subunit_enclosure_gain"), apolar_fraction
+        )
+    )
+    return d
+
+
+# ===========================================================================
+# mdpocket — the site fixed BY CONSTRUCTION
+# ===========================================================================
+#
+# Everything above matches pockets ACROSS structures after the fact, by shared
+# residue numbers. That is a heuristic and it has been measured failing: on the
+# five apo TNF-alpha structures it tracked a pocket 7.7 A from the site it
+# claimed, with 12.2 A of internal inconsistency between structures, and
+# reported a large druggability spread that was never a measurement of one
+# site. mdpocket removes the matching step entirely: ONE set of grid points is
+# defined once, in a common frame, and the same points are characterised in
+# every structure. Same five structures, volume CV ~28% -> ~10% (measured 28.1%
+# at D=1.6 against 9.9%; ~1 percentage point of each is fpocket's Monte-Carlo
+# volume noise, so do not quote a third significant figure).
+#
+# Four things about mdpocket that are not in its documentation and each of
+# which silently corrupts the answer:
+#
+#   1. IT SILENTLY DROPS MISSING FRAMES AND EXITS 0. Verified directly: a
+#      5-entry --pdb_list with one unreadable path prints "Identified 5
+#      snapshots to analyze", then "! The pdb file ... doesn't exists.", then
+#      processes "1/4 ... 4/4", writes a 4-line time.txt, and returns 0. The
+#      frequency grid is normalised over however many frames actually ran, so a
+#      dropped structure inflates EVERY frequency in the grid — 3/4 = 0.75
+#      where the truth is 3/5 = 0.60. Nothing in the return code says so.
+#      Hence `_assert_frame_count`, which is not optional.
+#   2. IT DOES NOT SUPERPOSE. It treats the list as MD frames already in a
+#      common frame. Deposited PDB entries are not. Everything is superposed
+#      here first, Kabsch on core C-alpha.
+#   3. ON A HOMO-OLIGOMER THE CHAIN MAPPING MUST BE SEARCHED. For a C3 trimer
+#      the three cyclic chain mappings agree to within 0.03 A and the three
+#      anticyclic ones land ~22 A out. Taking chains in file order picks an
+#      anticyclic mapping roughly half the time and produces a superposition
+#      that is geometrically absurd but numerically silent.
+#   4. FREQUENCY IS QUANTISED AT 1/N. With N=5 the only attainable values are
+#      {0, 0.2, 0.4, 0.6, 0.8, 1.0}. Quoting "this pocket is open 60% of the
+#      time" off five structures is quoting the grid resolution. Frequencies
+#      are therefore REFUSED below N=10 and the refusal is reported.
+#
+# time.txt is written in density mode only; characterisation mode does not
+# write one, so there the equivalent invariant is the descriptor ROW count.
+
+# mdpocket is on PATH in the Modal image. Locally it needs its conda env
+# activated (the bare binary segfaults with rc 133 on a bare exec), hence the
+# override — `MDPOCKET_CMD="micromamba run -n druggability mdpocket"`.
+MDPOCKET_CMD = os.environ.get("MDPOCKET_CMD", "mdpocket").split()
+
+# Below this many structures a frequency VALUE is grid resolution, not a
+# measurement. See note 4 above.
+MDPOCKET_MIN_N_FOR_FREQUENCY = 10
+
+# Grid points within this distance of the transferred ligand define the
+# ligand-anchored site. 3.0 A reproduces the calibration numbers; 2.0 A gives
+# 148.4 A^3 where 3.0 A gives 154.1 A^3 on 1TNF, i.e. the answer is not
+# sensitive to it.
+MDPOCKET_SITE_CUTOFF_A = 3.0
+
+# An anticyclic chain mapping on a C3 trimer lands ~22 A out against ~0.03 A
+# for a cyclic one. Anything above this is not a superposition.
+MDPOCKET_MAX_ACCEPTABLE_RMSD_A = 5.0
+
+# A structure that will not superpose is DROPPED, not fatal — but a spread over
+# the survivors of a partial ensemble is only a measurement if enough of them
+# survived. Below this many, refuse rather than report a CV over two frames.
+# An ensemble that was always going to be small (the KRAS 6OIM/4OBE pair) is
+# unaffected: this floor applies only once a drop has happened.
+MDPOCKET_MIN_N_AFTER_DROPS = 3
+
+
+def _ca_by_chain(pdb: Path) -> dict[str, dict[int, list[float]]]:
+    """{chain: {resseq: CA xyz}} straight out of a PDB, by fixed column."""
+    out: dict[str, dict[int, list[float]]] = {}
+    for line in pdb.read_text().splitlines():
+        if not line.startswith("ATOM") or len(line) < 54:
+            continue
+        if line[12:16].strip() != "CA":
+            continue
+        if line[16] not in (" ", "A"):
+            continue
+        try:
+            out.setdefault(line[21], {})[int(line[22:26])] = [
+                float(line[30:38]), float(line[38:46]), float(line[46:54])
+            ]
+        except ValueError:
+            continue
+    return out
+
+
+def _res_names_by_chain(pdb: Path) -> dict[str, dict[int, str]]:
+    """{chain: {resseq: residue name}} from the CA records of a PDB."""
+    out: dict[str, dict[int, str]] = {}
+    for line in pdb.read_text().splitlines():
+        if not line.startswith("ATOM") or len(line) < 54:
+            continue
+        if line[12:16].strip() != "CA" or line[16] not in (" ", "A"):
+            continue
+        try:
+            out.setdefault(line[21], {})[int(line[22:26])] = line[17:20].strip()
+        except ValueError:
+            continue
+    return out
+
+
+def _pdb_resnames_by_seqid(
+    pdb: Path, chains: list[str] | None = None
+) -> dict[int, str]:
+    """{resseq: residue name}, pooled over chains. For numbering comparisons.
+
+    Pooling is correct here because the consumer is a chain-agnostic seqid
+    match; on a homo-oligomer the protomers carry identical numbering by
+    construction, so pooling loses nothing. A genuine disagreement between two
+    chains of one entry would show up as an arbitrary pick, which is why the
+    FIRST name seen for a number wins and later ones do not overwrite it.
+    """
+    out: dict[int, str] = {}
+    for ch, m in _res_names_by_chain(pdb).items():
+        if chains and ch not in chains:
+            continue
+        for num, name in m.items():
+            out.setdefault(num, name)
+    return out
+
+
+# A numbering offset search wider than this is not a construct offset, it is a
+# different protein. TL1A's measured offsets are +67 and +71.
+MAX_NUMBERING_OFFSET = 2000
+
+
+def _best_numbering_offset(
+    mob: dict[int, str], ref: dict[int, str]
+) -> tuple[int, int, int]:
+    """Integer offset that best maps `mob`'s numbering onto `ref`'s.
+
+    Returns (offset, n_matched, n_overlapping). `mob[r]` is taken to be the same
+    residue as `ref[r + offset]`.
+
+    WHY THIS EXISTS, AND IT IS THE MOST SERIOUS BUG THIS FILE HAS CARRIED.
+    The superposition indexed C-alpha by RAW AUTHOR RESIDUE NUMBER. PDB entries
+    for one protein routinely use different numbering conventions, and TL1A's
+    ensemble carries three at once: 2O0O at offset 0, then 2QE3/2RJK/2RJL/3K51/
+    3MI8 at +67, and 2RE9 at +71. Fitting on raw numbers therefore fitted
+    non-homologous residues onto each other:
+
+        numbering             core CA   best 3-chain RMSD, 2O0O vs the rest
+        raw author (old)           67   18.70 - 20.06 A
+        aligned (this function)   138   0.51 - 1.45 A, clean C3 split
+
+    The ensemble superposes essentially perfectly. The tool reported
+    "2QE3: best chain mapping RMSD 14.84 A exceeds 5.0 A; not a superposition",
+    which reads as a conformational problem and is not one — the error message
+    misdiagnosed its own failure and the whole mdpocket stage was lost.
+
+    The old `len(core) < 20` guard did not catch it and could not: its message
+    already said "the entries do not share a numbering", but it tests a COUNT.
+    67 residues aligned by accident at a constant offset clear a count of 20
+    comfortably. What catches it is asserting residue IDENTITY at the matched
+    positions, which is what `_common_core` below does.
+
+    Offsets, not a gapped alignment, deliberately: a constant offset is the
+    failure that occurs in deposited entries, it is exactly recoverable, and the
+    identity assertion downstream shrinks the core wherever the offset model is
+    wrong rather than letting a bad alignment through. An entry needing a truly
+    gapped alignment simply yields a smaller core and, if it gets too small, an
+    explicit refusal.
+    """
+    from collections import Counter
+
+    if not mob or not ref:
+        return 0, 0, 0
+    # Every offset that could match ANY residue by name, voted once per pair.
+    # votes[off] is exactly the number of name-matched positions at that
+    # offset, so this is the same answer as scanning a window and costs
+    # O(n_mob * n_ref / 20) instead of O(window * n_mob).
+    by_name: dict[str, list[int]] = {}
+    for num, name in ref.items():
+        by_name.setdefault(name, []).append(num)
+    votes: Counter = Counter()
+    for num, name in mob.items():
+        for rnum in by_name.get(name, ()):
+            off = rnum - num
+            if -MAX_NUMBERING_OFFSET <= off <= MAX_NUMBERING_OFFSET:
+                votes[off] += 1
+    if not votes:
+        return 0, 0, len(set(mob) & set(ref))
+    # Most matches wins; ties go to the smallest shift, so an entry that already
+    # shares the reference numbering is never gratuitously renumbered.
+    off = max(votes, key=lambda o: (votes[o], -abs(o)))
+    overlap = sum(1 for num in mob if (num + off) in ref)
+    return off, votes[off], overlap
+
+
+def _align_numbering(
+    ca: dict[str, dict[int, list[float]]],
+    names: dict[str, dict[int, str]],
+    ref_names: dict[int, str],
+) -> tuple[dict[str, dict[int, list[float]]], dict[str, dict[int, str]], dict]:
+    """Renumber every chain of one structure onto the reference's numbering.
+
+    Only the internal fit uses the renumbered dictionaries; the PDB written for
+    mdpocket keeps its own deposited numbering, because mdpocket reads
+    coordinates and never residue numbers.
+    """
+    new_ca: dict[str, dict[int, list[float]]] = {}
+    new_names: dict[str, dict[int, str]] = {}
+    report: dict[str, dict] = {}
+    for ch, m in names.items():
+        off, matched, overlap = _best_numbering_offset(m, ref_names)
+        new_ca[ch] = {r + off: v for r, v in ca.get(ch, {}).items()}
+        new_names[ch] = {r + off: v for r, v in m.items()}
+        report[ch] = {
+            "offset_applied": off,
+            "n_positions_matched_by_name": matched,
+            "n_positions_overlapping": overlap,
+            "identity_fraction": (
+                round(matched / overlap, 3) if overlap else None
+            ),
+        }
+    offsets = sorted({v["offset_applied"] for v in report.values()})
+    return new_ca, new_names, {
+        "per_chain": report,
+        "offsets_applied": offsets,
+        "renumbered": any(o != 0 for o in offsets),
+    }
+
+
+def _common_core(
+    names_by_pid: dict[str, dict[str, dict[int, str]]],
+) -> tuple[list[int], dict]:
+    """Residue numbers present in EVERY chain of EVERY structure *and naming
+    the same residue in all of them*.
+
+    THE IDENTITY HALF IS THE GUARD THAT WAS MISSING. A count of shared numbers
+    cannot tell a homologous core from an accidental overlap at a constant
+    offset — 67 positions of TL1A's ensemble passed `len(core) >= 20` while
+    being non-homologous throughout. Requiring the residue NAME to agree at
+    every core position is what makes the core a core.
+    """
+    shared: set[int] | None = None
+    for by_chain in names_by_pid.values():
+        for m in by_chain.values():
+            shared = set(m) if shared is None else shared & set(m)
+    shared = shared or set()
+    core, dropped = [], []
+    for num in sorted(shared):
+        seen = {
+            m[num]
+            for by_chain in names_by_pid.values()
+            for m in by_chain.values()
+        }
+        (core if len(seen) == 1 else dropped).append(num)
+    return core, {
+        "n_shared_numbers": len(shared),
+        "n_core_positions": len(core),
+        "n_dropped_on_residue_name_disagreement": len(dropped),
+        "dropped_positions_sample": dropped[:20],
+        "_why": (
+            "A core position must be the SAME residue in every structure, not "
+            "merely a number they all happen to carry. Counting numbers alone "
+            "let a 67-position non-homologous overlap at a constant numbering "
+            "offset pass as a valid core on TL1A and turned a 0.5 A "
+            "superposition into a reported 14.8-20.1 A refusal."
+        ),
+    }
+
+
+def _kabsch(P, Q):
+    """R, t such that P @ R + t is the least-squares fit of P onto Q.
+
+    numpy only — scipy is not in this image and is not needed for this.
+    """
+    import numpy as np
+
+    pc, qc = P.mean(0), Q.mean(0)
+    H = (P - pc).T @ (Q - qc)
+    U, _S, Vt = np.linalg.svd(H)
+    d = np.sign(np.linalg.det(Vt.T @ U.T))
+    R = (Vt.T @ np.diag([1.0, 1.0, d]) @ U.T).T
+    return R, qc - pc @ R
+
+
+def _fit_to_reference(
+    mob_ca: dict[str, dict[int, list[float]]],
+    ref_ca: dict[str, dict[int, list[float]]],
+    core: list[int],
+    mob_chains: list[str] | None = None,
+    max_perms: int = 2000,
+) -> dict:
+    """Best chain mapping of one structure onto the reference, by RMSD.
+
+    THE PERMUTATION SEARCH IS THE POINT. Chain letters are not a biological
+    correspondence — 1TNF's A and 2ZJC's A need not be the same protomer, and on
+    a C3 trimer picking wrongly costs ~22 A rather than ~0.03 A. Every mapping
+    is scored and all of them are returned, so the caller can see the cyclic /
+    anticyclic split rather than trusting a single number.
+
+    BOTH SIDES are searched — ordered subsets of the mobile chains against
+    unordered subsets of the reference chains. Permuting only the mobile side
+    is not enough and fails on a real case: 2AZ5's asymmetric unit is two
+    TNF-alpha DIMERS (4 chains) and the reference is a TRIMER (3), so every
+    3-chain mapping is geometrically impossible and the best of them is 17.3 A.
+    The correct fit maps the ligand's own dimer onto TWO of the trimer's three
+    protomers, which requires choosing a subset of the REFERENCE.
+
+    `mob_chains` restricts the mobile side, and for a site donor it must be
+    given: it is what keeps a crystallographic second copy out of the fit.
+    """
+    import itertools
+
+    import numpy as np
+
+    ref_chains = sorted(ref_ca)
+    mob_list = sorted(mob_chains) if mob_chains else sorted(mob_ca)
+    mob_list = [c for c in mob_list if c in mob_ca]
+    if not ref_chains or not mob_list or not core:
+        return {"ok": False, "reason": "no reference chains or no core residues"}
+
+    # Map as many chains as the smaller side has. A subset mapping is correct
+    # behaviour, not a fallback: 6OIM's assembly is a monomer and 4OBE's need
+    # not be.
+    k = min(len(ref_chains), len(mob_list))
+    if k == 0:
+        return {"ok": False, "reason": "no chains to map"}
+
+    # LARGEST MAPPING THAT IS ACTUALLY A SUPERPOSITION, then fall back. Two
+    # assemblies need not be the same oligomer: 2AZ5's asymmetric unit is two
+    # TNF-alpha DIMERS and 1TNF is a TRIMER, so no 3-chain mapping between them
+    # exists at all — the best is 17.3 A — while the 2-chain mapping of the
+    # ligand's own dimer onto two protomers of the trimer is 1.13 A. Refusing
+    # at k=3 threw away a measurement that was available at k=2.
+    #
+    # Reducing k always lowers RMSD (fewer constraints), so the search goes
+    # DOWNWARD from the largest k and stops at the first acceptable one. It
+    # never trades chains for a prettier number.
+    scored: list[tuple[float, tuple[str, ...], tuple[str, ...]]] = []
+    truncated = False
+    rms = perm = tgt = None
+    for kk in range(k, 0, -1):
+        pairs = [
+            (p, t) for p in itertools.permutations(mob_list, kk)
+            for t in itertools.combinations(ref_chains, kk)
+        ]
+        truncated = truncated or len(pairs) > max_perms
+        level: list[tuple[float, tuple[str, ...], tuple[str, ...]]] = []
+        for p, t in pairs[:max_perms]:
+            try:
+                Pp = np.array([mob_ca[c][r] for c in p for r in core])
+                Qq = np.array([ref_ca[c][r] for c in t for r in core])
+            except KeyError:
+                continue
+            R, t_ = _kabsch(Pp, Qq)
+            level.append((
+                float(np.sqrt((((Pp @ R + t_) - Qq) ** 2).sum(1).mean())), p, t
+            ))
+        if not level:
+            continue
+        level.sort(key=lambda x: x[0])
+        if kk == k:
+            scored = level
+        if level[0][0] <= MDPOCKET_MAX_ACCEPTABLE_RMSD_A or kk == 1:
+            if kk != k:
+                scored = level
+            rms, perm, tgt = level[0]
+            k = kk
+            break
+    if rms is None:
+        return {"ok": False, "reason": "no chain permutation shared the core"}
+    Pp = np.array([mob_ca[c][r] for c in perm for r in core])
+    Qq = np.array([ref_ca[c][r] for c in tgt for r in core])
+    R, t = _kabsch(Pp, Qq)
+    return {
+        "ok": rms <= MDPOCKET_MAX_ACCEPTABLE_RMSD_A,
+        "reason": (
+            None
+            if rms <= MDPOCKET_MAX_ACCEPTABLE_RMSD_A
+            else f"best chain mapping RMSD {rms:.2f} A exceeds "
+                 f"{MDPOCKET_MAX_ACCEPTABLE_RMSD_A} A; not a superposition"
+        ),
+        "rmsd_a": round(rms, 3),
+        "chain_map": {m: r for m, r in zip(perm, tgt, strict=False)},
+        "n_chains_mapped": k,
+        "n_mobile_chains": len(mob_list),
+        "n_reference_chains": len(ref_chains),
+        "unmapped_mobile_chains": [c for c in mob_list if c not in perm],
+        "n_core_ca": len(Pp),
+        # Every mapping, so the C3 cyclic/anticyclic split is visible rather
+        # than assumed: the three good ones agree to ~0.03 A, the three bad
+        # ones sit ~22 A away.
+        "all_mapping_rmsd_a": sorted(round(s[0], 3) for s in scored)[:24],
+        "n_mappings_tried": len(scored),
+        "permutations_truncated": truncated,
+        "_R": R,
+        "_t": t,
+    }
+
+
+def _write_superposed(src: Path, dst: Path, R, t, chain_map: dict[str, str]) -> int:
+    """Rewrite a prepared PDB into the reference frame, relabelling chains.
+
+    EVERY CHAIN IS KEPT, not only the mapped ones. When the chain mapping falls
+    back to a smaller k — 2AZ5's two dimers against 1TNF's trimer map 2-on-2,
+    not 3-on-3 — dropping the unmapped chains would delete the third protomer
+    of the trimer, and TNF-alpha's site IS the trimer. The pocket would simply
+    not be there and mdpocket would return a confident wrong volume.
+
+    Unmapped chains keep their own label unless it collides with a mapped
+    target label, in which case they take the next free one.
+    """
+    import numpy as np
+
+    taken = set(chain_map.values())
+    full = dict(chain_map)
+    pool = [c for c in _PDB_CHAIN_POOL if c not in taken]
+    for line in src.read_text().splitlines():
+        if not line.startswith("ATOM") or len(line) < 22:
+            continue
+        ch = line[21]
+        if ch in full:
+            continue
+        if ch not in taken:
+            full[ch] = ch
+            taken.add(ch)
+        elif pool:
+            full[ch] = pool.pop(0)
+            taken.add(full[ch])
+        else:
+            full[ch] = ch  # out of letters; collision is visible, not silent
+
+    lines = []
+    for line in src.read_text().splitlines():
+        if not line.startswith("ATOM") or len(line) < 54:
+            continue
+        xyz = np.array(
+            [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+        )
+        q = xyz @ R + t
+        lines.append(
+            line[:21] + full.get(line[21], line[21]) + line[22:30]
+            + f"{q[0]:8.3f}{q[1]:8.3f}{q[2]:8.3f}" + line[54:]
+        )
+    dst.write_text("\n".join(lines) + "\nEND\n")
+    return len(lines)
+
+
+def _run_mdpocket(args: list[str], cwd: Path, timeout: int) -> subprocess.CompletedProcess:
+    return subprocess.run(  # noqa: S603
+        MDPOCKET_CMD + args,
+        cwd=str(cwd), check=False, capture_output=True, timeout=timeout,
+    )
+
+
+def _assert_frame_count(observed: int, expected: int, what: str) -> None:
+    """THE NON-NEGOTIABLE CHECK. See note 1 in the block comment above."""
+    if observed != expected:
+        raise RuntimeError(
+            f"mdpocket processed {observed} of {expected} structures ({what}). "
+            "It drops unreadable frames silently and still exits 0, and the "
+            "frequency grid is then normalised over the frames that ran — every "
+            "frequency in the grid would be inflated. Refusing the result."
+        )
+
+
+def _read_dx(path: Path):
+    """OpenDX scalar grid -> (values 1-D in C order, counts, origin, spacing)."""
+    import numpy as np
+
+    counts = origin = None
+    deltas: list[list[float]] = []
+    vals: list[float] = []
+    indata = False
+    with path.open() as fh:
+        for line in fh:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            if s.startswith("object 1"):
+                counts = tuple(int(x) for x in s.split()[-3:])
+                continue
+            if s.startswith("origin"):
+                origin = np.array([float(x) for x in s.split()[1:4]])
+                continue
+            if s.startswith("delta"):
+                deltas.append([float(x) for x in s.split()[1:4]])
+                continue
+            if s.startswith("object 3"):
+                indata = True
+                continue
+            if s.startswith(("object", "attribute", "component")):
+                continue
+            if indata:
+                vals.extend(float(x) for x in s.split())
+    if counts is None or origin is None or len(deltas) != 3:
+        raise RuntimeError(f"{path.name}: not a readable OpenDX grid")
+    n = int(np.prod(counts))
+    return np.asarray(vals[:n], dtype=float), counts, origin, np.diag(np.array(deltas))
+
+
+def _dx_points(counts, origin, spacing):
+    import numpy as np
+
+    ix, iy, iz = np.meshgrid(
+        np.arange(counts[0]), np.arange(counts[1]), np.arange(counts[2]),
+        indexing="ij",
+    )
+    return np.stack(
+        [
+            origin[0] + ix.ravel() * spacing[0],
+            origin[1] + iy.ravel() * spacing[1],
+            origin[2] + iz.ravel() * spacing[2],
+        ],
+        axis=1,
+    )
+
+
+def _largest_grid_cluster(points, spacing):
+    """Largest 26-connected cluster of grid points, BFS on grid adjacency.
+
+    A frequency mask is not a pocket — it is a mask, and on a trimer it
+    contains a large disconnected surface film as well as the real internal
+    cavity. Taking the biggest connected component is what turns it into one.
+    """
+    from collections import deque
+
+    import numpy as np
+
+    if len(points) == 0:
+        return np.zeros(0, dtype=int)
+    # Index on integer grid coordinates so adjacency is exact rather than a
+    # float distance test.
+    # np.diag returns a read-only VIEW, so this must be a copy before assignment.
+    step = np.array(spacing, dtype=float, copy=True)
+    step[step == 0] = 1.0
+    key = {}
+    ijk = np.rint((points - points.min(0)) / step).astype(int)
+    for n, cell in enumerate(map(tuple, ijk)):
+        key[cell] = n
+    offs = [
+        (i, j, k)
+        for i in (-1, 0, 1) for j in (-1, 0, 1) for k in (-1, 0, 1)
+        if (i, j, k) != (0, 0, 0)
+    ]
+    seen = np.zeros(len(points), dtype=bool)
+    best: list[int] = []
+    for s in range(len(points)):
+        if seen[s]:
+            continue
+        q = deque([s])
+        seen[s] = True
+        cur = [s]
+        while q:
+            u = q.popleft()
+            cu = ijk[u]
+            for o in offs:
+                v = key.get((cu[0] + o[0], cu[1] + o[1], cu[2] + o[2]))
+                if v is not None and not seen[v]:
+                    seen[v] = True
+                    q.append(v)
+                    cur.append(v)
+        if len(cur) > len(best):
+            best = cur
+    return np.asarray(best, dtype=int)
+
+
+def _write_probe_pdb(points, path: Path) -> int:
+    with path.open("w") as fh:
+        for i, p in enumerate(points):
+            fh.write(
+                f"ATOM  {i + 1:5d}  C   PTH     1    "
+                f"{p[0]:8.3f}{p[1]:8.3f}{p[2]:8.3f}  0.00  0.00\n"
+            )
+        fh.write("END\n")
+    return len(points)
+
+
+def _read_descriptors(path: Path) -> list[dict]:
+    """mdpocket's characterisation table: one row per snapshot, in list order."""
+    lines = [ln for ln in path.read_text().splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return []
+    hdr = lines[0].split()
+    rows = []
+    for ln in lines[1:]:
+        parts = ln.split()
+        if len(parts) < len(hdr):
+            continue
+        row = {}
+        for k, v in zip(hdr, parts, strict=False):
+            try:
+                row[k] = float(v)
+            except ValueError:
+                row[k] = v
+        rows.append(row)
+    return rows
+
+
+def _spread(values: list[float]) -> dict:
+    """Mean / SD / CV. CV is the number rule 4 of the dossier is about."""
+    vals = [float(v) for v in values]
+    if not vals:
+        return {"n": 0, "mean": None, "sd": None, "cv_pct": None,
+                "min": None, "max": None}
+    n = len(vals)
+    mean = sum(vals) / n
+    sd = (
+        (sum((v - mean) ** 2 for v in vals) / (n - 1)) ** 0.5 if n > 1 else 0.0
+    )
+    return {
+        "n": n,
+        "mean": round(mean, 2),
+        "sd": round(sd, 2),
+        "cv_pct": round(100 * sd / mean, 1) if mean else None,
+        "min": round(min(vals), 2),
+        "max": round(max(vals), 2),
+        "values": [round(v, 2) for v in vals],
+    }
+
+
+def _mdpocket_characterise(
+    run: Path, listfile: Path, sel: Path, prefix: str, ids: list[str], timeout: int
+) -> dict:
+    """One selected-pocket run: same grid points, every structure."""
+    proc = _run_mdpocket(
+        ["--pdb_list", listfile.name, "--selected_pocket", sel.name, "-o", prefix],
+        run, timeout,
+    )
+    desc = run / f"{prefix}_descriptors.txt"
+    if not desc.exists():
+        raise RuntimeError(
+            f"mdpocket wrote no {desc.name} (exit {proc.returncode}): "
+            f"{proc.stdout.decode(errors='replace')[-400:]}"
+        )
+    rows = _read_descriptors(desc)
+    # Characterisation mode writes no time.txt, so the descriptor row count is
+    # the frame-count invariant here. Same hazard, same refusal.
+    _assert_frame_count(len(rows), len(ids), f"{desc.name} rows")
+    vols = [float(r.get("pock_volume", 0.0)) for r in rows]
+    present = [pid for pid, v in zip(ids, vols, strict=False) if v > 0.0]
+    out = {
+        "n_probe_points": sum(1 for ln in sel.read_text().splitlines()
+                              if ln.startswith("ATOM")),
+        "volume_a3_by_structure": dict(zip(ids, [round(v, 2) for v in vols],
+                                           strict=False)),
+        "volume_a3": _spread(vols),
+        "volume_a3_where_present": _spread([v for v in vols if v > 0.0]),
+        "n_structures_with_volume": len(present),
+        "structures_with_volume": present,
+        "structures_without_volume": [p for p in ids if p not in present],
+        # ---------------------------------------------------------------
+        # THE DESCRIPTORS UNDER THEIR OWN NAMES, and NO druggability.
+        #
+        # This block used to carry `druggability_by_structure`, populated from
+        # the `volume_score` column. Observed values were 3.35 to 4.00, which is
+        # impossible for a [0,1] score and matches `volume_score` exactly. It is
+        # the worst class of bug we get: a plausible number under a field name
+        # that invites it to be quoted as something else, and it was.
+        #
+        # IT IS NOT A COLUMN-INDEX SLIP AND THERE IS NO RIGHT COLUMN.
+        # mdpocket's characterisation table is fixed at 22 descriptors plus 20
+        # amino-acid counts (`M_MDP_OUTP_HEADER` in fpocket's mdpocket.h) and
+        # NONE of them is a druggability score:
+        #
+        #   snapshot pock_volume pock_asa pock_pol_asa pock_apol_asa pock_asa22
+        #   pock_pol_asa22 pock_apol_asa22 nb_AS mean_as_ray mean_as_solv_acc
+        #   apol_as_prop mean_loc_hyd_dens hydrophobicity_score volume_score
+        #   polarity_score charge_score prop_polar_atm as_density as_max_dst
+        #   convex_hull_volume nb_abpa  + ALA..VAL
+        #
+        # Nor can it be reconstructed. fpocket's shipped score (pscoring.c,
+        # drug_score_pocket) is
+        #     sigmoid(-9.5699 + 7.4798*mean_loc_hyd_dens_norm
+        #             + 0.3696*as_max_dst - 0.04672*surf_pol_vdw22)
+        # and `mean_loc_hyd_dens_norm` is MIN-MAX NORMALISED ACROSS THE OTHER
+        # POCKETS OF THE SAME STRUCTURE (pocket.c, set_normalized_descriptors).
+        # A druggability score is therefore not a property of a pocket at all;
+        # it is a property of a pocket relative to the pocket population it was
+        # detected with. mdpocket characterisation has a population of exactly
+        # one fixed grid, so the normalisation has no referent. Applying
+        # fpocket's single-pocket fallback constants ((mlhd-8.23)/15.97) to the
+        # 6OIM switch-II row gives a saturated 1.000, which is not a measurement
+        # either.
+        #
+        # So the honest answer is null with a reason. Druggability from the
+        # fpocket path (`structures.<ID>.by_clustering.<D>`) is the one that
+        # exists; it is a per-structure number and must not be presented as an
+        # mdpocket fixed-site number.
+        "druggability_by_structure": None,
+        "druggability_status": "not_available",
+        "druggability_reason": (
+            "mdpocket characterisation mode emits no druggability score, and "
+            "fpocket's score cannot be reconstructed from what it does emit: "
+            "the score's leading term is min-max normalised across the other "
+            "pockets of the same structure, and a fixed grid has no such "
+            "population. This field previously reported the `volume_score` "
+            "descriptor (observed 3.35-4.00) under this name. Read "
+            "volume_score_by_structure for that descriptor, and take "
+            "druggability from the fpocket path only."
+        ),
+        "volume_score_by_structure": dict(
+            zip(ids, [round(float(r.get("volume_score", 0.0)), 3) for r in rows],
+                strict=False)
+        ),
+        "_volume_score_note": (
+            "fpocket's `volume_score` descriptor, NOT a druggability score and "
+            "NOT on [0,1]. It is one of the raw scoring descriptors and it is "
+            "the value this block used to mislabel as druggability."
+        ),
+        "mean_local_hydrophobic_density_by_structure": dict(
+            zip(ids,
+                [round(float(r.get("mean_loc_hyd_dens", 0.0)), 2) for r in rows],
+                strict=False)
+        ),
+        "hydrophobicity_score_by_structure": dict(
+            zip(ids,
+                [round(float(r.get("hydrophobicity_score", 0.0)), 2) for r in rows],
+                strict=False)
+        ),
+        "descriptors": rows,
+    }
+    # The range assertion. `volume_a3` and the descriptors are unbounded by
+    # nature; the only [0,1] quantity this function can emit is druggability,
+    # and it is now explicitly null. Asserting it anyway means that if anyone
+    # ever repopulates it from a column, a 4.00 cannot leave the function.
+    _unit_interval(
+        out["druggability_by_structure"], "druggability_by_structure",
+        f"{prefix} over {len(ids)} structures",
+    )
+    for pid_, v in (out["volume_a3_by_structure"] or {}).items():
+        if v < 0.0:
+            raise RuntimeError(
+                f"{prefix}: negative pocket volume {v} A^3 for {pid_}; "
+                "mdpocket does not produce one and this is a parse error"
+            )
+    return out
+
+
+# A site centroid this far from the transferred ligand centroid is a DIFFERENT
+# POCKET, not a noisy estimate of the same one. NOT A CALIBRATED THRESHOLD — it
+# is a proposal, chosen as roughly half the 7.73 A miss measured on apo
+# TNF-alpha, i.e. comfortably below the one error we know about and above the
+# ~1 A grid spacing. It gates a WARNING, never a refusal, and no number in this
+# module is dropped because of it. Calibrating it needs more than one case.
+MDPOCKET_SITE_OFFSITE_WARN_A = 4.0
+
+
+def _ligand_distance_fields(
+    centroid, lig_common, donor_pid: str | None, donor_fit: dict | None
+) -> dict:
+    """`distance_to_donor_ligand_centroid_a`, ALWAYS, plus why when it is null.
+
+    The distance field only prevents a misread if it is there to be read. It
+    used to be emitted only when a ligand had been transferred, which is
+    backwards: the case that most needs the warning is the pure-apo run where
+    nothing was transferable and `site_from_density` comes back as the only
+    site, with `mdpocket_status: "ok"`, and nothing in the payload says it may
+    not be the pocket the dossier asked about. So a null here is itself the
+    finding, and it carries its own reason.
+    """
+    import numpy as np
+
+    if lig_common is not None:
+        d = round(float(np.linalg.norm(np.asarray(centroid) - lig_common.mean(0))), 2)
+        return {
+            "distance_to_donor_ligand_centroid_a": d,
+            "distance_reason": None,
+            "donor_pdb_id": donor_pid,
+            "off_site_warning": (
+                None if d <= MDPOCKET_SITE_OFFSITE_WARN_A else
+                f"this site's centroid is {d} A from the {donor_pid} ligand "
+                f"centroid, past the {MDPOCKET_SITE_OFFSITE_WARN_A} A proposed "
+                "(NOT calibrated) warning distance. At 7.73 A on apo TNF-alpha "
+                "this is a different pocket — the on-axis cavity, the one the "
+                "retracted matcher reported as the SPD304 site. Do not report "
+                "this volume or druggability as the ligand site."
+            ),
+        }
+    if not donor_pid:
+        reason = (
+            "no site donor: no holo structure in the ensemble carried a "
+            "drug-like ligand and no mdpocket_site_donor was supplied, so "
+            "there is no ligand to measure a distance to. THIS SITE IS "
+            "THEREFORE UNVERIFIED — it is the most persistent cavity, and "
+            "nothing here establishes that it is the site of interest."
+        )
+    else:
+        reason = (
+            f"site donor {donor_pid} was resolved but its ligand could not be "
+            f"transferred into the common frame "
+            f"(fit: {(donor_fit or {}).get('reason') or 'no fit attempted'}), "
+            "so no distance is available. THIS SITE IS THEREFORE UNVERIFIED."
+        )
+    return {
+        "distance_to_donor_ligand_centroid_a": None,
+        "distance_reason": reason,
+        "donor_pdb_id": donor_pid,
+        "off_site_warning": (
+            "cannot be checked — no ligand-anchored reference was available. "
+            "Treat this site as a cavity of unknown identity, not as the "
+            "dossier's site, and say so in tractability.site_hypothesis_basis."
+        ),
+    }
+
+
+def _mdpocket_ensemble(
+    work: Path,
+    prepped: dict[str, Path],
+    donor_pid: str | None,
+    donor_prepped: Path | None,
+    donor_ligand_xyz: list[list[float]] | None,
+    donor_chains: list[str] | None = None,
+    timeout: int = 900,
+) -> dict:
+    """Superpose the ensemble, then measure ONE site definition in all of it.
+
+    Returns a dict always carrying `mdpocket_status` in {ok, failed, not_run}.
+    Two site definitions are reported and they answer different questions:
+
+      * `site_from_ligand` — grid points around the holo ligand, transferred by
+        superposition. This is the site the dossier is asking about. On the
+        five apo TNF-alpha structures it returns 0.00 A^3 in four of them, and
+        THAT IS THE CORRECT ANSWER: the SPD304 channel is not open in those
+        crystal forms with all three subunits present. A refusal, not a
+        failure. Reading it as "mdpocket failed" is the mistake this comment
+        exists to prevent.
+      * `site_from_density` — the largest connected cluster of grid points at
+        which a pocket is present in EVERY structure. Independent of any
+        ligand, so it is the one that exists for a pure apo ensemble, and it is
+        the measurement behind the CV ~28% -> ~10% improvement.
+
+    THE SECOND ONE IS NOT THE LIGAND SITE AND ON OUR BEST-CHARACTERISED TEST
+    CASE IT IS THE WRONG POCKET. On the apo TNF-alpha ensemble
+    `site_from_density`'s centroid sits 7.73 A from the transferred SPD304
+    ligand: it is the on-axis cavity, i.e. precisely the pocket the retracted
+    residue-number matcher reported as "the SPD304 site". It is a real cavity
+    and a real measurement — it is just the answer to a different question.
+
+    So EVERY site entry carries `ligand_anchored` (bool) and
+    `distance_to_donor_ligand_centroid_a`, unconditionally, with
+    `distance_reason` when the distance could not be computed. They are emitted
+    even when there is no donor at all, because the dangerous case is exactly
+    the one where a pure-apo run with no transferable ligand returns
+    `site_from_density` as the ONLY site, with `mdpocket_status: "ok"` — a
+    confident single answer about the wrong pocket. A consumer that reads a
+    volume off a site entry without reading these two fields reproduces the
+    retracted bug, and it will look like a result rather than a bug.
+    """
+    import numpy as np
+
+    ids = list(prepped)
+    n = len(ids)
+    out: dict = {
+        "mdpocket_status": "not_run",
+        "mdpocket_reason": None,
+        "n_structures": n,
+        "_why": (
+            "The site is fixed BY CONSTRUCTION: one set of grid points defined "
+            "once in a common frame and characterised in every structure. This "
+            "replaces post-hoc residue-number matching, which on the five apo "
+            "TNF-alpha structures tracked a pocket 7.7 A from the site it "
+            "claimed and inflated the volume CV from ~10% to ~28%. "
+            "FIXED BY CONSTRUCTION MEANS REPRODUCIBLE, NOT CORRECT: it "
+            "guarantees every structure was measured at the SAME grid points, "
+            "not that those points are the site of interest. site_from_density "
+            "is a by-construction grid that is 7.73 A off-site on apo "
+            "TNF-alpha. Check each site's ligand_anchored and "
+            "distance_to_donor_ligand_centroid_a."
+        ),
+    }
+    if n < 2:
+        out["mdpocket_reason"] = (
+            f"{n} structure(s); an ensemble measurement needs at least 2"
+        )
+        return out
+
+    run = work / "mdpocket"
+    shutil.rmtree(run, ignore_errors=True)
+    run.mkdir(parents=True, exist_ok=True)
+
+    # ---- superposition, Kabsch on core C-alpha ---------------------------
+    #
+    # NUMBERING IS ALIGNED BEFORE ANYTHING IS FITTED. Indexing C-alpha by raw
+    # author residue number was this file's most serious bug: PDB entries for
+    # one protein routinely use different numbering conventions, and TL1A's
+    # ensemble carries three (2O0O at 0, five entries at +67, 2RE9 at +71). The
+    # fit then matched non-homologous residues and reported
+    # "best chain mapping RMSD 14.84 A exceeds 5.0 A; not a superposition" —
+    # a message that misdiagnosed its own failure as a conformational one. The
+    # same ensemble superposes at 0.51-1.45 A once numbering is aligned. See
+    # `_best_numbering_offset` and `_common_core`.
+    cas_raw = {pid: _ca_by_chain(p) for pid, p in prepped.items()}
+    names_raw = {pid: _res_names_by_chain(p) for pid, p in prepped.items()}
+    ref_pid = ids[0]
+    if not cas_raw[ref_pid]:
+        out.update(mdpocket_status="failed",
+                   mdpocket_reason=f"no C-alpha in reference {ref_pid}")
+        return out
+    ref_names_pooled = _pdb_resnames_by_seqid(prepped[ref_pid])
+
+    cas: dict[str, dict] = {}
+    names: dict[str, dict] = {}
+    numbering: dict[str, dict] = {}
+    for pid in ids:
+        cas[pid], names[pid], numbering[pid] = _align_numbering(
+            cas_raw[pid], names_raw[pid], ref_names_pooled
+        )
+    out["numbering_alignment"] = {
+        "reference": ref_pid,
+        "per_structure": numbering,
+        "_why": (
+            "C-alpha are matched on residue number, so the entries must first "
+            "be put on ONE numbering. Offsets are recovered by voting on "
+            "residue-name agreement against the reference, then every core "
+            "position must name the same residue in every structure. Fitting "
+            "on raw author numbers turned a 0.5 A TL1A superposition into a "
+            "reported 14.8-20.1 A refusal and lost the whole mdpocket stage."
+        ),
+    }
+
+    def _fit_all(pids: list[str]) -> tuple[dict, list[int], dict, list[dict]]:
+        """Core over `pids`, then fit each of them. Failures are returned, not
+        raised — a structure that will not superpose costs itself only."""
+        core_, report_ = _common_core({p: names[p] for p in pids})
+        fits_: dict[str, dict] = {}
+        dropped_: list[dict] = []
+        if len(core_) < 20:
+            return fits_, core_, report_, dropped_
+        ref_ca_ = cas[pids[0]]
+        for pid_ in pids:
+            fit = _fit_to_reference(cas[pid_], ref_ca_, core_)
+            if fit.get("ok"):
+                fits_[pid_] = fit
+            else:
+                dropped_.append({
+                    "pdb_id": pid_,
+                    "reason": fit.get("reason"),
+                    "rmsd_a": fit.get("rmsd_a"),
+                    "n_chains_mapped": fit.get("n_chains_mapped"),
+                    "n_mobile_chains": fit.get("n_mobile_chains"),
+                    "n_reference_chains": fit.get("n_reference_chains"),
+                    "all_mapping_rmsd_a": fit.get("all_mapping_rmsd_a"),
+                    "numbering": numbering.get(pid_, {}).get("per_chain"),
+                })
+        return fits_, core_, report_, dropped_
+
+    fits, core, core_report, dropped = _fit_all(ids)
+    passes = [{"pass": 1, "pids": list(ids), "n_core": len(core),
+               "core_report": core_report,
+               "dropped": [d["pdb_id"] for d in dropped]}]
+    if len(core) < 20:
+        out.update(
+            mdpocket_status="failed",
+            mdpocket_reason=(
+                f"only {len(core)} C-alpha positions are shared by every chain "
+                f"of every structure AND name the same residue in all of them "
+                f"({core_report['n_shared_numbers']} numbers were shared, "
+                f"{core_report['n_dropped_on_residue_name_disagreement']} of "
+                "them dropped because the entries disagree about which residue "
+                "that number is). Numbering was aligned first, so this is a "
+                "genuine lack of common sequence rather than an offset."
+            ),
+            numbering_alignment=out["numbering_alignment"],
+            core_selection=core_report,
+        )
+        return out
+
+    # A structure that failed to fit also constrained the core it was fitted
+    # against. Recompute over the survivors so a dropped entry does not shrink
+    # the measurement it is no longer part of.
+    if dropped:
+        survivors = [p for p in ids if p not in {d["pdb_id"] for d in dropped}]
+        if len(survivors) >= 2:
+            fits2, core2, report2, dropped2 = _fit_all(survivors)
+            passes.append({
+                "pass": 2, "pids": survivors, "n_core": len(core2),
+                "core_report": report2,
+                "dropped": [d["pdb_id"] for d in dropped2],
+                "_why": (
+                    "pass 1 dropped a structure, and that structure had also "
+                    "been constraining the common core. Pass 2 recomputes the "
+                    "core over the survivors only."
+                ),
+            })
+            if len(core2) >= 20 and fits2:
+                fits, core, core_report = fits2, core2, report2
+                dropped = dropped + dropped2
+
+    kept_ids = [p for p in ids if p in fits]
+    n_kept = len(kept_ids)
+    out["frames_dropped"] = {
+        "n_input": n,
+        "n_kept": n_kept,
+        "n_dropped": len(dropped),
+        "dropped": dropped,
+        "kept": kept_ids,
+        "_why": (
+            "A structure that will not superpose is DROPPED and recorded here, "
+            "not fatal. One 4-chain assembly matched against a 2-chain "
+            "reference (IRAK4 6UYA, 23.87 A) used to abort the entire ensemble "
+            "and cost a full re-run. THE REFUSAL IS CORRECT; ABORTING IS NOT."
+        ),
+        "_not_the_same_as_mdpockets_silent_drop": (
+            "mdpocket ALSO drops frames, silently, and still exits 0 — a "
+            "5-entry list with one bad path prints 'Identified 5 snapshots', "
+            "then an error, then 1/4..4/4, and returns 0, renormalising every "
+            "frequency in the grid over 4. That failure is still refused, by "
+            "_assert_frame_count, and this deliberate drop does not weaken it: "
+            "the assertion is made against n_kept (the frames actually "
+            "submitted to mdpocket), so a frame we dropped on purpose and a "
+            "frame mdpocket lost on its own remain distinguishable. "
+            "frame_count_check carries n_input, n_submitted and n_processed "
+            "separately for exactly this reason."
+        ),
+    }
+    if n_kept < 2 or (dropped and n_kept < MDPOCKET_MIN_N_AFTER_DROPS):
+        out.update(
+            mdpocket_status="failed",
+            mdpocket_reason=(
+                f"{len(dropped)} of {n} structures would not superpose onto "
+                f"{ref_pid} and were dropped, leaving {n_kept}. An ensemble "
+                f"measurement needs at least 2 structures, and at least "
+                f"{MDPOCKET_MIN_N_AFTER_DROPS} once a drop has occurred — a CV "
+                "over the two survivors of a partial ensemble is a statistic, "
+                "not a measurement of reproducibility. Refusing rather than "
+                "reporting it. Dropped: "
+                + "; ".join(f"{d['pdb_id']}: {d['reason']}" for d in dropped)
+            ),
+        )
+        return out
+
+    sup_paths: dict[str, Path] = {}
+    for pid in kept_ids:
+        fit = fits[pid]
+        dst = run / f"sup_{pid}.pdb"
+        _write_superposed(prepped[pid], dst, fit.pop("_R"), fit.pop("_t"),
+                          fit["chain_map"])
+        sup_paths[pid] = dst
+
+    ids, n = kept_ids, n_kept
+    out["n_structures"] = n
+    out["n_structures_submitted"] = n
+    out["superposition"] = {
+        "reference": ref_pid,
+        "n_core_ca_positions": len(core),
+        "core_residue_range": [core[0], core[-1]],
+        "core_selection": core_report,
+        "numbering_alignment_passes": passes,
+        "per_structure": fits,
+        "_note": (
+            "mdpocket does NOT superpose; it assumes MD frames already in a "
+            "common frame. Deposited entries are not. Chain mappings are "
+            "searched, not assumed: all_mapping_rmsd_a shows the split — on a "
+            "C3 trimer the three cyclic mappings agree to ~0.03 A and the "
+            "three anticyclic ones land ~22 A out. Residue NUMBERING is "
+            "aligned before any of that; see numbering_alignment."
+        ),
+    }
+
+    # ---- the site donor's ligand, moved into the common frame ------------
+    lig_common = None
+    donor_fit = None
+    donor_numbering = None
+    if donor_ligand_xyz and donor_prepped and donor_prepped.exists():
+        # The donor is a separate deposition and needs the SAME numbering
+        # alignment as the ensemble; a site donor at a different offset would
+        # fail to fit for the same reason 2QE3 did, and take the whole
+        # ligand-anchored site with it.
+        donor_ca, donor_names, donor_numbering = _align_numbering(
+            _ca_by_chain(donor_prepped),
+            _res_names_by_chain(donor_prepped),
+            ref_names_pooled,
+        )
+        # Only the chains that line the ligand copy being transferred. Without
+        # this the second crystallographic dimer of 2AZ5 joins the fit and the
+        # best mapping is 17.3 A — no transfer, no ligand-anchored site.
+        dchains = [c for c in (donor_chains or sorted(donor_ca)) if c in donor_ca]
+        dcore = sorted(
+            set.intersection(*[set(donor_ca[c]) for c in dchains]) & set(core)
+        ) if dchains else []
+        # Same identity guard as the ensemble core: a shared number is not a
+        # shared residue.
+        dcore = [
+            r for r in dcore
+            if all(donor_names[c].get(r) == names[ref_pid][cc].get(r)
+                   for c in dchains for cc in names[ref_pid])
+        ]
+        if len(dcore) >= 20:
+            donor_fit = _fit_to_reference(donor_ca, cas[ref_pid], dcore, dchains)
+            if donor_fit.get("ok"):
+                R, t = donor_fit.pop("_R"), donor_fit.pop("_t")
+                lig_common = np.asarray(donor_ligand_xyz, dtype=float) @ R + t
+        out["site_donor"] = {
+            "pdb_id": donor_pid,
+            "chains_used": dchains,
+            "n_ligand_atoms": len(donor_ligand_xyz),
+            "n_core_ca_positions": len(dcore),
+            "numbering_alignment": donor_numbering,
+            "fit": ({k: v for k, v in (donor_fit or {}).items()
+                     if not k.startswith("_")} or None),
+            "transferred": lig_common is not None,
+            "transfer_failed_reason": (
+                None if lig_common is not None else
+                (f"only {len(dcore)} core C-alpha positions are shared with the "
+                 f"ensemble reference {ref_pid} and name the same residue "
+                 "(20 needed)")
+                if len(dcore) < 20
+                else (donor_fit or {}).get("reason")
+            ),
+        }
+
+    # ---- density mode ----------------------------------------------------
+    listfile = run / "list.txt"
+    listfile.write_text("\n".join(p.name for p in sup_paths.values()) + "\n")
+    try:
+        proc = _run_mdpocket(["--pdb_list", listfile.name, "-o", "dens"],
+                             run, timeout)
+    except (OSError, subprocess.SubprocessError) as exc:
+        out.update(mdpocket_status="failed",
+                   mdpocket_reason=f"{type(exc).__name__}: {exc}")
+        return out
+    time_txt = run / "time.txt"
+    try:
+        if not time_txt.exists():
+            raise RuntimeError(
+                f"mdpocket wrote no time.txt (exit {proc.returncode}): "
+                f"{proc.stdout.decode(errors='replace')[-400:]}"
+            )
+        n_ran = len([ln for ln in time_txt.read_text().splitlines() if ln.strip()])
+        _assert_frame_count(n_ran, n, "time.txt lines")
+    except RuntimeError as exc:
+        out.update(mdpocket_status="failed", mdpocket_reason=str(exc))
+        return out
+
+    try:
+        freq, counts, origin, spacing = _read_dx(run / "dens_freq.dx")
+    except (OSError, RuntimeError) as exc:
+        out.update(mdpocket_status="failed",
+                   mdpocket_reason=f"frequency grid unreadable: {exc}")
+        return out
+    pts = _dx_points(counts, origin, spacing)
+
+    out["frame_count_check"] = {
+        # THREE NUMBERS, NOT TWO. n_input is what the caller asked for,
+        # n_submitted is what survived OUR superposition refusal, n_processed is
+        # what mdpocket actually ran. The assertion is n_processed == n_submitted
+        # and it is undiminished: a frame we dropped on purpose is recorded in
+        # `frames_dropped`, a frame mdpocket lost on its own still fails here.
+        "n_input_structures": len(prepped),
+        "n_submitted_to_mdpocket": n,
+        "n_processed": n_ran,
+        "n_dropped_by_us_before_submission": len(prepped) - n,
+        "passed": True,
+        "_why": (
+            "mdpocket drops unreadable frames silently and still exits 0, and "
+            "the frequency grid is renormalised over the frames that ran, so a "
+            "dropped structure inflates every frequency in the grid. Our own "
+            "deliberate drops happen BEFORE submission and are listed in "
+            "frames_dropped; they never enter this comparison."
+        ),
+    }
+    out["frequency"] = {
+        "reported": n >= MDPOCKET_MIN_N_FOR_FREQUENCY,
+        "quantum": round(1.0 / n, 4),
+        "min_n_to_report": MDPOCKET_MIN_N_FOR_FREQUENCY,
+        "refusal_reason": (
+            None if n >= MDPOCKET_MIN_N_FOR_FREQUENCY else
+            f"frequency is quantised at 1/N; with N={n} the only attainable "
+            f"values are {{0, {round(1.0 / n, 2)}, ..., 1.0}}, so any "
+            f"fractional occupancy quoted from this ensemble would be reporting "
+            f"the grid resolution and not a measurement. Refusing. "
+            f"n_of_n presence below is exact at any N and is reported."
+        ),
+    }
+
+    # ---- the two site definitions ----------------------------------------
+    sites: dict[str, dict] = {}
+    all_present = freq >= 1.0 - 1e-9
+    if all_present.any():
+        sel_pts = pts[all_present]
+        cluster = _largest_grid_cluster(sel_pts, spacing)
+        if len(cluster):
+            cav = sel_pts[cluster]
+            sel = run / "sel_density.pdb"
+            _write_probe_pdb(cav, sel)
+            entry: dict = {
+                "definition": (
+                    f"largest connected cluster of grid points at which a "
+                    f"pocket is present in ALL {n} structures"
+                ),
+                "n_of_n": n,
+                "centroid": [round(float(x), 2) for x in cav.mean(0)],
+                # NOT the ligand site, by construction. This is the most
+                # persistent cavity, which is a different question. Stated as a
+                # field rather than only in prose so a consumer cannot read the
+                # volume without it.
+                "ligand_anchored": False,
+                "_is_this_the_pocket": (
+                    "NO, not necessarily. This is the most PERSISTENT cavity in "
+                    "the ensemble, which is not automatically the LIGAND's site. "
+                    "On the apo TNF-alpha ensemble its centroid sits 7.73 A from "
+                    "the transferred SPD304 ligand — it is the on-axis cavity, "
+                    "and it is precisely the pocket the retracted residue-number "
+                    "matcher reported as 'the SPD304 site'. Check "
+                    "distance_to_donor_ligand_centroid_a before treating this as "
+                    "the site the dossier is asking about; when a "
+                    "site_from_ligand entry is also present, that one is the "
+                    "ligand site and this one is not."
+                ),
+            }
+            entry.update(
+                _ligand_distance_fields(
+                    cav.mean(0), lig_common, donor_pid, donor_fit
+                )
+            )
+            try:
+                entry.update(
+                    _mdpocket_characterise(run, listfile, sel, "site_density",
+                                           ids, timeout)
+                )
+                sites["site_from_density"] = entry
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                sites["site_from_density"] = {**entry, "error": str(exc)}
+
+    if lig_common is not None:
+        d = np.linalg.norm(pts[:, None, :] - lig_common[None, :, :], axis=-1).min(1)
+        near = pts[d <= MDPOCKET_SITE_CUTOFF_A]
+        if len(near):
+            sel = run / "sel_ligand.pdb"
+            _write_probe_pdb(near, sel)
+            entry = {
+                "definition": (
+                    f"grid points within {MDPOCKET_SITE_CUTOFF_A} A of the "
+                    f"{donor_pid} ligand, transferred by superposition"
+                ),
+                "centroid": [round(float(x), 2) for x in near.mean(0)],
+                # THIS is the site the dossier is asking about. Stated as a
+                # field so the two entries can be told apart programmatically
+                # and not only by their key name.
+                "ligand_anchored": True,
+                "_is_this_the_pocket": (
+                    "YES. These grid points are defined BY the transferred "
+                    "ligand, so this is the ligand site by construction. When "
+                    "a site_from_density entry is also present it is a "
+                    "different pocket unless its "
+                    "distance_to_donor_ligand_centroid_a is small."
+                ),
+                "_zero_is_an_answer": (
+                    "0.00 A^3 in a structure means the site is NOT OPEN in that "
+                    "structure at these exact grid points. That is a refusal, "
+                    "not a failure: on the five apo TNF-alpha entries the "
+                    "SPD304 site returns 0.00 in four of five, which is the "
+                    "correct result — the channel is occluded by the third "
+                    "subunit. Do not read it as a broken run."
+                ),
+            }
+            try:
+                entry.update(
+                    _mdpocket_characterise(run, listfile, sel, "site_ligand",
+                                           ids, timeout)
+                )
+                sites["site_from_ligand"] = entry
+            except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+                sites["site_from_ligand"] = {**entry, "error": str(exc)}
+
+    out["sites"] = sites
+    out["_reproducibility"] = (
+        "fpocket estimates pocket volume by Monte Carlo, and mdpocket inherits "
+        "it: three identical reruns of this exact ensemble gave site_from_density "
+        "volumes of 280.6/276.1/274.6 A^3 on the same structure and CVs of "
+        "12.1/11.3/10.8%. About 1 percentage point of the reported CV is the "
+        "method's own noise. Do not read a CV difference smaller than that as a "
+        "difference between sites."
+    )
+    out["_site_from_density_caveat"] = (
+        "site_from_density is the most PERSISTENT cavity, which is not "
+        "automatically the LIGAND's site. On the apo TNF-alpha ensemble its "
+        "centroid sits ~7.7 A from the transferred SPD304 ligand — it is the "
+        "on-axis cavity, and it is precisely the pocket the residue-number "
+        "matcher used to report as 'the SPD304 site'. Read "
+        "distance_to_donor_ligand_centroid_a before treating the two as one."
+    )
+    if not sites:
+        out.update(
+            mdpocket_status="failed",
+            mdpocket_reason=(
+                "the density run produced no site definition: no grid point is "
+                "occupied in all structures and no ligand was transferable"
+            ),
+        )
+        return out
+    failed = [k for k, v in sites.items() if v.get("error")]
+    out["mdpocket_status"] = "failed" if len(failed) == len(sites) else "ok"
+    if failed:
+        out["mdpocket_reason"] = "; ".join(f"{k}: {sites[k]['error']}" for k in failed)
+    return out
+
+
 @app.function(cpu=4.0, timeout=1800)
 def pocket_scan(
     pdb_ids: list[str],
     chains: dict[str, list[str]] | None = None,
     ligand_codes: list[str] | None = None,
     site_residues: list[int] | None = None,
+    uniprot_accession: str | None = None,
+    partner_structures: list[str] | None = None,
+    mdpocket_site_donor: str | None = None,
+    run_disorder: bool = True,
+    run_cryptic: bool = True,
+    run_mdpocket: bool = True,
 ) -> dict:
     """Scan an ensemble at every clustering value and report the spread.
+
+    ADDED KEYWORD PARAMETERS (the four original positional ones are unchanged):
+
+    uniprot_accession
+        Drives the disorder stage. STRONGLY PREFERRED over the structure-derived
+        fallback: a deposited construct is the ordered part of the protein by
+        selection, so a sequence lifted out of a PDB entry understates disorder.
+        Validation: P01106 (MYC) ~0.83, P24941 (CDK2) ~0.00.
+    partner_structures
+        PDB IDs of complexes containing the BINDING PARTNER, e.g. `["3ALQ"]`
+        for TNF-alpha + TNFR2. Turns "is this pocket orthosteric?" from an
+        assumption into a measurement. Target and partner chains are separated
+        by sequence, not by chain letter.
+    mdpocket_site_donor
+        A holo PDB ID used ONLY to define the site for the mdpocket stage, not
+        added to the ensemble. This is how a pure-apo ensemble gets a
+        ligand-anchored site: `pdb_ids=[5 apo TNF entries],
+        mdpocket_site_donor="2AZ5", ligand_codes=["307"]`. When omitted, a holo
+        structure already inside `pdb_ids` donates the site.
+    run_disorder, run_cryptic, run_mdpocket
+        Switches for the optional stages. Every one of them is non-fatal
+        regardless: each emits `<stage>_status` in {ok, failed, not_run} with a
+        reason, and none of them can kill the fpocket result.
 
     Returns volume with its across-structure spread as the PRIMARY number, and
     druggability only as a range.
@@ -773,11 +3414,85 @@ def pocket_scan(
     work = Path("/tmp/pockets")
     work.mkdir(parents=True, exist_ok=True)
     chains = chains or {}
+    # ONE chemical-component source for the whole run, so a comp_id is looked up
+    # once however many entries carry it. A hard import: if `ligand_filter` is
+    # not in the image, the holo/apo call has no basis at all, and failing
+    # loudly here is the only honest option — a fallback to a size threshold
+    # would reinstate the exact bug it replaces, silently.
+    chemcomp_src = _chemcomp_source()
     results: dict[str, dict] = {}
+    # Carried across the per-structure loop so the four stages after fpocket can
+    # reuse exactly what was scored — same files, same chains, same frame.
+    prepped_by_pid: dict[str, Path] = {}
+    chains_by_pid: dict[str, list[str]] = {}
+    cif_by_pid: dict[str, Path] = {}
+    seqs_by_pid: dict[str, str] = {}
+    vert_by_pid: dict[str, dict[str, Path]] = {}
+    holo_by_pid: dict[str, dict] = {}
     site_signature: set[str] = {str(r) for r in (site_residues or [])}
     signature_source = "caller" if site_signature else None
     signature_donor_homo: dict | None = None
     signature_n_residues_in = len(site_residues or [])
+
+    # ---- an out-of-ensemble holo reference, resolved FIRST -----------------
+    # `mdpocket_site_donor` names a holo structure deliberately NOT measured —
+    # the five apo TNF-alpha entries with 2AZ5 donating the site. It is
+    # resolved before anything else because it serves three stages: it donates
+    # the site SIGNATURE for the fpocket pass below, it is the holo half of the
+    # cryptic comparison, and it defines the mdpocket site. Resolving it late
+    # meant a pure-apo run fell back to "most druggable pocket anywhere" in the
+    # fpocket pass while a perfectly good holo reference sat one argument away.
+    donor: dict | None = None
+    donor_error: str | None = None
+    if mdpocket_site_donor and mdpocket_site_donor not in pdb_ids:
+        try:
+            dcif = _fetch(mdpocket_site_donor, work)
+            dst, _dmiss, _dren = _load(dcif)
+            dprep, dchains = _prep(dst, work, mdpocket_site_donor, None)
+            dligs, _dholo = _ligands(dst, chemcomp_src)
+            dcomp = next(
+                (lig["comp_id"] for lig in dligs
+                 if ligand_codes and lig["comp_id"] in ligand_codes),
+                next((lig["comp_id"] for lig in dligs if lig["druglike"]), None),
+            )
+            if not dcomp:
+                raise RuntimeError(
+                    f"{mdpocket_site_donor} carries no drug-like ligand, so it "
+                    "cannot donate a site"
+                )
+            dsite, dcopy = _ligand_site(dst, dcomp, dchains)
+            dkeep, dcounts = _ligand_contact_chains(dst, dcomp, dcopy)
+            donor = {
+                "pdb_id": mdpocket_site_donor,
+                "cif": dcif,
+                "prepped": dprep,
+                "in_ensemble": False,
+                "comp_id": dcomp,
+                "ligand_chain": dcopy.split("/")[0] if dcopy else None,
+                "ligand_copy": dcopy,
+                "site_chains": dkeep,
+                "site_chain_atom_counts": dcounts,
+                "site_residues": dsite,
+                "homo_oligomer": _homo_oligomer(dst),
+                "ligand_xyz": [
+                    [a.pos.x, a.pos.y, a.pos.z]
+                    for chain in dst[0] for res in chain
+                    if res.het_flag == "H" and res.name == dcomp
+                    and (dcopy is None or
+                         f"{chain.name}/{res.seqid.num}" == dcopy)
+                    for a in res
+                ],
+            }
+        except Exception as exc:  # noqa: BLE001
+            donor_error = (
+                f"site donor {mdpocket_site_donor}: {type(exc).__name__}: {exc}"
+            )
+
+    if not site_signature and donor and donor["site_residues"]:
+        site_signature = {r.split("/")[-1] for r in donor["site_residues"]}
+        signature_source = f"{donor['pdb_id']}:{donor['comp_id']} (site donor)"
+        signature_n_residues_in = len(donor["site_residues"])
+        signature_donor_homo = donor["homo_oligomer"]
 
     # A holo structure anywhere in the ensemble donates its ligand site as the
     # signature for the apo ones, so order the pass holo-first.
@@ -786,7 +3501,7 @@ def pocket_scan(
             try:
                 raw = _fetch(pid, work)
                 st, _chains_avail, _renames = _load(raw)
-                ligs = _ligands(st)
+                ligs, _sholo = _ligands(st, chemcomp_src)
                 dl = [lig for lig in ligs if lig["druglike"]]
                 if not dl:
                     continue
@@ -807,6 +3522,50 @@ def pocket_scan(
             except Exception:  # noqa: BLE001, S112
                 continue
 
+    # ---- WHICH PROTEIN IS THE TARGET, resolved before anything reads a chain
+    # Three separate wrong answers all came from not knowing this: the target
+    # sequence picked by chain length (S1PR1's G-beta-1), the homo-oligomer
+    # guard firing on a partner's homodimer (8G94's CD69 pair, 25 and 27
+    # residues, which disqualified a site that by hand matches the holo pockets
+    # at Jaccard 0.79-0.94), and disorder measured on whichever chain happened
+    # to be longest. The accession is already an input, and every entry declares
+    # its own in `_struct_ref`.
+    target_accession = (uniprot_accession or "").strip() or None
+    accession_basis = "caller" if target_accession else None
+    accession_counts: dict[str, int] = {}
+    accession_by_pid: dict[str, list[str]] = {}
+    for pid in pdb_ids:
+        try:
+            found = _uniprot_from_cif(_fetch_header(pid, work))
+        except Exception:  # noqa: BLE001, S112
+            continue
+        accession_by_pid[pid] = found
+        for a in found:
+            accession_counts[a] = accession_counts.get(a, 0) + 1
+    if not target_accession and accession_counts:
+        # THE ACCESSION PRESENT IN THE MOST ENTRIES. The target is the protein
+        # the ensemble was assembled around, so it appears in every entry;
+        # partners, fusion chaperones and crystallisation scaffolds vary. Taking
+        # the first accession of the first entry would pick whatever the
+        # depositor listed first.
+        top = max(accession_counts.values())
+        winners = [a for a in accession_counts if accession_counts[a] == top]
+        target_accession = winners[0]
+        accession_basis = (
+            f"mmcif:_struct_ref — present in {top} of {len(pdb_ids)} entries"
+            + ("" if len(winners) == 1 else
+               f"; AMBIGUOUS, tied with {', '.join(winners[1:])}, first taken. "
+               "Pass uniprot_accession to disambiguate.")
+        )
+
+    # THE MEASURED COLLAPSE, computed once. This is what decides whether a
+    # residue-number signature can identify a site at all — not how many chains
+    # the donor has. 19 residues -> 11 numbers on a homotrimer is the failure;
+    # 23 -> 23 is not a failure at all. See the basis selection below.
+    signature_collapsed_by = max(
+        0, signature_n_residues_in - len(site_signature)
+    )
+
     for pid in pdb_ids:
         # One unfetchable structure must not lose the whole ensemble, and the
         # reason must survive the trip back: exceptions holding open file
@@ -826,8 +3585,25 @@ def pocket_scan(
                 else None
             )
             prepped, used_chains = _prep(st, work, pid, want)
-            ligs = _ligands(st)
-            homo = _homo_oligomer(st, used_chains)
+            ligs, holo_call = _ligands(st, chemcomp_src)
+            # Target chains by ACCESSION. The homo-oligomer guard asks whether
+            # the SITE SIGNATURE is ambiguous, so a partner's homodimer is not
+            # its business: 8G94's CD69 pair (25 and 27 residues) tripped it and
+            # disqualified an apo structure whose rank-1 pocket matches the holo
+            # pockets at Jaccard 0.79/0.94/0.94.
+            chain_acc = _chain_accessions(_fetch_header(pid, work), renamed)
+            tgt_chains, tgt_basis = _target_chains(
+                chain_acc, target_accession, used_chains
+            )
+            homo = _homo_oligomer(st, tgt_chains)
+        except LigandSourceError:
+            # DELIBERATELY NOT RECORDED AS A PER-STRUCTURE ERROR. Every
+            # structure would carry the same message and the run would return a
+            # full, well-formed, entirely holo-free payload — which is exactly
+            # the silent failure this exception exists to prevent. A
+            # misconfigured chemical-component source is a run-level fault and
+            # must kill the run.
+            raise
         except Exception as exc:  # noqa: BLE001
             results[pid] = {
                 "error": f"{type(exc).__name__}: {exc}",
@@ -877,6 +3653,63 @@ def pocket_scan(
             else ([], None)
         )
         protein_centroid = _centroid(_pdb_coords(prepped))
+
+        # Hand the downstream stages exactly what fpocket was given.
+        prepped_by_pid[pid] = prepped
+        chains_by_pid[pid] = used_chains
+        cif_by_pid[pid] = cif
+        # The TARGET's sequence, not the assembly's longest chain. This feeds
+        # the interface stage's target/partner split and the disorder fallback,
+        # and both were wrong on every S1PR1 entry because G-beta-1 is longer
+        # than the receptor.
+        seq, seq_chain = _one_letter(st, tgt_chains)
+        if seq:
+            seqs_by_pid[pid] = seq
+        target_chain_info = {
+            "target_accession": target_accession,
+            "target_accession_basis": accession_basis,
+            "target_chains": tgt_chains,
+            "target_chains_basis": tgt_basis,
+            "chain_accessions": chain_acc,
+            "non_target_chains_scored": [
+                c for c in used_chains if c not in tgt_chains
+            ],
+            "sequence_chain_used": seq_chain,
+            "_why": (
+                "Everything that used to identify the target by chain LENGTH "
+                "is wrong whenever a partner chain is longer, which on a "
+                "GPCR-G-protein complex is always. Chains here are resolved by "
+                "UniProt accession from the entry's own _struct_ref_seq."
+            ),
+        }
+        if target_comp and true_site:
+            # The ligand's own heavy atoms, for the mdpocket site transfer, plus
+            # the chains that line it — a crystallographic second copy in the
+            # same file must not join the superposition.
+            lig_xyz = [
+                (a.pos.x, a.pos.y, a.pos.z)
+                for chain in st[0] for res in chain
+                if res.het_flag == "H" and res.name == target_comp
+                and (site_copy is None or
+                     f"{chain.name}/{res.seqid.num}" == site_copy)
+                for a in res
+            ]
+            keep_chains, chain_atom_counts = _ligand_contact_chains(
+                st, target_comp, site_copy
+            )
+            holo_by_pid[pid] = {
+                "comp_id": target_comp,
+                "ligand_xyz": [list(x) for x in lig_xyz],
+                # Atom counts, 15% of the top contributor — the same rule
+                # cryptic_analysis uses to reject a chain that merely brushes
+                # the ligand across a crystal contact. See
+                # `_ligand_contact_chains` for why residue counts are wrong.
+                "site_chains": keep_chains,
+                "site_chain_atom_counts": chain_atom_counts,
+                "ligand_chain": site_copy.split("/")[0] if site_copy else None,
+                "ligand_copy": site_copy,
+                "site_residues": true_site,
+            }
 
         per_d = {}
         for d in D_VALUES:
@@ -946,14 +3779,23 @@ def pocket_scan(
                 basis = "site_signature_overlap"
                 if best and not (best.get("signature_overlap") or 0.0):
                     best, basis = None, "no_pocket_matched_site_signature"
-                elif homo["is_homo_oligomer"] or (
-                    signature_donor_homo or {}
-                ).get("is_homo_oligomer"):
-                    # Chain-agnostic numbers cannot resolve a symmetric site.
-                    # Report the match, but never as a same-site basis: the old
-                    # behaviour labelled a pocket 7.7 A off-site
-                    # `site_signature_overlap` on 4 of 5 apo TNF structures and
-                    # a pocket 12.2 A from those on the fifth.
+                elif signature_collapsed_by > 0:
+                    # KEYED ON THE MEASURED COLLAPSE, NOT ON CHAIN COUNT.
+                    # Chain-agnostic numbers cannot resolve a symmetric site —
+                    # but only when the numbers actually collapse. The old test
+                    # fired on donor chain count, so apo structures were flagged
+                    # `site_signature_unreliable_homooligomer` while reporting
+                    # `collapsed_by: 0`: 23 residues in, 23 distinct numbers
+                    # out, nothing ambiguous about the match. An
+                    # over-conservative flag gets ignored, and an ignored flag
+                    # is how a real one gets missed.
+                    #
+                    # The real hazard is unchanged and still caught: 2AZ5's 22
+                    # site residues collapse to 14 numbers across four identical
+                    # chains (collapsed_by 8), and pooling those 10 of 12
+                    # measurements anyway regenerates a fold_range of exactly
+                    # 651.0 — the withdrawn claim reproducing itself from the
+                    # identical defect. The guard is load-bearing where it fires.
                     basis = "site_signature_unreliable_homooligomer"
             else:
                 best = max(
@@ -963,10 +3805,116 @@ def pocket_scan(
                 )
                 basis = "max_druggability_no_ligand_site"
             site_centroid = best.get("centroid") if best else None
+            ranked = sorted(pockets, key=lambda p: p["rank"])
+            # Alpha-sphere centres, for the interface stage. Kept as PATHS, not
+            # as coordinates: a few hundred points per pocket per D per
+            # structure would bloat the payload for a consumer that is a
+            # classification label.
+            #
+            # MORE THAN THE SELECTED POCKET. Rule 2b asks for every detected
+            # pocket to be classified against the interface, and classifying
+            # exactly one made that unsatisfiable. Every pocket is not
+            # affordable — enclosure casts 512 rays per probe point per chain —
+            # so the top ranks plus the selected pocket are classified and the
+            # count that was not is reported.
+            cls_ranks = [p["rank"] for p in ranked[:MAX_POCKETS_CLASSIFIED]]
+            if best and best["rank"] not in cls_ranks:
+                cls_ranks.append(best["rank"])
+            if cls_ranks:
+                vert_by_pid.setdefault(pid, {})[str(d)] = {
+                    "site_rank": best["rank"] if best else None,
+                    "n_pockets": len(pockets),
+                    "verts": {
+                        r: out_dir / "pockets" / f"pocket{r}_vert.pqr"
+                        for r in sorted(cls_ranks)
+                    },
+                    "apolar_by_rank": {
+                        p["rank"]: p.get("apolar_lining_fraction")
+                        for p in ranked
+                    },
+                }
+            # ---- EVERY POCKET, not only the selected one -------------------
+            # The module used to return one pocket per structure, which makes
+            # the dossier's rule 2b ("classify every detected pocket")
+            # unsatisfiable from this output: the IRAK4 run had to re-run
+            # fpocket locally to see the other 133, and reproduced these counts
+            # exactly, so the data existed here and was being discarded. Worse
+            # than lost data — on TL1A, 2RE9 reported `n_pockets: 31` while
+            # carrying only rank 28, so the agent could not tell whether the
+            # axial cavity was ABSENT in that structure or merely UNSELECTED,
+            # and could honestly report neither a persistence nor a zero.
+            #
+            # Payload is bounded by rank, and WHAT WAS DROPPED IS STATED. Silent
+            # truncation reads as completeness, which is the same failure in a
+            # new place.
+            keep_ranks = {p["rank"] for p in ranked[:MAX_POCKETS_RETURNED]}
+            if best:
+                keep_ranks.add(best["rank"])
+            returned = [dict(p) for p in ranked if p["rank"] in keep_ranks]
+            for p in returned:
+                p["is_site_pocket"] = bool(best and p["rank"] == best["rank"])
+            omitted = [p for p in ranked if p["rank"] not in keep_ranks]
             per_d[str(d)] = {
                 "n_pockets": len(pockets),
+                "pockets": returned,
+                "pockets_returned": len(returned),
+                "pockets_omitted": len(omitted),
+                "pockets_omitted_note": (
+                    None if not omitted else
+                    f"{len(omitted)} of {len(pockets)} detected pockets are not "
+                    f"in `pockets` above. They are fpocket ranks "
+                    f"{min(p['rank'] for p in omitted)}-"
+                    f"{max(p['rank'] for p in omitted)}, i.e. everything below "
+                    f"rank {MAX_POCKETS_RETURNED} that is not the selected site "
+                    "pocket. THEY WERE DETECTED, NOT ABSENT — a pocket missing "
+                    "from this list is not evidence that it does not exist. "
+                    "The summary below bounds what is in them."
+                ),
+                "pockets_omitted_summary": (
+                    None if not omitted else {
+                        "n": len(omitted),
+                        "rank_range": [min(p["rank"] for p in omitted),
+                                       max(p["rank"] for p in omitted)],
+                        "max_volume_a3": round(
+                            max((p.get("volume") or 0.0) for p in omitted), 2),
+                        "max_druggability_score": round(
+                            max((p.get("druggability_score") or 0.0)
+                                for p in omitted), 3),
+                        "max_jaccard_vs_ligand_site": max(
+                            (p.get("jaccard_vs_ligand_site") or 0.0)
+                            for p in omitted),
+                        "max_signature_overlap": max(
+                            (p.get("signature_overlap") or 0.0)
+                            for p in omitted),
+                        "_why": (
+                            "so a reader can see that nothing large, nothing "
+                            "druggable and nothing overlapping the site was "
+                            "hidden by the truncation, without having to trust "
+                            "that claim."
+                        ),
+                    }
+                ),
+                "max_pockets_returned": MAX_POCKETS_RETURNED,
                 "site_pocket": best,
                 "site_pocket_selected_by": basis,
+                # The number behind the basis in defect 7's sense: whether the
+                # residue-number signature could identify a site AT ALL, stated
+                # per measurement rather than only once at ensemble level.
+                "site_signature_collapsed_by": signature_collapsed_by,
+                # THE VALUE BEHIND THE BASIS, promoted out of `site_pocket`.
+                # It was being computed, used to make the selection, and then
+                # left buried one level down inside the pocket dict, where the
+                # dossier's `tractability.ligand_site_jaccard` never found it —
+                # the measurement was made and thrown away. A basis without its
+                # number is not checkable: "selected by ligand_site_jaccard" is
+                # equally true at 0.74 and at 0.02, and those are not the same
+                # claim about whether the pocket is the site.
+                "site_pocket_ligand_site_jaccard": (
+                    best.get("jaccard_vs_ligand_site") if best else None
+                ),
+                "site_pocket_signature_overlap": (
+                    best.get("signature_overlap") if best else None
+                ),
                 "merge_suspected": bool(
                     best and best.get("volume", 0) > 1000
                 ),
@@ -998,14 +3946,36 @@ def pocket_scan(
             "missing_residues": missing_res,
             "ligands": ligs,
             "cofactors_present": cofactors,
-            "tier": "holo" if druglike else "apo",
-            "tier_note": (
-                "no drug-like ligand (>=18 heavy atoms, endogenous cofactors "
-                "excluded by identity)"
-                + (f"; cofactors present: {', '.join(cofactors)}" if cofactors else "")
-                if not druglike else
-                f"drug-like ligand {target_comp or druglike[0]['comp_id']}"
+            # THREE TIERS, NOT TWO. `undetermined` is not `apo`. When a
+            # component could not be classified — because its record could not
+            # be retrieved, not because the chemistry was unrecognised — this
+            # entry's state is unknown, and calling it apo would be the same
+            # class of error as reporting a credential failure as "no data".
+            "tier": (
+                "holo" if druglike
+                else "apo" if holo_call.get("determined", True)
+                else "undetermined"
             ),
+            "tier_note": (
+                f"drug-like ligand {target_comp or druglike[0]['comp_id']}"
+                if druglike else
+                "HOLO/APO UNDETERMINED: the chemical-component lookup failed "
+                f"for {', '.join(holo_call.get('undetermined') or [])}. This is "
+                "a lookup failure, not an absence of ligand, and this entry "
+                "must not be counted as apo."
+                if not holo_call.get("determined", True) else
+                "no drug-like ligand (classified by chemistry, "
+                "ligand_filter.classify_record — not by a size floor or a "
+                "comp_id list)"
+                + (f"; cofactors present: {', '.join(cofactors)}"
+                   if cofactors else "")
+                + (f"; other components: "
+                   f"{', '.join(k for k in (holo_call.get('by_verdict') or {}) if k not in ('druglike', 'cofactor'))}"
+                   if holo_call.get("by_verdict") else "")
+            ),
+            # The full entry-level call with every rejected component and the
+            # reason it was rejected, so "apo" is checkable rather than asserted.
+            "holo_call": holo_call,
             "ligand_site_residues": true_site,
             "ligand_site_copy": site_copy,
             # What actually anchored the site, and whether the caller chose it.
@@ -1016,7 +3986,10 @@ def pocket_scan(
             "site_anchor_available_druglike": [
                 lig["comp_id"] for lig in druglike
             ],
+            # Measured over the TARGET's chains only. A partner's homodimer is
+            # not evidence that the target's site signature is ambiguous.
             "homo_oligomer": homo,
+            "target_chains": target_chain_info,
             "protein_centroid": protein_centroid,
             "site_pocket_centroids": {
                 k: v["site_pocket_centroid"] for k, v in per_d.items()
@@ -1048,8 +4021,436 @@ def pocket_scan(
             # the chain IDs in every residue list above are ours, not RCSB's.
             results[pid]["chain_renamed_from_cif"] = renamed
 
+    # ---- holo reference from INSIDE the ensemble, if none came from outside
+    if donor is None:
+        pid0 = (
+            mdpocket_site_donor
+            if mdpocket_site_donor in holo_by_pid
+            else next((p for p in pdb_ids if p in holo_by_pid), None)
+        )
+        if pid0:
+            donor = {
+                "pdb_id": pid0, "cif": cif_by_pid[pid0],
+                "prepped": prepped_by_pid[pid0], "in_ensemble": True,
+                **holo_by_pid[pid0],
+            }
+
+    # =======================================================================
+    # STAGE 2 — DISORDER. Non-fatal; never 0.0 on failure.
+    # =======================================================================
+    disorder_out: dict = {
+        "disorder_status": "not_run",
+        "disorder_reason": "run_disorder=False",
+        "disorder_fraction": None,
+    }
+    if run_disorder:
+        # THE FULL-LENGTH PATH IS THE DEFAULT WHEREVER AN ACCESSION EXISTS, and
+        # one usually does exist without the caller supplying it: every
+        # deposited entry declares its UniProt accession in `_struct_ref`. The
+        # old code only looked at the argument, so an omitted argument silently
+        # switched the measurement onto the crystallised construct — a
+        # different molecule — and IRAK4 came back 0.0 over 284 residues
+        # against a true 0.1413 over 460.
+        acc, acc_src = target_accession, accession_basis
+        acc_candidates = accession_by_pid
+        seq = seq_src = None
+        if acc:
+            seq_src = f"uniprot:{acc}"
+        else:
+            for pid in pdb_ids:
+                if pid in seqs_by_pid:
+                    seq, seq_src = seqs_by_pid[pid], f"structure:{pid}"
+                    break
+        disorder_out = _disorder_block(acc, seq, seq_src, acc_src)
+        disorder_out["accession_candidates_by_structure"] = acc_candidates
+        if len({a for v in acc_candidates.values() for a in v}) > 1:
+            # A complex, a chimera or a fusion construct. Report it rather than
+            # letting the first entry's accession stand in for the target.
+            disorder_out["_accession_ambiguity"] = (
+                "the ensemble's entries declare more than one UniProt "
+                "accession; the first was used. If the target is not that one, "
+                "pass uniprot_accession explicitly."
+            )
+
+    # =======================================================================
+    # STAGE 3 — CRYPTIC MECHANISM. Needs BOTH an apo and a holo in the run.
+    # =======================================================================
+    cryptic_out: dict = {
+        "cryptic_status": "not_run",
+        "cryptic_reason": "run_cryptic=False",
+    }
+    if run_cryptic:
+        apo_ids = [
+            p for p in pdb_ids
+            if p in prepped_by_pid and results.get(p, {}).get("tier") == "apo"
+        ]
+        if donor is None or not apo_ids:
+            cryptic_out["cryptic_reason"] = (
+                f"needs both an apo and a holo structure; got "
+                f"{0 if donor is None else 1} holo reference and "
+                f"{len(apo_ids)} apo. This comparison is a PAIRWISE measurement "
+                "— there is nothing to superpose against with only one state. "
+                "A holo entry outside the ensemble can be supplied as "
+                "mdpocket_site_donor."
+                + (f" {donor_error}" if donor_error else "")
+            )
+        else:
+            holo_pid = donor["pdb_id"]
+            info = donor
+            per_apo: dict[str, dict] = {}
+            for apo_pid in apo_ids:
+                per_apo[apo_pid] = _cryptic_block(
+                    cif_by_pid[apo_pid], donor["cif"], info["comp_id"],
+                    apo_pid, holo_pid,
+                    chains_by_pid.get(apo_pid), info.get("ligand_chain"),
+                )
+                # Per-target as well as per-pair: a reader looking at one apo
+                # structure must not have to find the pairwise block.
+                results[apo_pid]["cryptic"] = {
+                    k: per_apo[apo_pid].get(k) for k in (
+                        "cryptic_status", "cryptic_reason", "mechanism",
+                        "is_cryptic", "max_backbone_ca_displacement_a",
+                        "clash_attribution", "cryptic_potency_prior",
+                        "holo_pdb_id", "ligand_comp_id",
+                    )
+                }
+            ok_items = [
+                (k, v) for k, v in per_apo.items()
+                if v["cryptic_status"] == "ok"
+            ]
+            rejected = [
+                {"pdb_id": k, "reason": v.get("cryptic_reason"),
+                 "core_ca_rmsd_a": (v.get("superposition_gate") or {}).get(
+                     "core_ca_rmsd_a")}
+                for k, v in per_apo.items() if v["cryptic_status"] != "ok"
+            ]
+            # EVERY DERIVED NUMBER COMES FROM ONE STRUCTURE, and it is named.
+            # The old block took `mechanism` and `is_cryptic` from ok[0] but
+            # `max_backbone_ca_displacement_a` from a max over all of ok, so on a
+            # disagreeing ensemble the label and the displacement described
+            # different structures. Measured on NLRP3: the block reported
+            # is_cryptic false / mechanism none (from 7ZGU) beside
+            # max_backbone_ca_displacement_a 21.6 (from the rejected 8SWF).
+            # Those cannot both be true, and whatever drops a structure from the
+            # call must drop it from every statistic derived from it.
+            #
+            # The representative is the apo entry with the BEST superposition,
+            # because that is the comparison least likely to be measuring the
+            # frame rather than the site.
+            rep_pid, rep = (
+                min(
+                    ok_items,
+                    key=lambda kv: (
+                        (kv[1].get("superposition_gate") or {}).get(
+                            "core_ca_rmsd_a") or 0.0
+                    ),
+                )
+                if ok_items else (None, {})
+            )
+            mechs = sorted({v.get("mechanism") for _k, v in ok_items
+                            if v.get("mechanism")})
+            cryptic_out = {
+                "cryptic_status": "ok" if ok_items else "failed",
+                "cryptic_reason": (
+                    None if ok_items else
+                    "; ".join(f"{k}: {v['cryptic_reason']}"
+                              for k, v in per_apo.items())
+                ),
+                "holo_pdb_id": holo_pid,
+                "holo_in_ensemble": donor["in_ensemble"],
+                "ligand_comp_id": info["comp_id"],
+                "per_apo_structure": per_apo,
+                # The ensemble-level call: the dossier asks one question about
+                # the target, and every field below describes ONE structure.
+                "representative_apo_pdb_id": rep_pid,
+                "representative_selected_by": (
+                    "lowest core C-alpha RMSD among apo entries that passed the "
+                    "superposition gate; all headline numbers below come from "
+                    "this one structure so they cannot contradict each other"
+                ),
+                "representative_core_ca_rmsd_a": (
+                    (rep.get("superposition_gate") or {}).get("core_ca_rmsd_a")
+                ),
+                "mechanism": rep.get("mechanism") if ok_items else None,
+                "is_cryptic": rep.get("is_cryptic") if ok_items else None,
+                "max_backbone_ca_displacement_a": (
+                    rep.get("max_backbone_ca_displacement_a")
+                    if ok_items else None
+                ),
+                "cryptic_potency_prior": (
+                    rep.get("cryptic_potency_prior") if ok_items else None
+                ),
+                "displacement_by_apo_structure": {
+                    k: v.get("max_backbone_ca_displacement_a")
+                    for k, v in ok_items
+                },
+                "apo_structures_rejected": rejected,
+                "_rejected_note": (
+                    None if not rejected else
+                    "These apo entries did not superpose onto the holo "
+                    "reference and contribute NOTHING to any field above — not "
+                    "the mechanism, not the displacement, not the census. A "
+                    "rejected structure's displacement used to survive into the "
+                    "aggregate while its mechanism did not."
+                ),
+                "mechanisms_across_apo": mechs,
+                "mechanisms_agree": (len(mechs) <= 1) if ok_items else None,
+                "_disagreement_note": (
+                    None if len(mechs) <= 1 else
+                    f"the apo entries disagree ({', '.join(mechs)}). The "
+                    "headline mechanism is the best-superposed one and the rest "
+                    "are in per_apo_structure. Do not average them, and do not "
+                    "quote the headline without saying which structure it is."
+                ),
+                # DERIVED FROM THE INPUT, NOT HARDCODED. This note used to say
+                # "With one apo entry this cannot be applied" unconditionally.
+                # On a run with TWO apo entries (IRAK4: 2OIB and 2O8Y) it said
+                # so anyway, contradicting the very census printed beside it.
+                # A caveat that does not track its own data is worse than no
+                # caveat, because it looks like it was checked.
+                "n_apo_examined": len(apo_ids),
+                "apo_examined": list(apo_ids),
+                "n_apo_ok": len(ok_items),
+                "_vajda_note": (
+                    "Vajda's stringent definition requires the pocket to be "
+                    "absent in ALL or nearly all unbound structures. "
+                    + (
+                        f"This run examined {len(apo_ids)} apo entr"
+                        f"{'y' if len(apo_ids) == 1 else 'ies'} "
+                        f"({', '.join(apo_ids)})"
+                    )
+                    + (
+                        ", which is one structure — the definition cannot be "
+                        "applied and the label below is a PAIRWISE RMSD result "
+                        "only, not a cryptic call in Vajda's sense."
+                        if len(apo_ids) < 2 else
+                        f", of which {len(ok_items)} produced an interpretable "
+                        "comparison. The definition can be applied to the "
+                        "extent that this ensemble represents the unbound "
+                        "states: read n_apo_examined as the denominator and "
+                        "mechanisms_across_apo for whether they agree. A site "
+                        "absent from some but not nearly all of them is "
+                        "low-scoring, not cryptic."
+                    )
+                    + " Note the TNF-alpha case: ~1.6 A displacement (this "
+                    "default protocol measures ~1.55-1.58 A; 1.62 A is the "
+                    "hand-calibration figure and is NOT what this run "
+                    "produces), site recovered in all five apo structures once "
+                    "the third subunit is removed — occluded, NOT cryptic."
+                ),
+            }
+
+    # =======================================================================
+    # STAGE 4 — INTERFACE. Needs a structure containing the binding partner.
+    # =======================================================================
+    interface_out: dict = {
+        "interface_status": "not_run",
+        "interface_reason": (
+            "no partner_structures supplied; without a complex containing the "
+            "partner, orthosteric/allosteric is an assumption and this module "
+            "refuses to assert it"
+        ),
+        "classification": "no_partner_structure",
+    }
+    if partner_structures:
+        partner_cifs: dict[str, Path] = {}
+        fetch_errors: dict[str, str] = {}
+        for pid in partner_structures:
+            try:
+                partner_cifs[pid] = _fetch(pid, work)
+            except Exception as exc:  # noqa: BLE001
+                fetch_errors[pid] = f"{type(exc).__name__}: {exc}"
+        interface_out = _interface_block(
+            partner_cifs, [seqs_by_pid[p] for p in pdb_ids if p in seqs_by_pid]
+        )
+        if fetch_errors:
+            interface_out["fetch_errors"] = fetch_errors
+        interface_out.setdefault("classification", "no_partner_structure")
+        epitope = interface_out.pop("_epitope", None)
+        partner_resnames = interface_out.pop("_partner_resnames", None)
+        per_struct: dict[str, dict] = {}
+        per_struct_by_rank: dict[str, dict] = {}
+        if epitope:
+            for pid, byd in vert_by_pid.items():
+                for dkey, spec in byd.items():
+                    site_rank = spec.get("site_rank")
+                    apolar = spec.get("apolar_by_rank") or {}
+                    by_rank: dict[str, dict] = {}
+                    for rank, vert in sorted(spec.get("verts", {}).items()):
+                        try:
+                            cls = _classify_site_pocket(
+                                prepped_by_pid[pid], chains_by_pid.get(pid, []),
+                                vert, epitope, partner_resnames,
+                                apolar.get(rank),
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            cls = {"error": f"{type(exc).__name__}: {exc}"}
+                        cls["fpocket_rank"] = rank
+                        cls["is_site_pocket"] = rank == site_rank
+                        by_rank[str(rank)] = cls
+                    # The selected site pocket stays the headline, so an
+                    # existing consumer reads the same field it always did.
+                    cls = by_rank.get(str(site_rank)) or (
+                        next(iter(by_rank.values())) if by_rank else {}
+                    )
+                    per_struct.setdefault(pid, {})[dkey] = cls
+                    # Kept OUT of per_struct: the consensus aggregation below
+                    # iterates per_struct[pid].values() and expects every entry
+                    # to be one classification.
+                    per_struct_by_rank.setdefault(pid, {})[dkey] = by_rank
+                    results[pid].setdefault("pocket_vs_interface", {})[dkey] = {
+                        "classification": cls.get(
+                            "classification", "no_partner_structure"),
+                        "pocket_interface_overlap": cls.get("overlap_fraction"),
+                        "enclosure": cls.get("enclosure"),
+                        "subunit_enclosure_gain": cls.get(
+                            "subunit_enclosure_gain"),
+                        "min_distance_to_interface_a": cls.get(
+                            "min_distance_to_interface_a"),
+                        "adjacent_to_interface": cls.get("adjacent_to_interface"),
+                        "also_overlaps_interface": cls.get(
+                            "also_overlaps_interface"),
+                        "partner_pdb_id": interface_out.get("partner_pdb_id"),
+                        "error": cls.get("error"),
+                        # Is the seqid match between these two entries legal at
+                        # all? Without this the overlap is silently wrong
+                        # wherever the numbering conventions differ.
+                        "numbering_check": cls.get("numbering_check"),
+                        "overlap_unreliable_numbering_mismatch": cls.get(
+                            "overlap_unreliable_numbering_mismatch"),
+                        # Is this a binding site or the hydrophobic core of a
+                        # domain? Geometry only; flag, never filter.
+                        "buried_core_suspected": cls.get("buried_core_suspected"),
+                        "buried_core_reason": cls.get("buried_core_reason"),
+                        # THE CLASSIFICATION IS ONLY AS GOOD AS THE POCKET IT
+                        # WAS HANDED. This classifies whichever pocket
+                        # `site_pocket_selected_by` chose, so on an apo
+                        # homo-oligomer it is classifying the pocket the
+                        # residue-number matcher landed on — which on apo
+                        # TNF-alpha is 7.7 A off-site. Echoed here so the label
+                        # can never be read without its basis.
+                        "classified_pocket_selected_by": (
+                            results[pid]["by_clustering"][dkey]
+                            ["site_pocket_selected_by"]
+                        ),
+                        # Rule 2b asks for EVERY pocket. This is every pocket
+                        # that could be afforded, with the shortfall stated.
+                        "by_fpocket_rank": by_rank,
+                        "n_pockets_classified": len(by_rank),
+                        "n_pockets_detected": spec.get("n_pockets"),
+                        "n_pockets_not_classified": max(
+                            0, (spec.get("n_pockets") or 0) - len(by_rank)),
+                        "not_classified_note": (
+                            None
+                            if (spec.get("n_pockets") or 0) <= len(by_rank)
+                            else (
+                                f"{(spec.get('n_pockets') or 0) - len(by_rank)} "
+                                "detected pockets were not classified: enclosure "
+                                "casts 512 rays per probe point per chain and "
+                                f"only the top {MAX_POCKETS_CLASSIFIED} ranks "
+                                "plus the selected site pocket are affordable. "
+                                "They are still listed with their residues in "
+                                "by_clustering.<D>.pockets, so the "
+                                "interface-overlap half of rule 2b can be "
+                                "computed from interface_residues without "
+                                "re-running fpocket."
+                            )
+                        ),
+                    }
+            interface_out["per_structure"] = per_struct
+            interface_out["per_structure_by_fpocket_rank"] = per_struct_by_rank
+            # AGGREGATE, NEVER FIRST-WINS. Two symmetry copies of one ligand in
+            # one structure can land either side of the overlap boundary:
+            # measured on 8DYG ligand U5Q, copy A classified
+            # allosteric_candidate at overlap 0.22 and copy B
+            # orthosteric_candidate at 0.36, both flagged borderline. A caller
+            # that takes whichever came first is tossing a coin between two
+            # different mechanistic claims. So the label a caller may quote is
+            # the consensus over every classification made, and a disagreement
+            # is reported AS a disagreement rather than resolved.
+            per_structure_label: dict[str, dict] = {}
+            for pid_, byd in per_struct.items():
+                labs = sorted({
+                    c.get("classification") for c in byd.values()
+                    if c.get("classification")
+                })
+                per_structure_label[pid_] = {
+                    "classifications_seen": labs,
+                    "consensus": (
+                        labs[0] if len(labs) == 1
+                        else ("mixed" if labs else "no_pocket_to_classify")
+                    ),
+                    "overlap_by_clustering": {
+                        k: c.get("pocket_interface_overlap")
+                        for k, c in byd.items()
+                    },
+                }
+                results[pid_]["pocket_vs_interface_consensus"] = (
+                    per_structure_label[pid_]
+                )
+            interface_out["per_structure_consensus"] = per_structure_label
+            labels = sorted({
+                c.get("classification") for byd in per_struct.values()
+                for c in byd.values() if c.get("classification")
+            })
+            interface_out["classifications_seen"] = labels
+            interface_out["_aggregation_rule"] = (
+                "`classification` here is the CONSENSUS over every pocket "
+                "classified in this run, and it is 'mixed' whenever they "
+                "disagree. Quote it, or quote per_structure_consensus — never "
+                "reach into per_structure and take the first entry. Measured on "
+                "8DYG (ligand U5Q): the two symmetry copies gave "
+                "allosteric_candidate at overlap 0.22 and orthosteric_candidate "
+                "at 0.36, both borderline against the 0.25 boundary. 'mixed' is "
+                "the honest answer there and must not be collapsed to one "
+                "label; report it as mixed and say the pocket sits on the "
+                "boundary."
+            )
+            interface_out["classification"] = labels[0] if len(labels) == 1 else (
+                "mixed" if labels else "no_pocket_to_classify"
+            )
+            interface_out["_note"] = (
+                "destabiliser_candidate is tested FIRST and does not need the "
+                "partner at all — burial inside the oligomer is measurable on "
+                "the oligomer alone. So a destabiliser call plus an interface "
+                "overlap of 0.00, which is what TNF-alpha's SPD304 site gives "
+                "against the TNFR2 epitope of 3ALQ, means the pocket is inside "
+                "the trimer and nowhere near the receptor epitope. Blocking "
+                "TNF/TNFR is not the mechanism; displacing a subunit is."
+            )
+    interface_out.pop("_epitope", None)
+    interface_out.pop("_partner_resnames", None)
+
+    # =======================================================================
+    # STAGE 5 — MDPOCKET. The site fixed by construction.
+    # =======================================================================
+    mdpocket_out: dict = {
+        "mdpocket_status": "not_run",
+        "mdpocket_reason": "run_mdpocket=False",
+    }
+    if run_mdpocket:
+        try:
+            mdpocket_out = _mdpocket_ensemble(
+                work,
+                {p: prepped_by_pid[p] for p in pdb_ids if p in prepped_by_pid},
+                donor["pdb_id"] if donor else None,
+                donor["prepped"] if donor else None,
+                donor["ligand_xyz"] if donor else None,
+                donor["site_chains"] if donor else None,
+            )
+            if donor_error:
+                mdpocket_out["site_donor_error"] = donor_error
+        except Exception as exc:  # noqa: BLE001
+            # Belt and braces. _mdpocket_ensemble reports its own failures as
+            # data; anything that escapes it still must not cost the run.
+            mdpocket_out = {
+                "mdpocket_status": "failed",
+                "mdpocket_reason": f"{type(exc).__name__}: {exc}",
+            }
+
     # Ensemble spread — volume is the reproducible quantity, druggability is not.
     vols, drugs = [], []
+    jaccards: dict[str, float] = {}
     n_ligand_confirmed, n_pooled, n_signature_unreliable = 0, 0, 0
     prank_status_counts: dict[str, int] = {}
     # {clustering value: [(pdb_id, centroid, radius), ...]}
@@ -1067,6 +4468,8 @@ def pocket_scan(
                         d.get("site_pocket_radius_from_protein_center_a"),
                     )
                 )
+            if d.get("site_pocket_ligand_site_jaccard") is not None:
+                jaccards[f"{pid}@D{dkey}"] = d["site_pocket_ligand_site_jaccard"]
             sp = d["site_pocket"]
             if sp:
                 n_pooled += 1
@@ -1087,33 +4490,68 @@ def pocket_scan(
     # will say so. A large maximum pairwise distance means the "same site" is
     # not the same site, and the pooled spread above is pooling different
     # pockets.
+    # `max_pairwise_centroid_distance_a` IS GONE, DELIBERATELY. It compared
+    # pocket centroids across structures that this module does not superpose, so
+    # it was the sum of a real site displacement and the two entries' arbitrary
+    # rigid-body offsets — the IRAK4 run reported 103.9 A, which is not a
+    # measurement of anything. It was presented as THE CONTROL, which made it
+    # worse than a stray number.
+    #
+    # This is not a hypothetical class of error for this project: comparing
+    # pockets across structures without a common frame is exactly what produced
+    # the 7.7 A off-site tracking that retracted the 651-fold claim. Documenting
+    # the caveat beside the number was already tried and the number was quoted
+    # anyway. `max_radius_difference_a` — each pocket's distance from its own
+    # structure's protein centre — measures the same thing, is frame-invariant,
+    # and already existed. It is the control.
     centroid_by_d: dict[str, dict] = {}
-    all_max: list[float] = []
+    all_radius_diff: list[float] = []
     for dkey, entries in sorted(centroids.items()):
-        worst_pair, worst = None, None
-        for a, b in _pairs(entries):
-            dist = _distance(a[1], b[1])
-            if dist is not None and (worst is None or dist > worst):
-                worst, worst_pair = dist, [a[0], b[0]]
         radii = [e[2] for e in entries if e[2] is not None]
+        diff = round(max(radii) - min(radii), 2) if len(radii) > 1 else None
         centroid_by_d[dkey] = {
             "n_structures_with_site_pocket": len(entries),
-            "max_pairwise_centroid_distance_a": worst,
-            "max_pairwise_pdb_ids": worst_pair,
-            "centroids": {e[0]: e[1] for e in entries},
             # Frame-independent: same quantity measured from each structure's
             # own centre, so it survives the fact that two PDB entries are not
-            # deposited in a common coordinate frame.
+            # deposited in a common coordinate frame. THIS IS THE CONTROL.
             "radius_from_protein_center_a": {e[0]: e[2] for e in entries},
-            "max_radius_difference_a": (
-                round(max(radii) - min(radii), 2) if len(radii) > 1 else None
+            "max_radius_difference_a": diff,
+            # Raw centroids are kept as INPUTS, under a name that says which
+            # frame they are in. Do not difference them across entries.
+            "centroids_in_own_deposited_frame": {e[0]: e[1] for e in entries},
+            "_centroids_frame_warning": (
+                "These are in each entry's OWN deposited frame. A difference "
+                "between two of them is not a distance between two pockets; it "
+                "also contains the two crystals' rigid-body offset. Note also "
+                "that a centroid of exactly x=y=z is not an artifact: it is an "
+                "on-axis pocket in an assembly whose 3-fold runs along the body "
+                "diagonal — 2QE3's assembly operators are literally x,y,z / "
+                "z,x,y / y,z,x, so any C3-symmetric cavity has equal "
+                "coordinates and zero spread across clustering values. That is "
+                "the crystal frame showing through, and it is the same reason "
+                "cross-entry centroid distances are meaningless."
             ),
         }
-        if worst is not None:
-            all_max.append(worst)
+        if diff is not None:
+            all_radius_diff.append(diff)
 
     return {
         "structures": results,
+        # The four stages after fpocket, each independently reported. A caller
+        # must be able to tell "this did not run" from "this ran and found
+        # nothing" from "this died", which is why every one of them carries its
+        # own status and reason rather than an absent key.
+        "disorder": disorder_out,
+        "cryptic": cryptic_out,
+        "pocket_vs_interface": interface_out,
+        "mdpocket": mdpocket_out,
+        "stage_status": {
+            "prank": None,  # per structure per D; see prank_status_counts
+            "disorder": disorder_out.get("disorder_status"),
+            "cryptic": cryptic_out.get("cryptic_status"),
+            "interface": interface_out.get("interface_status"),
+            "mdpocket": mdpocket_out.get("mdpocket_status"),
+        },
         "ensemble": {
             "n_structures": len(pdb_ids),
             "clustering_swept": list(D_VALUES),
@@ -1121,6 +4559,21 @@ def pocket_scan(
             "site_pockets_pooled": n_pooled,
             "site_pockets_ligand_confirmed": n_ligand_confirmed,
             "site_pockets_signature_unreliable_homooligomer": n_signature_unreliable,
+            # The jaccard VALUES, not just the count of structures selected by
+            # them. `tractability.ligand_site_jaccard` in the dossier had no
+            # source to read: the number was computed per pocket, used to pick
+            # the site pocket, and then never surfaced above the individual
+            # pocket dict. A basis is not evidence without its value.
+            "ligand_site_jaccard_by_structure": jaccards,
+            "ligand_site_jaccard": (
+                {
+                    "min": min(jaccards.values()),
+                    "max": max(jaccards.values()),
+                    "n": len(jaccards),
+                }
+                if jaccards
+                else None
+            ),
             "site_signature": {
                 "source": signature_source,
                 "n_residues_in": signature_n_residues_in,
@@ -1146,8 +4599,9 @@ def pocket_scan(
             },
             "prank_status_counts": prank_status_counts,
             "site_centroid_control": {
-                "max_pairwise_centroid_distance_a": (
-                    max(all_max) if all_max else None
+                # THE CONTROL IS max_radius_difference_a AND NOTHING ELSE HERE.
+                "max_radius_difference_a": (
+                    max(all_radius_diff) if all_radius_diff else None
                 ),
                 "per_clustering": centroid_by_d,
                 "_note": (
@@ -1156,18 +4610,24 @@ def pocket_scan(
                     "apart and an overlap fraction will not tell you. A large "
                     "value here means the 'same site' across the ensemble is "
                     "not the same site and the pooled spread below is pooling "
-                    "different pockets."
+                    "different pockets. The quantity is each pocket's distance "
+                    "from its OWN structure's protein centre, differenced "
+                    "across structures — frame-invariant, so it survives the "
+                    "fact that two PDB entries are not deposited in a common "
+                    "coordinate frame."
                 ),
-                "_frame_caveat": (
-                    "Centroids are in each entry's OWN deposited coordinate "
-                    "frame; this module does not superpose. Across different "
-                    "PDB entries the raw pairwise distance therefore also "
-                    "contains their rigid-body offset and is an UPPER bound, "
-                    "not a site displacement. Within one entry across "
-                    "clustering values it is exact. Use "
-                    "max_radius_difference_a — distance from each structure's "
-                    "own protein centre — as the frame-independent check, and "
-                    "superpose before quoting a cross-entry displacement."
+                "_removed_max_pairwise_centroid_distance_a": (
+                    "REMOVED, and deliberately not replaced by a null. It "
+                    "differenced pocket centroids across structures this module "
+                    "does not superpose, so it was a real site displacement "
+                    "plus two arbitrary rigid-body offsets — an IRAK4 run "
+                    "reported 103.9 A, which is not a measurement of anything, "
+                    "under the heading of a control. Comparing pockets across "
+                    "structures without a common frame is the exact error that "
+                    "retracted this project's 651-fold claim, and a caveat "
+                    "printed beside the number did not stop it being quoted. "
+                    "Use max_radius_difference_a, or superpose first (the "
+                    "mdpocket block does) and quote from there."
                 ),
             },
             "_pooling_caveat": (
@@ -1178,6 +4638,26 @@ def pocket_scan(
                 "the site the holo structures point at. Check "
                 "site_pocket_selected_by per structure before quoting a "
                 "spread as being about one site."
+            ),
+            "_pooling_caveat_2_trustworthy_basis_is_not_enough": (
+                "site_pocket_selected_by == 'ligand_site_jaccard' is a "
+                "PER-STRUCTURE guarantee and it does NOT make pooling across "
+                "structures safe. Measured on IL-17A: three structures all "
+                "selected by ligand_site_jaccard were nonetheless not one site "
+                "— 9SQX spans residues 85-142 across both chains, 8DYG spans "
+                "A/107-148 plus B/68-104 (a different location), and 8USS is a "
+                "MONOMER assembly in which the groove is only half present, so "
+                "fpocket buries it at rank 6 of 6 with druggability 0.001. That "
+                "0.001 alone produced a 930x pooled range, and "
+                "max_radius_difference_a came back at 16.61 A and flagged it. "
+                "This is the retracted-651x failure mode recurring WITH a "
+                "trustworthy selection basis. So the basis is necessary and not "
+                "sufficient: read site_centroid_control.max_radius_difference_a "
+                "as well, and do not pool across structures whose assemblies "
+                "differ in whether the site is even present. A merge_suspected "
+                "or a volume above ~1000 A^3 is the other half of the same "
+                "check — at D=2.4 the same IL-17A site came out at 1831 A^3, so "
+                "its 0.930 druggability is a merged-site artifact."
             ),
             "volume_a3": {
                 "min": min(vols) if vols else None,
@@ -1201,11 +4681,19 @@ def pocket_scan(
                     "clustering values. Measured on an apo TNF-alpha ensemble: "
                     "fixing the site BY CONSTRUCTION (one grid definition "
                     "applied to every superposed structure) rather than by "
-                    "post-hoc residue matching cut the across-ensemble CV from "
-                    "27.8% to 10.2% — the matching heuristic inflated the "
-                    "spread 2.7-fold. Report druggability as a range; never "
-                    "drive a verdict from a single value. Volume is the more "
-                    "reliable number."
+                    "post-hoc residue matching cut the across-ensemble VOLUME "
+                    "CV from ~28% to ~10% (measured 28.1% at D=1.6 against "
+                    "9.9%), roughly a 2.8-fold reduction. Both figures carry "
+                    "about 1 percentage point of fpocket Monte-Carlo volume "
+                    "noise — three identical reruns of one 5-structure ensemble "
+                    "gave CVs of 12.1/11.3/10.8% — so quote them to two "
+                    "significant figures and do not read a CV difference under "
+                    "~1pp as a difference between sites. The improvement is "
+                    "real; the third digit is not. NOTE the CV above was "
+                    "measured on site_from_density, which is not the ligand "
+                    "site; see mdpocket.sites. Report druggability as a range; "
+                    "never drive a verdict from a single value. Volume is the "
+                    "more reliable number."
                 ),
                 "_retracted": (
                     "An earlier version of this warning carried a large "
@@ -1222,21 +4710,85 @@ def pocket_scan(
         },
         "method": {
             "tool": "fpocket 4.2.3 (conda-forge)",
+            "tools": {
+                "detection": "fpocket 4.2.3 (conda-forge)",
+                "rescoring": f"P2Rank {P2RANK_VERSION} rescore (rescore_2024)",
+                "site_fixed_by_construction": "mdpocket (ships with fpocket)",
+                "cryptic_mechanism": "cryptic_analysis.py (gemmi + numpy)",
+                "interface": "interface_analysis.py (gemmi + numpy)",
+                "disorder": "metapredict 3.0.2, CPU torch",
+            },
             "clustering_swept": list(D_VALUES),
-            "druglike_min_heavy_atoms": DRUGLIKE_MIN_HEAVY_ATOMS,
-            "druglike_excludes_cofactors": True,
+            "ligand_classification": {
+                "tool": "ligand_filter.classify_record (stdlib, no RDKit)",
+                "records": "RCSB data.rcsb.org/rest/v1/core/chemcomp (SMILES, "
+                           "formula, type)",
+                "basis": "chemistry of the component, from its SMILES graph",
+                "accuracy": "259/262 on ground truth; 61/70 on a blind "
+                            "held-out set with zero false positives",
+                "replaces": (
+                    "a >=18 heavy-atom floor plus two hardcoded comp_id lists. "
+                    "Both are deleted. ADP has 27 heavy atoms and so does "
+                    "A1IPJ, a genuine inhibitor — no size threshold separates "
+                    "them, and no list is ever complete (CHAPS/CPS was simply "
+                    "missing). Identity filtering gave 16 holo / 8 apo on "
+                    "NLRP3 where a size window gave 19 / 5."
+                ),
+                "verdicts": list(getattr(_lf_verdicts(), "VERDICTS", ())),
+                "undetermined_is_not_apo": (
+                    "a component whose record could not be retrieved leaves "
+                    "the entry at tier 'undetermined'; see structures.<ID>."
+                    "holo_call.undetermined"
+                ),
+            },
             "ligand_site": "5.0 A heavy-atom shell, single ligand copy, kept chains only",
             "prep": "protein only, altloc A/blank, hydrogens stripped",
             # Provenance: legacy PDB truncates comp_ids to 3 characters and is
             # not issued at all for newer entries, so nothing here is derived
             # from it. The PDB written for fpocket comes out of the mmCIF.
-            "source_format": "mmCIF (files.rcsb.org/download/<ID>.cif), parsed with gemmi",
+            #
+            # DERIVED FROM WHAT WAS ACTUALLY FETCHED, not restated as a
+            # constant. The constant said `<ID>.cif`, which is the ASYMMETRIC
+            # UNIT, while `_fetch` tries `<ID>-assembly1.cif` first and the
+            # per-structure `structure_source` correctly reported `assembly1`.
+            # The same payload contradicted itself and the method block was the
+            # half that was wrong, so a reader who trusted it concluded we
+            # scanned ASUs. That is not cosmetic: ASU-versus-assembly is a
+            # documented wrong answer of ours — 9SQX's ASU holds two dimers,
+            # scoring all four fused them and moved the real ligand site from
+            # rank 1 to rank 9.
+            "source_format": (
+                "mmCIF, parsed with gemmi. Preferred biological assembly "
+                "(files.rcsb.org/download/<ID>-assembly1.cif) with fallback to "
+                "the asymmetric unit (<ID>.cif); which one was used is recorded "
+                "per structure in structures.<ID>.structure_source, and "
+                "summarised in source_used_by_structure below."
+            ),
+            "source_used_by_structure": {
+                pid: r.get("structure_source", "unknown")
+                for pid, r in results.items()
+            },
+            "source_used": sorted(
+                {r.get("structure_source", "unknown") for r in results.values()}
+            ),
         },
     }
 
 
 @app.local_entrypoint()
-def main(pdb_ids: str = "6OIM,4OBE", ligand_codes: str = ""):
+def main(
+    pdb_ids: str = "6OIM,4OBE",
+    ligand_codes: str = "",
+    uniprot_accession: str = "",
+    partner_structures: str = "",
+    mdpocket_site_donor: str = "",
+    chains: str = "",
+    site_residues: str = "",
+    run_disorder: bool = True,
+    run_cryptic: bool = True,
+    run_mdpocket: bool = True,
+    out: str = "",
+):
     """Smoke test: the KRAS holo/apo pair the calibration was built on.
 
     Expected: 6OIM's switch-II pocket recovers the MOV site with high Jaccard
@@ -1249,10 +4801,57 @@ def main(pdb_ids: str = "6OIM,4OBE", ligand_codes: str = ""):
     all — the one path most likely to be wrong was the one that could not be
     tested. Empty means the function derives MOV from 6OIM itself, which is the
     behaviour that should hold.
+
+    EVERY PARAMETER `pocket_scan` TAKES IS NOW REACHABLE FROM HERE. `chains`,
+    `site_residues` and the three stage switches existed on the function and on
+    nothing that could call it, which made the single most informative control
+    on an oligomer unreachable without editing this file: deleting the third
+    protomer is the experiment that separates "the cavity is too small" from "a
+    protomer is standing in it", and on TNF-alpha it moves the SPD304 site from
+    0.00 A^3 to ~280-550 A^3. TL1A's axial cavity was reported at 49.5-141.1
+    A^3 intact and the control was never run, because the CLI could not ask.
+
+        --chains '6OIM=A;1TNF=A,B'
+        --site-residues 57,58,59,60,61
+
+    `--out` WRITES THE JSON TO A FILE, and it is the right way to capture it.
+    Modal prints its own progress banner and a trailing "Stopping app..." to
+    stdout, interleaved with anything printed here, so
+    `modal run modal_app.py ... > out.json` produces INVALID JSON and every
+    consumer has had to `raw_decode` from the first `{`. With `--out` the
+    payload never touches stdout; without it, it goes to stderr, which the
+    banner does not share.
     """
     codes = [c.strip() for c in ligand_codes.split(",") if c.strip()]
-    out = pocket_scan.remote(
+    partners = [p.strip() for p in partner_structures.split(",") if p.strip()]
+    # "6OIM=A;1TNF=A,B" -> {"6OIM": ["A"], "1TNF": ["A", "B"]}
+    chain_map: dict[str, list[str]] = {}
+    for part in chains.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        pid, _, cs = part.partition("=")
+        picked = [c.strip() for c in cs.split(",") if c.strip()]
+        if picked:
+            chain_map[pid.strip()] = picked
+    resi = [int(r) for r in site_residues.replace(",", " ").split() if r.strip()]
+    result = pocket_scan.remote(
         pdb_ids=[p.strip() for p in pdb_ids.split(",")],
+        chains=chain_map or None,
         ligand_codes=codes or None,
+        site_residues=resi or None,
+        uniprot_accession=uniprot_accession.strip() or None,
+        partner_structures=partners or None,
+        mdpocket_site_donor=mdpocket_site_donor.strip() or None,
+        run_disorder=run_disorder,
+        run_cryptic=run_cryptic,
+        run_mdpocket=run_mdpocket,
     )
-    print(json.dumps(out, indent=2))
+    text = json.dumps(result, indent=2)
+    if out.strip():
+        Path(out.strip()).write_text(text + "\n")
+        print(f"wrote {out.strip()}", file=sys.stderr)
+    else:
+        # stderr, not stdout: Modal owns stdout and puts a banner on either
+        # side of whatever is printed there.
+        print(text, file=sys.stderr)
