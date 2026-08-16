@@ -4,9 +4,12 @@ description: >
   Detects and measures ligand-binding pockets across an ensemble of structures,
   sweeping fpocket clustering, and quantifies whether a site is cryptic and by
   which mechanism (backbone collapse vs steric occlusion). Reports volume with
-  its spread as the primary number and druggability only as a range. It does NOT
-  decide whether a target is druggable, does NOT rank targets, and does NOT
-  interpret a low score as evidence against tractability.
+  its spread as an absolute quantity comparable across structures, and
+  druggability ONLY as a within-structure rank among that structure's pockets
+  with the pocket count beside it. It does NOT decide whether a target is
+  druggable, does NOT rank targets, does NOT compare a druggability value across
+  structures or against a threshold, and does NOT interpret a low score as
+  evidence against tractability.
 ---
 
 # pocket-scan
@@ -71,12 +74,21 @@ Supporting per-target runs, in the order they were measured:
   than 4.**
 
 **But PRANK rank is a site finder, not a quality score, and used as the latter it
-is inverted.** As a *druggability* classifier its AUC is **0.25** — worse than
-chance, in the systematic direction — because on a target with no ligand to
-anchor to, the top-ranked pocket is top-ranked by construction, so "rank 1"
-carries no information about whether the site is good. **It finds sites. It says
-nothing about their quality.** Never let a PRANK rank stand in for a
+is inverted.** As a *cross-target druggability* classifier its AUC is **0.25** —
+worse than chance, in the systematic direction — because on a target with no
+ligand to anchor to, the top-ranked pocket is top-ranked by construction, so
+"rank 1" carries no information about whether the site is good. **It finds sites.
+It says nothing about their quality.** Never let a PRANK rank stand in for a
 druggability judgement.
+
+**Why this one worked when the cross-target evaluations did not.** Rescoring is a
+**within-structure reordering** — the operation this whole family of quantities
+supports (see "fpocket druggability is a within-structure quantity" below). So
+the n=70 promotion result and the AUC 0.25 result are consistent rather than in
+tension: the first was measured with a supported operation, the second was not.
+**PRANK rank is a second within-structure ordering, legitimate on exactly the
+same footing as fpocket's own rank** — not better, not a tiebreaker, and not a
+substitute. Report both, and report a disagreement as a disagreement.
 
 **The KRAS negative still stands and is not deleted.** A method that helps on
 three targets and hurt on one is a more useful thing to know than a method that
@@ -256,28 +268,69 @@ Report both. See failure modes for why a single value is a coin flip.
 
 ### 4. Measure, in priority order
 
-1. **Volume** at the site, with its spread across the ensemble — the primary number.
-2. **Druggability** as a *range* across D and across structures — never a single figure.
+1. **Volume** at the site, with its spread across the ensemble. An **absolute**
+   quantity — comparing it across structures is a legitimate operation.
+2. **Druggability as a WITHIN-STRUCTURE RANK** — the site pocket's rank among
+   that structure's pockets, with the pocket count and the PDB ID. "rank 1 of 30
+   in 6OIM" is the claim. The value may sit beside the rank; the rank is what is
+   asserted.
 3. Hydrophobic density, lining residues with chain IDs.
 
-**The gap between 1 and 2 is much wider than "volume is more reproducible".**
-Measured across 15 targets, 67 structures, 134 measurements:
+**The gap between 1 and 2 is not that volume is more reproducible. It is that
+they are different KINDS of quantity.** Volume is a number about a cavity.
+Druggability is a number about a cavity *relative to the other cavities in the
+same file* — see "fpocket druggability is a within-structure quantity" below,
+which reads it out of the source.
 
-| | |
-| --- | --- |
-| volume at D=1.6, target-level | **AUC 1.000**, stable under all 15 leave-one-out refits. Every hard target ≤ 207 A^3, every druggable one ≥ 242 A^3 |
-| druggability at D=1.6, target-level | AUC **0.720, 95% CI 0.44–0.94** — the interval includes chance |
-| druggability at D=2.4 | AUC **0.520** — chance |
-| pockets with a drug physically bound scoring **< 0.1** at D=1.6 | **41%** (n=37 ligand-anchored holo structures across all 10 known-druggable targets) |
+**The one-protein proof, and the only demonstration you need:**
 
-Individual cases: EGFR with osimertinib bound scores **0.013**; JAK1's median is
-**0.009** across nine approved drugs; RORgt 6C1P is **0.009 at rank 55 of 60**.
-And the clustering choice does **1.5x more work than the biology** — median
-within-structure swing across D is 0.229, maximum 0.955.
+| RORgt entry | site MLHD | that structure's MLHD max | normalises to | druggability |
+| --- | --- | --- | --- | --- |
+| **4NB6** | 30.722 | 30.722 — *the site is the maximum* | **1.0** | **0.827** |
+| **6C1P** | 19.0 | 52.767 | **0.36** | **0.009** |
 
-So volume is not merely the better number, it is the **load-bearing** one, and
-anything affecting volume accuracy matters accordingly. Report druggability as a
-range with its provenance and never let it carry a verdict.
+Same protein, same orthosteric site, comparable absolute hydrophobic density.
+**The 90-fold gap comes entirely from which other pockets happened to co-exist in
+the file.** A value quoted without its structure's pocket population is not
+interpretable, and a value compared against another structure's is not a
+comparison.
+
+Three consequences for this skill:
+
+- **Never pool druggability across structures into a min/max.** A spread of
+  druggability across an ensemble measures nothing. A range across the **D
+  sweep within one structure** is legitimate and is a different object — say
+  which one you built.
+- **Never take a max over pockets.** r(n_pockets, max druggability) = **0.702**
+  at D=1.6: max-over-pockets measures pocket count. That is what
+  `max_druggability_no_ligand_site` computes, and it contaminated **70% of the
+  hard class** of the retracted calibration set.
+- **The clustering swing is the same mechanism, not a separate defect.** Median
+  within-structure |D=2.4 − D=1.6| is **0.229**, maximum **0.955**. Changing D
+  changes the pocket population, which changes the normalisation. Sweep and read
+  both; do not average them.
+
+Low values on holo structures with a drug physically bound are common and are
+**not** findings about the pocket — JAK1's median is **0.009** across nine
+approved drugs, TYK2 6NZP with deucravacitinib is **0.169**, BCL-2 6QGK is
+**0.025**, NLRP3 runs **0.001–0.018** across seven holo crystals including one
+carrying a clinical compound.
+
+**Two named cases that used to sit in this list are struck.** *"EGFR 6LUD with
+osimertinib bound scores 0.013"* is **off-site**: Jaccard **0.077** to the
+osimertinib site, centroid spread **10.49 Å**, and at D=2.4 the pocket that
+genuinely overlaps scores **0.174**. It was the same failure mode as the 651x
+retraction, sitting inside the sentence used to justify the demotion — do not
+quote it. *"RORgt 6C1P is 0.009 at rank 55 of 60"* is struck as a false-negative
+case because **6C1P contains no RORgt** (sole entity A8EVM5, an ion transport
+protein; anchor ligand `1N7` is CHAPSO). 6C1P survives above only as the
+normalisation demonstration, where what it contains does not matter — what is
+being shown is arithmetic on a pocket population.
+
+**And the evaluation that produced the AUCs could not have established the
+negative it was read as establishing.** Exact permutation over all 3,003 label
+assignments: observed AUC 0.720 gives **p = 0.103**, and the minimum AUC this
+design can call significant is **0.760**. See `falsification-sweep` check 10b.
 
 ### 5. Establish which pocket matters — apo is the normal case
 
@@ -382,8 +435,22 @@ trimers held volume to +/-16% at "the same site" while druggability swung
 **651-fold** (0.001 in 2ZJC to 0.651 in 1A8M, volumes 206.7–309.2 A^3; the same
 claim appears as 650-fold in older copies — 651 is what 0.651/0.001 gives, and
 it is the form used everywhere the retraction is now cited). **That figure is
-WITHDRAWN — and so is the volume range printed beside it.** Both came
-out of one step: matching pockets across structures on shared residue *numbers*.
+WITHDRAWN — and so is the volume range printed beside it.**
+
+**There were TWO defects, and the deeper one was named later.**
+
+1. **The pooling.** Druggability is normalised inside each structure (see
+   "fpocket druggability is a within-structure quantity" above), so **pooling it
+   across five structures manufactures a meaningless spread on its own** — no
+   matcher error required. **This alone was sufficient to produce 651x.** It is
+   the same root cause as the whole within-structure rule, and it is why no
+   improvement to pocket matching would have rescued the number.
+2. **The matcher.** Separately and additionally, the pockets were matched across
+   structures on shared residue *numbers*, chain-agnostically. That is a real
+   defect, it is what withdrew the **volume** range printed beside the spread,
+   and it is documented in full below.
+
+Both retractions stand. The paragraphs that follow are the second defect.
 
 mdpocket over the superposed ensemble showed what that matcher was actually
 tracking:
@@ -405,11 +472,15 @@ frequency 1.0**. Well-formed, reproducible, and the wrong pocket.
 Do not cite 650x, 651x, +/-16%, or 206.7–309.2 A^3. If you meet them in an older
 dossier, they are void. What replaces them is below.
 
-Note what does *not* change: **never build a verdict on a single-structure
-druggability score**, and volume remains the reproducible number while
-druggability remains a 3-descriptor regression fitted on 21 positives. That
+Note what does *not* change: **never build a verdict on a druggability score**,
+and druggability remains a 3-descriptor regression fitted on 21 positives. That
 claim never rested on the 651x figure — it rests on the KRAS holo/apo collapse
 and on the provenance of the score itself.
+
+Note also what this does **not** forbid: reporting the site pocket's **rank among
+that structure's pockets, with the count**. That is the reportable form and it is
+a within-structure statement. What is forbidden is a *value* travelling between
+structures — as a spread, a threshold comparison, or a verdict.
 
 ### What replaces it: the spread was mostly the matcher
 
@@ -452,6 +523,40 @@ Lys98 heavy atom is **8.74 A** from ligand `307`, and residue 56 is **7.82 A**.
 Neither is in the 5 A shell — residue 98 does not line the SPD304 site at all.
 The K98R concern is real, but it belongs to the *other* pocket, the on-axis
 cavity above. Report ensemble composition either way.)
+
+### fpocket druggability is a WITHIN-STRUCTURE quantity, read out of the source
+
+**This is the finding the section below was an early, narrow instance of.** It
+was written as "mdpocket cannot report a druggability". The general statement is
+stronger and applies to **every** druggability number this skill emits.
+
+`pocket.c`, `set_normalized_descriptors`, lines **736-756**:
+
+    mean_loc_hyd_dens_norm = (mlhd - mlhd_min) / (mlhd_max - mlhd_min)
+
+with `mlhd_min` and `mlhd_max` accumulated **over the current structure's own
+pocket list**, taken whenever `n_pockets > 1`. `pscoring.c:325` feeds the result
+into the logistic. The hardcoded PDB-wide constants at `pocket.c:780` —
+`(mlhd - 8.23) / (24.20 - 8.23)` — are the **single-pocket branch, and it never
+fires on anything we scan**: our structures carry **4 to 324** pockets.
+
+So the score answers **"how does this pocket rank against the others in this
+structure"**. It never answered "how druggable is this pocket in absolute terms".
+The mdpocket case below is that statement at n_pockets = 1; the RORgt 4NB6 /
+6C1P pair under "Measure, in priority order" is the same statement at n_pockets
+in the hundreds, on one protein and one site, with a 90-fold gap.
+
+**What this licenses and what it forbids:**
+
+| operation | legal? |
+| --- | --- |
+| rank the site pocket among that structure's pockets, report rank + count | **yes — this is the reportable form** |
+| compare fpocket rank against PRANK rank in the same structure | **yes** — two within-structure orderings, same footing |
+| range across the D sweep **within one structure** | yes, with the caveat that D changes the population |
+| compare a druggability value between two structures | **no** |
+| compare a druggability value to a threshold | **no** |
+| pool druggability into a min/max across an ensemble | **no** |
+| take the max over a structure's pockets as a target value | **no** — r = 0.702 with pocket count |
 
 ### `mdpocket.sites.*` reports NO druggability, and that is the honest answer
 
@@ -501,13 +606,19 @@ per-structure number, not an mdpocket fixed-site one.
 Every `[0,1]` field now passes a range assertion before it leaves the function.
 A score named as a probability that comes back at 4.00 should never have escaped.
 
-**And the loss is small, because the number was never worth much.** The
-15-target evaluation in "Measure, in priority order" above puts fpocket
-druggability at target-level AUC 0.720 with a confidence interval that includes
-chance, with 41% of pockets that have a drug physically bound scoring below 0.1 —
-while **volume at D=1.6 separated all 15 targets perfectly**. The quantity that
-turned out to be undefined here is the one we should not have been leading with
-anyway. Lead with volume.
+**And the loss is small, because the quantity mdpocket cannot report is not the
+quantity anyone wanted.** What is missing here is an *absolute* druggability, and
+fpocket never had one either — see the section above. What mdpocket can give you
+is the site volume in a fixed grid, which is absolute, comparable across the
+ensemble, and the thing the fixed grid was built for.
+
+**Do not read this as "volume separated all 15 targets perfectly", which an
+earlier version of this paragraph said.** That separation is **retracted** — see
+the failure modes and `CLAUDE.md` rule 4a. Volume is the reported number because
+it is the right *kind* of number, not because it classifies. It does not
+classify; it also fails the clustering-sensitivity test worse than druggability
+did (492 Å³ within-structure swing against a 139 Å³ between-group difference,
+ratio 3.53 versus druggability's 1.49).
 
 ### mdpocket's own failure modes, all confirmed by direct test
 
@@ -984,9 +1095,21 @@ per returned pocket carrying
 **A table of thirty rows with nine of them on chain B cannot hide what a single
 elected number hides.** It also removes the selection bias by construction:
 taking the max-scoring pocket of N is a maximum over N draws and grows with N.
-(That bias is real but was overstated — it applies to both groups, and the audit
-found volume does not track pocket count, r = −0.098. It does not by itself
-manufacture a separation.)
+
+**That bias is now measured, and for druggability it is severe.**
+r(n_pockets, max druggability) = **0.702** at D=1.6 — **max-over-pockets is
+substantially a measurement of pocket count.** It contaminated **70% of the hard
+class** of the retracted calibration set, because on the hard side nothing
+anchored the site and selection fell back to
+`max_druggability_no_ligand_site`. **That path must never produce a reportable
+value.**
+
+The earlier parenthetical here read "that bias is real but was overstated". It
+was not overstated; it was measured on the wrong quantity. **Volume** does not
+track pocket count (r = **−0.098**), which is what that sentence was true of.
+Druggability does, and it does so because the score is normalised over exactly
+that population — see "fpocket druggability is a within-structure quantity"
+above.
 
 **The confound that does hold is a separate thing and is not fixed by this.**
 "Has a drug-like co-crystal" separates druggable from hard at **AUC 0.900 with no
@@ -1048,6 +1171,40 @@ rank 13 with Jaccard 0.069, because the channel fragments below fpocket's `-i 15
 floor — the documented D=1.6 false negative, unchanged. Read both D values.
 
 IL-17A is the remaining half of this test and has not been run here.
+
+#### But agreeing with a ligand is not the same as FINDING the site without one
+
+The result above is that the symmetry-axis *label* co-occurs with `ligand_site`
+where the ligand exists. The harder question — **can a ligand-free definition
+find the site when there is no ligand?** — was tested separately on TNF-alpha,
+and the answer separates the four definitions sharply. **n = 1 target; do not
+generalise the ranking.**
+
+| ligand-free definition | centroid distance to the SPD304 site | shared residues |
+| --- | --- | --- |
+| **transferred homolog** (CD40LG **3LKJ**) | **0.00 Å**, Jaccard **0.615** | — |
+| TNFR2 epitope | **14.1 Å** | **zero** |
+| symmetry axis | **22.4 Å** | — |
+| annotated function | **20.5 Å** | — |
+
+Two things follow, and the second is the sharper one:
+
+- **`transferred_homolog_site` is the strongest ligand-free anchor measured
+  here** — and it is the one label this module does **not** produce (it lives in
+  `structure-select` / `neighbour_precedent`). Its absence from the anchors table
+  is a gap in this module, not a negative about the target.
+- **"On the symmetry axis" is not a site.** TNF's C3 axis carries **five**
+  distinct on-axis cavities and there is **no ligand-free rule to pick among
+  them**. The runner-up sits **7.86 Å** from SPD304 — independently reproducing
+  the **7.7 Å** figure in the withdrawn-matcher retraction below, arrived at from
+  a completely different direction. The 22.4 Å above is what happens when the
+  rule picks a different one of the five.
+
+So a `symmetry_axis` anchor standing alone establishes *a* cavity on an axis, not
+*the* site, and `site_hypothesis_basis` should say so. This does not retract the
+2AZ5 / 1TNF co-occurrence result — a label agreeing with a ligand where the
+ligand exists is a different and weaker claim than a definition locating the site
+where it does not.
 
 #### Payload size: read `pocket_table`, not `pockets`
 
@@ -1559,12 +1716,19 @@ SPD304 site measures 0.00 A^3 intact and ~280-550 A^3 with a protomer deleted.
 TL1A's axial cavity was reported at 49.5-141.1 A^3 intact and the control was
 never run, because the CLI could not ask for it.
 
-Fill the dossier's `tractability` block: volume with ensemble spread as the
-primary number, druggability as a range across D and across structures, lining
-residues with chain IDs, overlap with any annotated or ligand-derived site,
+Fill the dossier's `tractability` block: volume with its ensemble spread (an
+absolute quantity, comparable across structures), **druggability as
+`site_pocket_rank` — fpocket rank, PRANK rank, `n_pockets` and
+`structure_pdb_id`, which is a within-structure claim** — lining residues with
+chain IDs, overlap with any annotated or ligand-derived site,
 `cryptic_pocket_risk`, `cryptic_mechanism`, and a `caveat` naming what this run
 could not see. Include the method block — tool, version, every D value swept,
 and which PDB entries formed the ensemble.
+
+`pocket_druggability.min`/`max` stay populated for consumers that read them, and
+`_comparability` must say whether the range is **within one structure across the
+D sweep** (legitimate) or **pooled across structures** (not a measurement — do
+not build one).
 
 When the ensemble number came through mdpocket, the method block also carries
 **how the site was established** (grid definition, not residue matching), the
@@ -1572,9 +1736,14 @@ When the ensemble number came through mdpocket, the method block also carries
 any frequency is reported — **N**. A frequency from N < 10 is not reportable as
 a frequency; give presence/absence instead.
 
-Never return a druggability figure without its structure tier, its D value, and
-its ensemble spread beside it. Separated from those, the number is not
-interpretable.
+Never return a druggability figure without its structure tier, its D value, **the
+PDB ID it was measured in, its rank, and that structure's pocket count** beside
+it. Separated from those, the number is not interpretable — the population it was
+normalised against is the missing half of it.
+
+(An earlier version of this sentence asked for "its ensemble spread" instead. **A
+druggability spread across an ensemble is not a measurement** and asking for one
+is asking for the 651x error. Rank plus count replaces it.)
 
 And a volume of **0.00 A^3 is a result, not a failed run.** Report it. It is the
 one output that cannot be an over-claim, and substituting the nearest pocket

@@ -4,10 +4,12 @@ description: >
   Attacks a druggability claim before it is reported — checks whether reported
   actives collapse to one assay, one series or one lab, whether a holo ligand is
   a known frequent hitter, whether a pocket appears in only one crystal form, and
-  what clinical programs were terminated and why. Treats a low fpocket
-  druggability score as a property of the score rather than of the pocket — 41%
-  of pockets with a drug-like ligand physically bound score below 0.1 — so it is
-  never entered as a finding against a site. Routes the rare finding that is
+  what clinical programs were terminated and why. Treats fpocket druggability as
+  a WITHIN-STRUCTURE quantity — normalised over the current structure's own
+  pocket list, so a low value, or a swing across an ensemble, is a property of
+  the pocket population and never a finding against a site. Also checks whether a
+  negative result came from a design that could have detected the effect at all.
+  Routes the rare finding that is
   a literature-provenance question back to the upstream graph as an ask, under a
   five-gate rule that refuses anything a local table can settle. Records checks
   that found nothing as well as checks that found something. It does NOT produce
@@ -127,13 +129,20 @@ A structure is not evidence just because something is bound. Check the ligand:
   The old supporting clause — "its site scores 0.346 at best against 0.708 for
   the sotorasib pocket, consistent with a micromolar tool compound, not a drug" —
   is **withdrawn as support**. Both numbers are real and the *inference* from
-  their gap is not: after check 5a, a 0.35-versus-0.71 gap is well inside the
-  spread the score produces across pockets that all have an approved drug bound
-  in them — EGFR 6LUD scores **0.013** with osimertinib in it, against KRAS
-  6OIM's 0.708 — so a gap that size
-  discriminates a tool compound from a drug not at all. Judge the ligand on its
-  chemistry — bis-electrophile, cytotoxicity, promiscuity reports — never on the
-  score of the pocket it sits in.
+  their gap is not — for a reason that is now structural rather than statistical.
+  **0.346 was measured in 2AZ5 and 0.708 in 6OIM, and a druggability value does
+  not travel between two structures at all** (check 5a). The gap is a comparison
+  of two different structures' pocket populations, not of two ligands. Judge the
+  ligand on its chemistry — bis-electrophile, cytotoxicity, promiscuity reports —
+  never on the score of the pocket it sits in.
+
+  (An earlier version of this passage cited *"EGFR 6LUD scores 0.013 with
+  osimertinib in it"* as the spread that made the gap uninformative. **That case
+  is struck**: the scored pocket is **off-site** — Jaccard **0.077** to the
+  osimertinib site, centroid spread **10.49 Å**, and at D=2.4 the pocket that
+  genuinely overlaps scores **0.174**. It was the same failure mode as the 651x
+  retraction, deployed inside the sentence that justified the demotion. Do not
+  quote it anywhere.)
 - **Cofactors and buffer components.** GDP, ATP, PEG, glycerol, sulfate,
   cryoprotectants. A pocket that exists around a cryoprotectant is an artifact.
 - **Covalent warheads** bind sites that may not be addressable non-covalently.
@@ -141,44 +150,89 @@ A structure is not evidence just because something is bound. Check the ligand:
 ### 5. Does the pocket appear in only one crystal form?
 
 Run the ensemble. A pocket present in one entry and absent in five is a finding.
-So is a druggability score that swings by orders of magnitude across an ensemble
-— **but only if every value in the swing describes the same site**, and that is
-exactly what this section used to get wrong.
+A **volume** that swings across the ensemble is a finding, once you have checked
+it is the same site and separated the clustering knob's contribution from the
+protein's.
 
-#### 5a. A LOW DRUGGABILITY SCORE IS NOT A FINDING. Attack it, do not report it.
+**A druggability score that swings across an ensemble is NOT a finding**, however
+carefully the site was fixed. This section used to say it was, provided every
+value described the same site. **Same site is not enough** — see 5a. The quantity
+is normalised inside each structure, so the swing is a fact about the pocket
+populations of the files, not about the site.
 
-Added 2026-08-15, and it inverts the direction this check used to point. The
-sweep exists to attack claims, and a low druggability score reads like a
-falsification result — the pocket looked good, the score says otherwise. It is
-not one. Measured over 15 targets, 67 structures and 134 measurements:
+#### 5a. A DRUGGABILITY VALUE IS A WITHIN-STRUCTURE QUANTITY. A low one is not a finding, and a cross-structure comparison of one is not a measurement.
 
-- on **37 holo structures where a drug-like ligand is physically bound and the
-  scored pocket is anchored to that ligand** — certain positives by construction,
-  spanning all 10 known-druggable targets — the median score is **0.320**, **25
-  of 37 fall below 0.5** and **15 of 37 (41%) fall below 0.1**. (**At least one
-  of the 37 is not a certain positive**: RORgt's 6C1P contains no RORgt — sole
-  entity A8EVM5, an ion transport protein — and its `1N7` anchor is CHAPSO, a
-  detergent. The demotion does not turn on it, but the denominator is 36 clean
-  cases, not 37, and nobody has re-audited the other 36 at residue level.)
-- EGFR 6LUD with osimertinib bound scores **0.013**; JAK1's median is **0.009**
-  across nine approved drugs; TYK2
-  6NZP with deucravacitinib is **0.169**; BCL-2 6QGK is **0.025**; NLRP3 runs
-  **0.001–0.018** across seven holo crystals including one clinical compound;
-- target-level AUC is **0.720 with a 95% CI of 0.44–0.94** at D=1.6 — the
-  interval includes chance — and **0.520** at D=2.4;
-- and it is **inverted** at target level: MYC, zero holo structures and canonical
-  undruggable, has a D=2.4 median of **0.75**, above KRAS, BCL-2, JAK1, EGFR and
-  NLRP3.
+Rewritten 2026-08-15 after the score was read out of fpocket's source. The
+earlier version of this check said a low score is not a finding *because the
+score is unreliable* — an AUC argument. **The real reason is stronger and it is
+structural.**
 
-So the honest sweep finding on a low score is about the *score*, not the target:
-**record that the pocket scored low, record the 41% false-negative rate beside
-it, and do not enter it in `findings` as evidence against the pocket.** A
-falsification block that lists "druggability 0.02, site may not be real" has
-manufactured a finding out of a measurement error rate.
+`pocket.c:736-756` normalises the score's dominant descriptor min-max **over the
+current structure's own pocket list** whenever `n_pockets > 1`; `pscoring.c:325`
+feeds it to the logistic. The hardcoded fallback at `pocket.c:780` is the
+single-pocket branch and **never fires** — our structures carry 4 to 324 pockets.
+**So the score answers "how does this pocket rank against the others in this
+structure", and nothing else.**
 
-**What to attack instead, on the same data:** the D=1.6 site volume. And when
-volume and druggability disagree — a 290 Å³ EGFR site scoring 0.013 — that
-disagreement is the finding. Report it; do not resolve it in either direction.
+**One protein, one site, the whole finding:** RORgt **4NB6** has site MLHD
+**30.722**, which *is* that structure's maximum → normalises to 1.0 →
+druggability **0.827**. RORgt **6C1P** has site MLHD **19.0** against a structure
+maximum of **52.767** → normalises to 0.36 → druggability **0.009**. Same
+protein, same orthosteric site, comparable absolute hydrophobic density. **The
+90-fold gap comes entirely from which other pockets happened to co-exist in the
+file.**
+
+So, for this sweep:
+
+- **A low druggability score is not a finding.** Record that the pocket ranked
+  where it ranked, with the count and the PDB ID, and do **not** enter it in
+  `findings` as evidence against the pocket. A falsification block listing
+  "druggability 0.02, site may not be real" has manufactured a finding out of a
+  normalisation.
+- **A druggability spread across an ensemble is not a finding either.** It is the
+  651x error. This check used to invite exactly that — "a druggability score that
+  swings by orders of magnitude across an ensemble" was offered as a legitimate
+  finding provided every value described the same site. **Same site is not
+  enough.** RORgt 4NB6 versus 6C1P is the same site and the swing is 90-fold.
+  Pooling a within-structure quantity across structures is the operation, and the
+  operation is the error.
+- **Attack the RANK instead.** "The site ranks 55 of 60 in this structure" is a
+  within-structure statement and is attackable — is the site fragmented at this
+  D? are the 54 above it on the target's chains at all? did PRANK reorder it?
+  That is a real check and it survives.
+- **Attack the D=1.6 site volume**, which is absolute and does travel between
+  structures — with its own clustering sensitivity attached (492 Å³ within-
+  structure swing; see check 10).
+
+Low values on holo structures with a drug physically bound are ordinary and carry
+no information about the ligand: JAK1's median is **0.009** across nine approved
+drugs, TYK2 6NZP with deucravacitinib is **0.169**, BCL-2 6QGK is **0.025**,
+NLRP3 runs **0.001–0.018** across seven holo crystals including one clinical
+compound.
+
+**Two named cases previously listed here are STRUCK.**
+
+- ***"EGFR 6LUD with osimertinib bound scores 0.013" is OFF-SITE.*** Jaccard
+  **0.077** to the osimertinib site, centroid spread **10.49 Å**; at D=2.4 the
+  pocket that genuinely overlaps scores **0.174**. It is the same failure mode as
+  the 651x retraction, sitting inside the sentence used to justify the demotion.
+  It is deployed verbatim in `validate_dossier.py` (~line 270) and in
+  `pocket-scan/SKILL.md` (~line 275) and **patches striking it are routed**. Do
+  not quote it, and flag it if you meet it.
+- ***"RORgt 6C1P is 0.009 at rank 55 of 60"*** is struck as a *false-negative*
+  case, because 6C1P contains no RORgt (sole entity A8EVM5, an ion transport
+  protein; anchor `1N7` is CHAPSO). It survives above only as the normalisation
+  arithmetic, where what the entry contains is irrelevant.
+
+**And the max-over-pockets path is contaminated by construction.**
+r(n_pockets, max druggability) = **0.702** at D=1.6 — it substantially measures
+pocket count, and it produced the value for **70% of the hard class**. A run
+whose `site_pocket_selected_by` is `max_druggability_no_ligand_site` has no
+reportable druggability at all; say so.
+
+**The 41% false-negative rate is not the argument any more, and should not be
+quoted as one.** Its denominator is under audit, it was computed by pooling
+across structures, and the rule now stands without it.
 
 **Do not resolve it against a volume boundary, because there is not one.** An
 earlier version of this passage said volume "separated all 15 targets at AUC
@@ -196,6 +250,18 @@ skill calls trustworthy. **Selection basis is necessary and not sufficient: a
 wrong PDB ID passes straight through it, so verify the accession of the entry
 itself.** A volume is a cavity measurement in a structure that was scored. It
 falsifies nothing and confirms nothing on its own.
+
+**And the volume guide may not be revived even with clean anchors, because the
+comparison was ill-posed.** Volume was promoted over druggability on a
+disqualifying test — does the clustering knob move the number more than the
+biology does? — and **volume fails that test 2.4x worse**: a **492 Å³**
+within-structure swing across clustering against a **139 Å³** between-group
+difference of medians, ratio **3.53** versus druggability's **1.49**. The
+**35 Å³** margin between the two groups is **14x smaller** than what the
+clustering knob alone moves volume by. A boundary narrower than the parameter's
+own noise is not a boundary. Volume stays the reported number because it is
+**absolute and therefore comparable across structures**, which druggability is
+not — that is the entire reason, and it is not a claim that volume classifies.
 
 **Do not reach for persistence as the replacement.** The site pocket was
 detected in 100% of structures for all 15 targets, so persistence is **AUC
@@ -269,6 +335,19 @@ Keep the ensemble-composition check, which was right in substance and wrong in
 its numbers: only one wild-type apo TNF-alpha entry exists (1TNF) and **four of
 the five** carry mutations. An ensemble of mutants is not an ensemble. State the
 composition beside any spread you report.
+
+**And add a site-identity check to it: how many cavities could the ligand-free
+rule have picked?** An anchor-agreement test on TNF-alpha (n=1 target, do not
+generalise) found that of four ligand-free site definitions, only **transferred
+homolog** located the SPD304 site — CD40LG **3LKJ**, centroid **0.00 Å**, Jaccard
+**0.615**. The TNFR2 epitope was **14.1 Å** away with **zero shared residues**;
+symmetry axis **22.4 Å**; annotated function **20.5 Å**. And TNF's C3 axis carries
+**five** distinct on-axis cavities with **no ligand-free rule to pick among
+them** — the runner-up sits **7.86 Å** from SPD304, **independently reproducing
+the 7.7 Å figure in the retraction above** from an entirely different direction.
+So "the pocket is on the symmetry axis" identifies a family of five cavities, not
+a site. Where a site was established by a ligand-free route, ask how many
+candidates that route admitted and record the answer.
 
 ### 6. Is the accession mapping real?
 
@@ -475,6 +554,41 @@ Record the check whether or not it fires. When it fires, the finding is *"the
 result is consistent with the boundary and also with there being no boundary"* —
 not "the result is wrong".
 
+### 10b. Could this design have detected the effect at all? Compute the minimum detectable AUC.
+
+**Check 10's mirror image, and it is the one we got wrong.** Check 10 asks what a
+*perfect* result on a small set can mean. This one asks what a *non-significant*
+result on a small set can mean, and the answer is usually: **nothing.**
+
+We demoted fpocket's druggability partly on *"AUC 0.720, 95% CI 0.44–0.94 — the
+interval includes chance"*. Run the exact permutation instead of the bootstrap:
+
+| | |
+| --- | --- |
+| design | **10 positives against 5 negatives** — all 3,003 label assignments enumerable |
+| observed AUC | **0.720** |
+| exact permutation p | **0.103** |
+| **minimum AUC this design can call significant** | **0.760** |
+
+**"The interval includes chance" was the *expected* result for a good score at
+n=10 vs 5.** A design that cannot reach significance below AUC 0.760 cannot
+report a null; failing to reject at 0.720 is a statement about the design, not
+about the score. The demotion survived — the score is a within-structure quantity
+and no cross-target AUC was a legal measurement of it at any n (5a) — but **it
+does not survive on this AUC**, and quoting the CI as the reason is quoting an
+artefact of n.
+
+**Run this on any negative result the dossier leans on.** Before writing "no
+separation was found", compute the smallest effect the design could have detected
+and report it beside the finding. If the observed effect is below that floor, the
+honest statement is **"underpowered — this design could not have established the
+negative"**, never "no effect".
+
+This is the same species of error as the degenerate CI in check 10, pointing the
+other way: **a confidence interval computed on a design that cannot resolve the
+question will look like evidence in whichever direction the point estimate
+happens to fall.**
+
 ### 11. Do the label and the measurement share a cause?
 
 **The confound check, and the one that generalises furthest.** Ask it of every
@@ -539,12 +653,14 @@ starts adjusting numbers, the numbers stop being measurements.
 
 **The sharpest instance of this is now check 5a.** A low druggability score is
 the most verdict-shaped thing this sweep will ever be handed — it looks like the
-pocket claim collapsing under attack — and it is a measurement error 41% of the
-time on pockets with a drug physically bound in them. `DRUGGABILITY_LOAD_BEARING`
-in `validate_dossier.py` blocks it from reaching a `not_tractable` or
-`insufficient_evidence` verdict, but the validator only sees structured fields:
-writing "the pocket scores 0.02 and is probably not real" into
-`falsification.findings` as prose routes around it entirely. Do not.
+pocket claim collapsing under attack — and it is a statement about the other
+pockets in the file. `DRUGGABILITY_LOAD_BEARING` in `validate_dossier.py` blocks
+it from reaching a `not_tractable` or `insufficient_evidence` verdict, but the
+validator only sees structured fields: writing "the pocket scores 0.02 and is
+probably not real" into `falsification.findings` as prose routes around it
+entirely. Do not. The same applies to prose asserting a *spread* — "druggability
+varied 90-fold across the ensemble, the site is unstable" — which is the 651x
+error rewritten as a finding.
 
 ### Treating absence of terminated programs as a good sign
 
@@ -596,13 +712,15 @@ Populate `falsification`:
 - `checks_run` — every check from this skill, by name, whether or not it fired.
   Check 9 is included on every run; "ran, did not fire" is its normal result.
   **Check 5a is included on every run too, and it can only ever "not fire" as a
-  finding** — its result is a note recording the score and the 41% false-negative
-  rate beside it. A 5a entry in `findings` is a defect
-- **Checks 10 and 11 apply to any separation or threshold the run relies on,
-  including one of ours.** They fire on the shape of the evidence rather than on
-  the target, so they will most often be recorded as "ran, no separation claim
-  was relied on". When a run *does* lean on a boundary, both are mandatory, and a
-  boundary that has not been through them may not carry a verdict
+  finding** — its result is a note recording the site pocket's **rank, the
+  structure's pocket count and the PDB ID**, with the statement that the value is
+  a within-structure quantity. A 5a entry in `findings` is a defect
+- **Checks 10, 10b and 11 apply to any separation, threshold or negative result
+  the run relies on, including one of ours.** They fire on the shape of the
+  evidence rather than on the target, so they will most often be recorded as
+  "ran, no separation claim was relied on". When a run *does* lean on a boundary
+  or on a null, all three are mandatory, and a boundary or a negative that has
+  not been through them may not carry a verdict
 - `findings` — what came back, each with its source
 - `survived` — true only if no finding materially undercuts the precedent claim;
   false with an explanation otherwise; never null after a run
