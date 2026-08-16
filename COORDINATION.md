@@ -288,3 +288,4 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:23 UTC** — merged `abhishek-jani` (6c3c094, tier-2: par6 checklist union) — thesis.ts ratification legwork (items 1-4, all optional/back-compat, 4/4 fixtures parse) · backtest scale-transfer EXPERIMENT columns (sqrt-dilution rejected on 22 fresh rows) — typecheck+check green.
 
 - **2026-08-16 00:25 UTC** — merged `vaalessi/hypothesis-highlander` (MERGED) — Add hypothesis-highlander: quality-diversity meta-search over the pipeline — typecheck+check green.
+- **2026-08-16 00:30 UTC** — merged `msoliman6/literature-graph-mcp` (b9a0c71, tier-2: shared-runtime conflict — union of Cyrus's streaming generator + Soliman's MCP fail-fast watchdog, complexity refactor; wrapper paths fixed to renamed dir) — research-evidence-mapper is now DEPLOYED (manifest + acl + eve wrapper) — typecheck+check green.
