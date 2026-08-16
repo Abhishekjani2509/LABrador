@@ -233,3 +233,5 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:00 UTC** — merged `vaalessi/program-strategy-valuation` (MERGED) — typecheck+check green.
 
 - **2026-08-16 00:07 UTC** — merged `abhishek-jani` (MERGED) — Adapter B: forecaster -> economics launch-delay overlay (economics-bridge.ts) — typecheck+check green.
+
+- **2026-08-16 00:11 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: read the upstream evidence graph, on the real schema — typecheck+check green.
