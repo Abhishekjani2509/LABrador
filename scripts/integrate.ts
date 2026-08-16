@@ -114,6 +114,17 @@ function fixDeadPaths(cwd: string): "clean" | "moved" | "collision" {
   return moved ? "moved" : "clean";
 }
 
+/** Subjects of the commits a branch brings in — for the §9 merge log. */
+function incomingSubjects(
+  b: { name: string; sha: string },
+  cwd: string
+): string {
+  const subjects = trySh(`git log --format=%s HEAD..origin/${b.name} -5`, cwd);
+  return subjects.ok && subjects.out
+    ? subjects.out.split("\n").join(" · ")
+    : "";
+}
+
 function mergeBranch(b: { name: string; sha: string }, cwd: string): string {
   const merge = trySh(
     `git merge --no-ff origin/${b.name} -m "auto-integrate: merge ${b.name} (${b.sha.slice(0, 7)})"`,
@@ -203,9 +214,10 @@ try {
   }
 
   const results = pending.map((b) => {
+    const subjects = incomingSubjects(b, repo);
     const status = mergeBranch(b, repo);
     log(`${status}: ${b.name} (${b.sha.slice(0, 7)})`);
-    return { branch: b.name, status };
+    return { branch: b.name, status, subjects };
   });
   const merged = results.filter((r) => r.status.startsWith("MERGED"));
   const escalate = results.filter((r) => !r.status.startsWith("MERGED"));
@@ -226,7 +238,10 @@ try {
 
   appendMergeLog(
     repo,
-    merged.map((r) => `merged \`${r.branch}\` (${r.status})`)
+    merged.map(
+      (r) =>
+        `merged \`${r.branch}\` (${r.status})${r.subjects ? ` — ${r.subjects}` : ""}`
+    )
   );
 
   if (dryRun) {

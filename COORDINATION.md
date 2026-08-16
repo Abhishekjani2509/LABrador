@@ -3,7 +3,8 @@
 **Read this file first every time you pull `main`.** It is the single source
 of truth for who owns what, what is done, what is pending, what nobody owns
 yet, and the process we all follow. If you change any of those facts, you
-update this file in the same push. Last full update: **2026-08-15 (evening)**.
+update this file in the same push. Last full update: **2026-08-15 (late
+evening — refreshed after every merge per §7.10)**.
 
 ---
 
@@ -74,10 +75,13 @@ are dead — do not create files under them.
   sandbox, python 3.11 + uv present, memory mounts writable, sqlite3 absent,
   egress open to the 3 tested hosts. Results recorded in Soliman's CONTRACT.md.
 
-**Vince — therapeutic-program-economics** *(runnable)*
+**Vince — therapeutic-program-economics** *(runnable, v0.2.0)*
 - Deterministic pydantic/numpy economics simulator: pricing corridors, patent
   clock, cash flow, Monte Carlo rNPV, provenance + secret redaction,
-  decision-grade gate. 61/61 tests pass (verified in-repo), CLI + Streamlit.
+  decision-grade gate. CLI + Streamlit.
+- v0.2.0 hardening drop (2026-08-15 late): evaluation module with reality
+  anchors, run replay, red-team hardening + interpretability-contract docs,
+  five new test suites — 87/87 tests pass on merged main.
 
 **Cyrus — infra**
 - Merged all branches into `main`, renamed nodes for clarity, rewrote README
@@ -194,7 +198,12 @@ nodes' actual contracts:
    `CONFLICT` / `COLLISION` / `VERIFY-FAILED` and leaves them for a human (or
    the watching Claude session) to resolve with judgment.
 9. Small COORDINATION.md-only updates may go straight to `main`.
-10. After a merge lands: everyone pulls, GOTO step 1.
+10. **After every merge lands, this file gets refreshed in two tiers:** the
+    integrator appends the §9 log line (branch, commit subjects, checks)
+    automatically, and the watcher session (or whoever merged) updates the
+    affected person's §3/§4 rows and any §5 items the merge resolved — so
+    §2–§5 never drift from what main actually contains.
+11. After a merge lands: everyone pulls, GOTO step 1.
 
 ## 8. Verification commands per node
 
