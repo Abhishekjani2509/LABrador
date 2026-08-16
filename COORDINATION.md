@@ -124,6 +124,19 @@ are dead — do not create files under them.
   is one command instead of a hand-authored driver. Confirmed materialized in
   the sandbox and `cat`-ed by the agent. Call ratio moved from 16 MCP / 41
   local to 42 MCP / 36 local.
+- **All six BUILD.md acceptance facts verified.** Fact 6 was the last and the
+  only genuinely human one: three quotes re-resolved **by DOI** rather than by
+  the paper id the agent used, so a wrong id would have surfaced. 3/3 — each DOI
+  returned exactly the title the graph recorded and each quote appears
+  word-for-word in it (PMC9945759 L6, PMC3583641 L6+L33, PMC7912553 L39). The
+  disagreement is real rather than an artifact: one paper concludes antioxidants
+  accelerate melanoma metastasis in BRAF-V600E mice, the other that ascorbate
+  reduces it by 71% (p=0.005) in Gulo-KO mice. Incidentally confirmed the
+  fixture README's own hazard note — the third paper is from the same group
+  (Le Gal / Sayin / Bergo) as one camp.
+- **Agent README rewritten for v10** — adds what it guarantees and how each is
+  enforced (mechanism, not intention), the modelling rules that shape the graph,
+  the six-fact acceptance table, and known limits.
 - **BUILD.md's blocking acceptance test run, and `explain_disagreement` fired
   in production for the first time.** `fixtures/q-disputed.txt`, graph g_e087:
   22 things, 11 papers, 38 findings, 32 links, 43KB of raw JSON. Fact 3 — the
@@ -254,69 +267,6 @@ are dead — do not create files under them.
 
 *§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
-- [~] **BUILD.md's blocking acceptance test: 4 of 6 facts now verified.**
-      Fact 3 PASSED — see §3. Facts 4 and 6 below. It says
-      run `fixtures/q-disputed.txt` and check six facts independently. No run
-      has ever used a fixture question — everything was verified against ad-hoc
-      queries instead. Three of the six are unverified:
-      **(3) the disputed fixture must yield ≥1 link `state: "disagreed"`** —
-      BUILD.md is explicit that "zero is a failure, not a clean result", and
-      `explain_disagreement` is the piece the whole design points at. It has
-      never produced a disagreed link in production; the only one observed came
-      from a hand-assembled round before deployment.
-      **(4) a low-confidence finding must survive into the output** — the
-      "nothing is filtered by score" guarantee, never explicitly checked.
-      **(6) three quotes spot-checked verbatim against their DOIs** — the
-      mechanical check runs every round, but no human has confirmed a quote
-      against its source.
-      Facts 1, 2 and 5 are verified (event-level Paperclip calls, raw full-graph
-      JSON, and round 2 loading round 1 from memory with `round` incrementing —
-      g_5cb6 reached round 7).
-- [x] **Four production findings from the tractability bridge — all real, all
-      fixed.** (a) Graphs carried no disease entity and protein nodes carried no
-      accession, so the bridge recovered both from the question string. (b)
-      `suppresses` was used in real paths but absent from the closed `how` enum
-      — and auditing found `causes` and `treats` outside it too. (c)
-      `example-round.json`, the template the agent copies, omitted the accession
-      fields entirely: its one node was IRAK4 typed `gene`, exactly the node
-      that should carry Q9NWZ3, and SKILL.md tells the agent not to re-derive
-      the shape from source. (d) CLAUDE.md's `things[]` skeleton put IRAK4's
-      accession on an **antibody** node with `resolved_by` claiming the quote
-      named the kinase.
-      (c) is the CAUSE of half of (a): accession coverage across seven real
-      graphs was 0,0,0,0,1,1,2 nodes, because the only place the agent looks
-      never mentioned the field. The template was written 13 minutes before
-      accession merging landed and never updated — the stale-artifact failure
-      this repo's own CLAUDE.md warns about, committed by me.
-      Fixes: template now carries accession + gene_symbol + resolved_by +
-      ambiguity on its gene node AND a disease node; skeleton no longer
-      mistypes an antibody; enum widened to inhibits | activates | binds |
-      suppresses | increases | decreases | causes | drives | treats |
-      associated_with, with the confusable trio separated (activity vs
-      phenotype vs measured quantity); assembly now reports
-      `proteins_without_accession` and `has_disease_node` in coverage.
-      Deployed v9; template re-verified by executing it.
-- [x] **`findings.confidence` collapsed to a 0.15-wide band; fixed.** Fact 4 of
-      BUILD.md's acceptance test could not be evaluated: all 38 findings scored
-      0.75-0.9 and nothing lower. Confirmed from the code that **nothing filters
-      on confidence** — the only removals are a failed quote match and a content
-      duplicate, so the "nothing is filtered by score" guarantee holds. The
-      problem is generation, not filtering: the model never uses the bottom of
-      its own scale, so Stage 2 had no speculative leads to explore, which is
-      precisely what Stage 2 wants the low end for.
-      The tell: exactly one `hedged: true` finding, scored 0.8. Hedging and
-      confidence were not connected at all.
-      Fix: a calibration rubric in claim-extraction (0.9-1.0 quantified primary
-      result · 0.7-0.85 clear result without numbers · 0.5-0.65 hedged or
-      indirect · 0.3-0.45 discussion-section speculation · <0.3 passing
-      mention), the rule that `hedged: true` means confidence ≤ 0.65, and
-      `coverage.confidence_profile` reporting min/max/below_0_65 plus
-      `hedged_but_confident` — findings whose two fields contradict each other.
-      Reported, never silently corrected. Deployed v10.
-- [ ] **Acceptance fact 6 — three quotes spot-checked verbatim against their
-      DOIs — is the one genuinely human check still outstanding.** The
-      mechanical string match runs every round; this is the one that confirms
-      the fetched text matches the real paper.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
