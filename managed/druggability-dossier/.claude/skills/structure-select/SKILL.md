@@ -14,43 +14,40 @@ Everything here runs against Paperclip's `pdb_v` views plus Proto's Foldseek.
 All queries below were tested; the controls are stated so a regression is
 visible.
 
-## The exclusion list — every holo query depends on it
+## Ligand identity — `ligand_filter.py`, not a denylist
 
-Cofactors, buffers, cryoprotectants, detergents, lipids and sugars. Call it
-`$EXCL`:
+**There is no `$EXCL` list any more.** It was a hardcoded set of ~160 comp_ids
+paired with a 250-1200 Da window, and that pairing cannot decide holo — see the
+failure mode "A comp_id denylist plus a size floor CANNOT decide holo" below,
+which is the systemic one on this page.
 
-```
-'ATP','ADP','AMP','ANP','AGS','ACP','APC','GTP','GDP','GNP','GSP','GCP','UTP','UDP','UMP',
-'CTP','CDP','CMP','TTP','TDP','IMP','5GP','FMN','FAD','NAD','NAI','NAP','NDP','COA','ACO',
-'SAM','SAH','TPP','PLP','BTN','HEM','HEC','HEA','SF4','FES','F3S','MTE','MGD','B12','COB',
-'GSH','GDS','UPG','UD1','PAP','PPS','PEG','PGE','PG4','P6G','1PE','2PE','7PE','12P','15P',
-'XPE','P33','PE4','PE8','M2M','MPO','MPD','SUC','TRE','MAN','BGC','GLC','NAG','GAL','FUC',
-'SIA','BMA','XYL','MLI','MLA','TLA','TAR','EPE','MES','TRS','BTB','BIS','CIT','FLC','ACY',
-'ACT','FMT','OXL','SIN','BME','DTT','DTV','DTU','IPA','IPH','DMS','EDO','GOL','SO4','PO4',
-'NO3','CO3','AZI','SCN','IOD','URE','IMD','BCT','BOG','LDA','LMT','C8E','OGA','SDS','TWT',
-'P4C','HTG','HEZ','PIN','CXS','MYR','PLM','OLA','STE','DAO','D12','UND','PC1','PEE','PGV',
-'PEF','PCW','LMN','CDL','CLR','CHD','Y01','OCT','HEX','DEP','BU1','BU3','PDO','PGO','PGR',
-'1BO','MRD','MRY','SPD','SPM','PUT','CAC','WO4','MOO','VO4','PER','PPV','POP','AF3','ALF',
-'BEF','MGF'
+Holo is now decided from chemistry:
+
+```python
+from ligand_filter import classify_ligands, holo_call
+v = classify_ligands(["MOV", "GNP", "L44"])   # one Paperclip trip per 40
+v["L44"].verdict        # 'lipid_or_detergent'
+v["L44"].reason         # '...unbranched aliphatic carbon chain is 21...'
+holo_call(["GNP", "GOL"])["is_holo"]          # False
+holo_call(["GNP", "GOL"])["determined"]       # True — and check this
 ```
 
-Hand-curated from the ~160 commonest entries, **not exhaustive** over the 38K-row
-`chemcomps` dictionary. Rare cofactors will leak through as false HOLO — eyeball
-`all_ligands` on anything surprising.
+`neighbour_precedent.py` uses it. Two rules that come with it:
+
+- **`unknown` is not apo.** A failed CCD lookup returns `unknown` with a
+  `lookup_failed` flag. Read `holo_call(...)["determined"]`, and on this axis
+  especially — "no drug-like holo among the neighbours" is a real finding, and
+  a lookup failure wearing that costume is the worst confusion available.
+- **Select candidates in SQL, classify in Python.** The SQL predicate cannot
+  express chemistry. Pull the comp_ids unfiltered and decide afterwards.
 
 ## 1. Candidate structures with holo/apo classification
 
+Pull the candidates, then classify them. **The SQL does not decide holo.**
+
 ```sql
 SELECT s.entry_id, s.resolution, s.exptl_method, s.release_date,
-  CASE WHEN COUNT(l.comp_id) FILTER (
-         WHERE l.comp_type='non-polymer'
-           AND l.formula_weight BETWEEN 250 AND 1200
-           AND l.comp_id NOT IN ($EXCL)) > 0
-       THEN 'HOLO' ELSE 'APO' END AS state,
-  COALESCE(STRING_AGG(DISTINCT CASE WHEN l.comp_type='non-polymer'
-             AND l.formula_weight BETWEEN 250 AND 1200
-             AND l.comp_id NOT IN ($EXCL)
-           THEN l.comp_id||'('||ROUND(l.formula_weight::numeric,0)||')' END, ' '), '-') AS druglike,
+  COALESCE(STRING_AGG(DISTINCT l.comp_id, ' '), '-') AS candidate_ligands,
   COALESCE(STRING_AGG(DISTINCT l.comp_id||':'||COALESCE(l.drugbank_id,'-'), ' '), '-') AS all_ligands
 FROM pdb_v.structures_by_accession s
 LEFT JOIN pdb_v.entry_ligands l ON l.entry_id = s.entry_id
@@ -60,6 +57,14 @@ ORDER BY s.resolution NULLS LAST, s.release_date DESC
 LIMIT 25
 ```
 
+Then `holo_call(candidate_ligands.split())` per entry.
+
+**Do NOT add `AND l.comp_type='non-polymer'` to that WHERE clause**, however
+tempting. Measured on a 25-entry list: without it the query returns in **6 ms**,
+with it the identical query **times out** (>120 s, `[error] Request timed out`).
+The column is not usefully indexed, and it does not separate cofactors from
+drugs anyway — `ligand_filter` reads the CCD type itself.
+
 **Do not order by the state column.** An earlier version of this query used
 `ORDER BY 5 DESC`, where column 5 is the `'HOLO'|'APO'` CASE string. Since
 `'HOLO' > 'APO'` alphabetically, every apo entry falls past the row limit and
@@ -68,7 +73,7 @@ the real split is **17 holo / 35 apo**. Order by resolution, and get the counts
 from a separate `GROUP BY state` query rather than by reading the first page.
 
 **Controls: 4OBE must return APO, 6OIM must return HOLO (MOV).** If either
-flips, the exclusion list or the MW window has broken.
+flips, `ligand_filter` has regressed.
 
 Verified on KRAS: 4LYH HOLO 21F(516), 6OIM HOLO MOV(563), 8AZX HOLO OFU(467);
 4OBE APO, 6P0Z APO. On TNF-alpha: 9OJO A1CB1(384) 1.36 A, 2AZ5 307(548) 2.1 A.
@@ -178,9 +183,11 @@ The procedure it implements, in order:
 3. **Resolve the aligned CHAIN(s) to accessions**, not the entry's accessions —
    see the failure mode below, it changes answers. On the multimer path a
    neighbour is a *set* of matched chains and all of them are resolved.
-4. **Ask whether those proteins have drug-like holo entries**, using the §1
-   MW window and `$EXCL`, reported as an entry-level upper bound *and* a
-   single-protein-entry floor, with `pdb_v.entries.title` attached.
+4. **Ask whether those proteins have drug-like holo entries**, classifying
+   every candidate ligand with `ligand_filter`, reported as an entry-level
+   upper bound *and* a single-protein-entry floor, with `pdb_v.entries.title`
+   attached and a `rejected_ligands` line per neighbour saying *why* each
+   candidate was dropped.
 
 Output keys worth knowing: **`search_path`** (`multimer` | `single_chain` — read
 this first; it decides whether the block is evidence about an interface),
@@ -267,8 +274,7 @@ SELECT a.acc, COUNT(DISTINCT a.entry_id) n_struct,
        COALESCE(STRING_AGG(DISTINCT l.comp_id,' '),'-') druglike
 FROM all_s a
 LEFT JOIN pdb_v.entry_ligands l ON l.entry_id = a.entry_id
-     AND l.comp_type='non-polymer' AND l.formula_weight BETWEEN 250 AND 1200
-     AND l.comp_id NOT IN ($EXCL)
+     AND l.comp_id IN (<the comp_ids ligand_filter classified `druglike`>)
 GROUP BY a.acc HAVING COUNT(DISTINCT a.entry_id) FILTER (WHERE l.comp_id IS NOT NULL) > 0
 ORDER BY 3 DESC LIMIT 20
 ```
@@ -285,7 +291,7 @@ This is the systemic one. Several failure modes below are symptoms of it.
 Every "is this entry holo?" decision in this pipeline was made two ways, and
 both are wrong:
 
-1. **`comp_id` against a hardcoded exclusion set** — §1's `$EXCL`,
+1. **`comp_id` against a hardcoded exclusion set** — the former §1 `$EXCL`,
    `neighbour_precedent.EXCLUDED_LIGANDS`, `modal_app.COFACTORS`.
 2. **A heavy-atom or MW floor** — `modal_app.DRUGLIKE_MIN_HEAVY_ATOMS = 18`,
    `neighbour_precedent.MW_MIN/MW_MAX`.
@@ -373,11 +379,21 @@ environment it is evaluated in.
 
 ### `comp_type` does not separate cofactors from drugs
 
+**Still true, and now a reason not to filter on `comp_type` at all** — see the
+section above; `ligand_filter` reads the CCD type itself and decides on
+chemistry.
+
 GDP and UDP are `'RNA linking'`, but **ATP (507 Da), GTP (523), GNP/GppNHp (522),
 NAD (663), FAD (786), COA (768), HEM (617) are all `'non-polymer'`** and sit
-inside any sensible MW window. GNP is the KRAS *active-state* analog — without
-explicit `comp_id` exclusion, every GppNHp KRAS structure misclassifies as HOLO.
-The exclusion list is load-bearing.
+inside any sensible MW window. GNP is the KRAS *active-state* analog, so a
+`comp_type` filter both admits every GppNHp KRAS structure as HOLO *and* drops
+the `'RNA linking'` nucleotides it should have caught. It discriminates in
+neither direction.
+
+There is a second, unrelated reason: putting `comp_type` in a WHERE clause is
+**slow enough to fail**. Measured on the same 25-entry list, `SELECT DISTINCT
+l.comp_id ... WHERE l.entry_id IN (...)` returns in 6 ms and the identical query
+with `AND l.comp_type='non-polymer'` times out past 120 s.
 
 ### `drugbank_id` is not a druglikeness signal
 
@@ -617,8 +633,8 @@ on the full 137-entry IL-17A multimer neighbourhood, 8 entries flagged
 
 | entry | ligand | what it actually is |
 | --- | --- | --- |
-| 1RV6 | `B3P` | bis-tris propane — a **buffer**, not on `$EXCL` |
-| 4MQW | `JEF` | Jeffamine — a **crystallisation additive**, not on `$EXCL` |
+| 1RV6 | `B3P` | bis-tris propane — a **buffer**; `ligand_filter` still calls it druglike |
+| 4MQW | `JEF` | Jeffamine — a **crystallisation additive**; `ligand_filter` still calls it druglike |
 | 4QAF | `OMA` | a cyclopropane fatty acid |
 | 4EC7 | `L44` | diacylglycerol (already known) |
 | 4XPJ | `LPY` | lysophospholipid (already known) |
@@ -629,33 +645,46 @@ on the full 137-entry IL-17A multimer neighbourhood, 8 entries flagged
 correctly retrieved, bound to the wrong protein in the entry. The chain fix
 keeps FSHR out of `accessions`, but `has_druglike_holo` is entry-level and will
 still read `true` with `attribution: ambiguous_multiprotein`. **Read
-`ligand_names` and the title.** The `$EXCL` list is `comp_id`-keyed and `B3P`
-and `JEF` are two more leaks; do not patch the list, read the names.
+`ligand_names` and the title.** `ligand_filter` removes the cofactor and lipid
+rows of that table (`L44`, `LPY`, `OMA`, and the `9SR`/`9SL` lipids alongside
+them) but not `B3P` or `JEF` — see "What `ligand_filter` fixed here, and what it
+did NOT" below.
 
-### The exclusion list leaks, and on fold neighbours it leaks into the headline
+### What `ligand_filter` fixed here, and what it did NOT
 
-§1's `$EXCL` is keyed on `comp_id`, so a cofactor with a *novel* comp_id sails
-through the 250-1200 Da window as a false HOLO. On a single target you eyeball
-`all_ligands` and catch it. On a 25-neighbour sweep it becomes the entire
-finding, because there is only ever one or two holo hits to begin with.
+Superseded: this section used to argue that `$EXCL` leaks and that the fix was
+to read `ligand_names` by eye. The list is gone and the classifier decides. Both
+of this axis's historical false positives now classify correctly, **without the
+classifier having been shown either case**:
 
-Both calibration targets landed exactly one "holo" neighbour, and **both were
-false**:
-
-| | ligand | what it actually is | MW |
+| | ligand | old verdict | `ligand_filter` verdict |
 | --- | --- | --- | --- |
-| KRAS → 4PHH | `2UK` | `5'-O-[(R)-hydroxy…]guanosine` — a GppNHp analog | 635 |
-| IL-17A → 4EC7 | `L44` | `(2S)-1-hydroxy-3-(tetradecanoyloxy)propan-2-yl docosano…` — a diacylglycerol | 625 |
+| KRAS → 4PHH | `2UK` | holo (635 Da, comp_id not listed) | `cofactor` — purine + ribose + phosphate |
+| IL-17A → 4EC7 | `L44` | holo (625 Da, comp_id not listed) | `lipid_or_detergent` — 21-carbon chain, 48% of the molecule |
+| IL-17A → 4XPJ | `LPY` | holo | `lipid_or_detergent` — phosphate head, 12-carbon chain |
 
-Also seen in the same runs: `GER` (geranylgeranyl, a prenyl lipid, 274 Da) on
-RAB7 and RAC1, `LPY` (a lysophospholipid) on mouse NGF, `PE5` (a PEG) on a
-TGF-beta2 nanobody complex.
+IL-17A multimer accordingly went from 23 apo / 2 holo to **25 apo / 0 holo, 0
+undetermined**, which is the answer the previous run argued for by hand.
 
-Do not extend `$EXCL` to patch this — the list is a shared, controlled artifact
-with stated controls (4OBE APO, 6OIM HOLO). Instead the module returns
-`ligand_names` next to every `comp_id`, and a nucleotide, lipid or polyol is
-obvious from its name in a way it never is from a three-character code. **Read
-the names before writing a precedent claim.**
+**But it opens a new gap, and it is a regression in one place.** The classifier
+has no crystallisation-additive rule for small aromatic amines or polyol
+buffers, so three known artifacts come back `druglike`:
+
+| comp_id | what it is | MW / heavy atoms | verdict |
+| --- | --- | --- | --- |
+| `BEN` | **benzamidine** — a protease crystallisation additive | 120 / 9 | `druglike` |
+| `B3P` | bis-tris propane — a buffer | 282 / 19 | `druglike` |
+| `JEF` | Jeffamine — a crystallisation additive | 598 / 41 | `druglike` |
+
+`BEN` is the regression: at 120 Da the old `MW_MIN = 250` floor excluded it, and
+the classifier does not. It is the single holo call in the IL-17A **single-chain**
+top 25 (2GNN, an Orf virus VEGF variant), and the defensible count there is still
+**0 of 25**. `B3P` and `JEF` sit in the multimer neighbourhood's tail.
+
+So the reason to read `ligand_names` and `rejected_ligands` has not gone away —
+it has moved from cofactors and lipids, which are now handled, to bench
+chemistry that happens to have a ring. Report `BEN`, `B3P` and `JEF` upstream
+rather than adding a local denylist; a local list is the defect this replaced.
 
 ### The public server's latency varies by two orders of magnitude
 
@@ -709,6 +738,26 @@ the row cap and is not — a 200-row aggregate came back cut off mid-array at
 
 Parse the output by the `---+---` rule's `+` positions, not by splitting on
 `|` — titles contain pipes.
+
+Three more query shapes that fail, all measured on `pdb_v.entry_ligands`:
+
+- **`comp_type` in a WHERE clause times out.** 6 ms without it, >120 s with it,
+  same 25 entries. See the `comp_type` section.
+- **`IN (SELECT ...)` is the fast plan; a direct JOIN is not.** For P15692
+  (VEGF-A, 75+ entries), `WHERE l.entry_id IN (SELECT entry_id FROM s)` returns
+  in **9 ms**, while `FROM structures_by_accession st JOIN entry_ligands l ON
+  l.entry_id = st.entry_id WHERE st.accession = ...` **times out**. Same rows,
+  same accession.
+- **One accession at a time, and even then expect one to fail.** Sweeping the
+  17 accessions of the IL-17A single-chain neighbourhood as one `unnest` array
+  timed out; per accession, 16 of 17 returned in ~1.4 s and **P67861 timed out
+  reproducibly at 120 s**. So the sweep retries and, on persistent failure,
+  marks that accession `lookup_failed` / `holo_determined: false` rather than
+  recording it as having no drug-like ligands. A timeout is not a zero.
+
+`neighbour_precedent.py` also short-circuits the accession aggregation entirely
+when nothing classified drug-like: the `n_dl > 0` filter is then unsatisfiable,
+and running it anyway costs 120+ s to prove an already-known empty result.
 
 ### Untested, do not assume
 

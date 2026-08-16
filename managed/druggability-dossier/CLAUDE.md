@@ -704,41 +704,149 @@ geometry already found**, and not as a way to find one.
 
 ### Measured on our own targets — use these, not the vendor claims
 
-**Confidence is anti-diagnostic, and worse than the literature reports.** We
-sealed KRAS's switch-II pocket with nine phenylalanine substitutions and re-ran
-the probe panel. The mutant scored **higher** than wild type on every
-pLDDT-family metric — complex pLDDT 0.940 to 0.957, confidence 0.919 to 0.927 —
-and its backbone came back at **0.73 A C-alpha RMSD to wild type, lower than the
-1.02 A wild-type-versus-wild-type baseline**. The switch loops move more between
-two wild-type seeds than between wild type and a nine-fold mutant. Only average
-PAE noticed anything at all.
-So there is **no output signal that tells you a site is gone**. Never treat a
-high confidence value as evidence that a predicted pocket is real.
+**Read this section knowing what happened to it on 2026-08-15.** Four of this
+project's headline computational claims have now been re-measured with a real n,
+and **three of the four were overturned or narrowed**: the 651-fold TNF-alpha
+druggability spread (withdrawn — a pocket-matching artifact), the fpocket
+druggability score itself (demoted — AUC 0.720 with a CI that includes chance,
+41% false negatives on pockets with a drug bound), cofolding confidence as
+"anti-diagnostic" (overturned — the signal is present on 5 of 5, it is just too
+small to act on), and the Boltz-2 affinity head's 1.97-log bias (overturned —
++0.23 log, CI including zero). Only the ESMFold caution survived, and it
+survived in a different form after our own counterexample turned out to be an
+input artifact.
+
+**Every one of them failed in the flattering direction** — each made our
+instrument sound more decisive than it is, or made a limitation sound more
+absolute and therefore more quotable — **and every one was caught the same way,
+by giving it an n.** The originals were n=1, n=1, 2 seeds on one target, and one
+compound against one literature value. So: when a figure in this section has no
+denominator beside it, treat it as a hypothesis about our tools, not a
+measurement of them.
+
+**Never treat a high confidence value as evidence that a predicted pocket is
+real — but the reason has changed, and the old reason is OVERTURNED.**
+
+**What was claimed (n=1, KRAS, 2 seeds):** that the sealed mutant scored
+*higher* than wild type on every pLDDT-family metric — complex pLDDT 0.940 to
+0.957, confidence 0.919 to 0.927 — with a backbone at 0.73 Å C-alpha RMSD to
+wild type against a 1.02 Å wild-type-versus-wild-type baseline, so that only
+average PAE noticed anything and there was "no output signal that tells you a
+site is gone". **That is withdrawn.** It was one target at two seeds.
+
+**What the repeat measured: 5 targets, 3 seeds per state, 30 folds, one uniform
+rule (a metric "notices" only if it moves beyond twice the seed spread).**
+
+| metric family | notices the sealed pocket |
+| --- | --- |
+| `confidence_score`, `complex_plddt`, `complex_iplddt` | **5 of 5** |
+| `iptm` / `ligand_iptm` | **3 of 5** |
+| `ptm`, `avg_pae`, `complex_pde` | 2 of 5 |
+
+So the pLDDT family is **not** anti-diagnostic. **The ligand-facing metrics are
+the treacherous ones** — on TNF-alpha `ligand_iptm` **rose** from 0.864 to
+0.906 when the pocket was sealed shut, and on IL-17A every ptm/iptm metric was
+flat.
+
+**The rule survives on magnitude instead of direction, which is a weaker but
+sounder footing.** Only KRAS moved enough to see unaided (confidence 0.959 →
+0.813). JAK1 fell 0.969 → 0.948 — a nine-fold mutation that destroys the ATP
+site, and the model still reports an excellent structure. BCL-2 0.844 → 0.798,
+TNF-alpha 0.873 → 0.850, IL-17A 0.806 → 0.774. **A drop of 0.02–0.05 is not
+something a reader will notice, and nothing tells you the drop is there without
+the wild-type control beside it.** So: never read a confidence value as evidence
+a pocket exists, because the signal is real but too small and too
+metric-dependent to act on.
+
+**The backbone claim inverts outright.** Against a proper seed baseline the
+backbone *does* notice: KRAS 0.23 Å wild-type-versus-wild-type against **1.37 Å**
+wild-type-versus-sealed, JAK1 0.26 Å against 0.83 Å, IL-17A 2.98 Å against
+5.82 Å. Two targets read "invisible" (BCL-2 4.92 vs 4.64 Å, TNF-alpha 14.85 vs
+10.80 Å) and both have seed spreads of the same size as the effect — TNF's
+baseline sd is 10.09 Å — so those are unresolved, not negative. **The original
+0.73-versus-1.02 comparison was seed noise on a two-seed baseline.**
 
 **Reseeding is not sampling.** Eight seeds of one probe gave a median pairwise
 centroid dispersion of **0.21 A** — seven of eight within 0.2 A. A "library" of
 probes hops between two or three memorised sites rather than exploring a surface.
 
-**The affinity head ranks; it does not measure potency.** On JAK1, tofacitinib
-(measured 0.50 nM) was predicted at **46.4 nM — 1.97 log units too weak**. But
-separation from two unrelated negatives was **2.36 log units** with correct
-ordering and binder probability 0.75 against 0.37 and 0.11. So use it to rank
-candidates within a target; **never compare its absolute value against a
-nanomolar threshold**, and never use it for a go/no-go potency decision.
+**The affinity head TRIAGES. It does not rank within a target, and it does not
+measure potency. Both halves of the old rule were wrong, in opposite
+directions.**
+
+**The 1.97-log bias is OVERTURNED.** It came from one compound against a single
+0.50 nM literature value. Measured over **17 approved/known binders across JAK1
+and BCL-2**, mean signed error is **+0.23 log**, 95% CI **(−0.28, +0.74)**,
+p=0.38 — indistinguishable from zero — with **11 too weak and 6 too strong**, so
+there is no consistent direction to correct for. Against the **64-measurement**
+ChEMBL consensus rather than one paper, tofacitinib's error is **+0.96**, not
+1.97. MAE is **0.85** against a ground-truth spread of **0.58 log** (mean ChEMBL
+sd over the 11 compounds with ≥3 measurements), so the model runs at about 1.5×
+the experimental noise floor. **Still never compare its absolute value against a
+nanomolar threshold** — an 0.85-log MAE is a factor of 7 — but stop describing
+it as systematically pessimistic.
+
+**"Use it to rank candidates within a target" is NOT SUPPORTED and is
+withdrawn.** That is the one use the old rule recommended and it is the one the
+data does not carry: within-target Spearman is **+0.48, 95% CI (−0.05, +0.77),
+p=0.11** on JAK1 (n=12) and **+0.60, p=0.28** on BCL-2 (n=5). Both intervals
+include zero. The pooled figure across both targets (+0.60, p=0.012) looks
+significant and is not usable — pooling two targets with different potency
+offsets manufactures rank correlation out of the offset.
+
+**What it does do is separate binders from non-binders, and that is now measured
+with an n.** JAK1, **12 actives against 9 decoys**: predicted pChEMBL 7.07±0.94
+against 4.75±0.69, a **2.32-log** separation, **ROC AUC 0.981** on predicted
+affinity and **1.000** on binder probability, Cohen's d 2.75. The old "2.36-log
+separation" quoted the same shape from **1 active against 2 decoys** — no n at
+all. Use it as a triage filter. Do not use it to order a series, and never for a
+go/no-go potency decision.
 
 **The pose head is a different instrument from the affinity head, and it is
 good.** Same run: confidence 0.974, ligand placed in the ATP site with the
 canonical hinge contacts (Glu957 at 2.88 A, Leu959 at 3.07 A), gatekeeper
 Met956, catalytic Lys908, DFG Asp1021. Trust the pose, discount the number.
 
-**ESMFold does not do interfaces.** It accepts multiple chains and strips its
-25-glycine linker correctly, but on the IL-17A homodimer it produced **1
-inter-chain contact against 97 in the deposited structure**, centre-of-mass
-separation 24.7 A against 12.8 A, global dimer TM-score 0.328 — two separated
-monomers touching at a point, not an intertwined dimer.
-**But its confidence correctly flags the failure** (pTM 0.399 and average PAE
-18.26 on the dimer, against 0.905 and 3.66 on the monomer), which is more than
-Boltz-2 managed above. Use it as a filter, not as a PPI predictor.
+**ESMFold does interfaces sometimes, its pTM tells you which time it is, and our
+original counterexample was an INPUT ARTIFACT.** Refined on **14 complexes × 2
+linker constructions, 28 runs**.
+
+**The old claim, and what was wrong with it.** We reported that on the IL-17A
+homodimer ESMFold produced **1 inter-chain contact against 97 in the deposited
+structure**, centre-of-mass separation 24.7 Å, dimer TM-score 0.328 — "two
+separated monomers touching at a point". **That reproduces exactly** — 1
+contact, minimum inter-chain C-alpha 7.30 Å, pTM 0.399 — **when you feed it
+IL-17A's full UniProt mature chain.** Feed the crystallographically ordered core
+of the same dimer, scored against the same reference and the same contact set,
+and it returns **55 contacts and 42% contact recovery**, complex TM 0.861, pTM
+0.684. Same tool, same complex, only the input sequence differs. **The failure
+was ours.** It bites on chains with long disordered termini; TNF-alpha is
+unaffected either way (78% recovery on both constructions).
+
+**The behaviour is bimodal, not uniformly bad.** Over 28 runs, **12 land above
+50% contact recovery and 10 land at exactly zero**, with little in between. So
+"does not do interfaces" is too strong and "does interfaces" is too generous.
+
+**pTM is a usable gate, and this is the part worth keeping.** pTM tracks the
+error strongly: Spearman **+0.79** against contact recovery and **+0.94**
+against complex TM-score, n=28. Thresholded:
+
+| pTM cut | runs kept | median recovery | zero-recovery runs |
+| --- | --- | --- | --- |
+| none | 28 | 0.414 | 10 |
+| ≥ 0.60 | 18 | 0.708 | 2 |
+| ≥ 0.80 | **5** | **0.873** | **0** |
+
+**At pTM ≥ 0.80 it is 5 of 5 with zero false alarms in 28 runs.** The two
+survivors at ≥ 0.70 with zero recovery are both Trypsin–BPTI (pTM 0.752 and
+0.702) — a real failure mode, and the reason the usable gate is 0.80 rather than
+0.70. There were **no** false alarms in the other direction: nothing below pTM
+0.60 recovered ≥ 50% of contacts.
+
+So: **use it as a filter with the gate at pTM ≥ 0.80, feed it the ordered core
+rather than the full mature chain, and check the construction before believing a
+zero.** A separated-monomers result on a protein with disordered termini is a
+prompt to re-run on the core, not a finding about the complex.
 
 **bioemu frames are pre-superposed but have no side chains.** All sixteen
 centres of mass sat within 0.045 A and the optimal rotation was identity to
@@ -956,6 +1064,19 @@ are uninformative — set `affinity.reliable: false` and do not report predicted
 values for novel chemotypes.
 
 A prediction without its control is not a measurement.
+
+**Two calibration notes on that one-log criterion, both measured over 17 pairs
+across JAK1 and BCL-2.** First, **one control compound is not a control** — the
+predictor's MAE is 0.85 log against a ground-truth spread of 0.58 log, so a
+single pair sitting inside or outside one log is largely a coin flip on that
+pair's own measurement noise. That is exactly how the withdrawn 1.97-log
+tofacitinib figure was produced: one compound against one literature value,
+where the 64-measurement ChEMBL consensus gives +0.96. Run several, or say the
+control is a single point. Second, **`reliable: true` licenses triage and
+nothing more.** Even a predictor that passes this control cannot order compounds
+within your target — within-target Spearman is +0.48 with a 95% CI of (−0.05,
++0.77). Separating actives from decoys is what it does (ROC AUC 0.981 on
+affinity, 1.000 on binder probability, 12 actives against 9 decoys).
 
 ### 13. Four axes have no tool in this deployment — null them, never recall them
 

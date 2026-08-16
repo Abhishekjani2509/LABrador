@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import Anthropic from "@anthropic-ai/sdk";
 import dotenvx from "@dotenvx/dotenvx";
 import { z } from "zod";
+import { assertNoCredentials } from "@/lib/credential-scan.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas + types shared with managed agent dirs
@@ -588,5 +589,56 @@ export async function loadManagedAgent(
     const mod = (await import(toolsPath)) as { tools?: CustomToolSpec[] };
     tools = mod.tools ?? [];
   }
+
+  // --- credential guard: THE chokepoint -----------------------------------
+  //
+  // This is the last line, not a backstop. `scripts/deploy.ts` is NOT a
+  // complete chokepoint for these artifacts: rubric.md never passes through
+  // deploy.ts on its way to the API at all. It ships at *runtime*, from
+  // runTask()'s `user.define_outcome` event (see the rubric field ~40 lines
+  // above `consumeUntilEndTurn`), and so do several manifest.json fields —
+  // the session title, `vault_ids`, and `memory.instructions`, all sent at
+  // sessions.create. A key added to either file *after* a successful deploy
+  // therefore reaches the API on the next `bun run console` or router
+  // invocation without deploy.ts ever seeing it.
+  //
+  // This function is the one place every path converges:
+  //
+  //   scripts/console.ts:40           → loadManagedAgent → runTask / sessions.create
+  //   agent/tools/<name>.ts (router)  → loadManagedAgent → runTask
+  //   scripts/deploy.ts:35            → loadManagedAgent → agents.create/update
+  //
+  // and it already has all four artifacts in hand. So the scan goes here, and
+  // it throws — a warning in a build log is not a control. The scanner itself
+  // lives in lib/credential-scan.ts because scripts/deploy.ts calls it too
+  // (for the skill bundles, which only deploy can see); two copies of the
+  // regexes would drift and the weaker copy would be the one guarding the
+  // path that matters.
+  //
+  // NOTE ON `tools`: with `skipToolImport` (the router path) this list is
+  // empty here, because the wrapper imports tools.ts statically and passes the
+  // handlers to runTask directly. That is safe — runTask never uploads tool
+  // declarations; they ship only in the agent config at deploy time, and
+  // deploy calls this function *without* skipToolImport, so the declarations
+  // are always scanned on the path that actually uploads them.
+  assertNoCredentials(
+    [
+      {
+        label: `managed/${name}/CLAUDE.md (system prompt)`,
+        text: instructions,
+      },
+      { label: `managed/${name}/rubric.md`, text: rubric ?? "" },
+      {
+        label: `managed/${name}/manifest.json`,
+        text: JSON.stringify(manifest),
+      },
+      {
+        label: `managed/${name}/tools.ts (tool definitions)`,
+        text: JSON.stringify(tools),
+      },
+    ],
+    `load managed agent "${name}"`
+  );
+
   return { dir, instructions, manifest, rubric, tools };
 }
