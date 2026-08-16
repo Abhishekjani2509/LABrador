@@ -34,6 +34,21 @@ TARGET_KINDS = {"protein", "gene"}
 # not asserted anything.
 NON_ACTIONABLE_BASIS = {"background_only", "hedged_only"}
 
+# The floor applied to the NOMINATION rather than to the mechanism. An allowlist,
+# not the complement of NON_ACTIONABLE_BASIS: a link whose `basis` is absent or
+# unrecognised has asserted nothing either, and must not outrank a hedged link by
+# being unnamed.
+ACTIONABLE_BASIS = {"primary", "mixed"}
+
+# Strongest first. A basis outside this tuple -- absent, or a value SCHEMA.md v1.1
+# does not define -- ranks below every value in it.
+BASIS_STRENGTH = ("primary", "mixed", "hedged_only", "background_only")
+
+# Nominations are emitted strongest-evidence-first so a review-only nomination is
+# not visually indistinguishable from one backed by primary experiments. Tier
+# never adds or removes a nomination; it only orders the same set.
+TIER_ORDER = {"actionable": 0, "gap_only": 1, "non_actionable": 2}
+
 # `how` has NO enum in SCHEMA.md. Every other categorical field there carries an
 # explicit a|b|c comment; `how` does not. It is open vocabulary written by the
 # upstream extraction model, so these sets can never be complete. An unmatched
@@ -352,6 +367,95 @@ def nominate(graph, idx):
     return nominated, rejected, adjudicate
 
 
+def basis_strength(basis):
+    return (BASIS_STRENGTH.index(basis) if basis in BASIS_STRENGTH
+            else len(BASIS_STRENGTH))
+
+
+def evidence_floor(reasons, idx):
+    """The evidence tier of the NOMINATION, read from the links that justified it.
+
+    NON_ACTIONABLE_BASIS already stops a review-sourced finding from setting
+    `interaction_to_disrupt`. Nothing read `basis` at nomination time, so a target
+    whose only supporting edge was a review citation arrived looking exactly like
+    one backed by primary experiments, and downstream could not separate them.
+
+    This does NOT reject anything. A review-only nomination may still be worth a
+    run; it must not be worth one silently.
+
+    Three tiers, not two. A gap carries no `basis` because a gap is by definition
+    unstated, so gap-only nominations are neither actionable nor review-backed --
+    they are proposals, the same reading SCHEMA.md's 0.6 cap on gaps[].confidence
+    already applies to them.
+    """
+    links, gaps = [], []
+    for reason in reasons:
+        via = reason.get("via")
+        if via in idx["links"]:
+            basis = idx["links"][via].get("basis") or "unknown"
+            links.append({
+                "link": via,
+                "basis": basis,
+                "actionable": basis in ACTIONABLE_BASIS,
+            })
+        elif via in idx["gaps"]:
+            gaps.append(via)
+
+    strongest = min(links, key=lambda l: basis_strength(l["basis"]),
+                    default=None)
+    strongest_basis = strongest["basis"] if strongest else None
+    actionable = any(l["actionable"] for l in links)
+
+    if not links:
+        tier = "gap_only"
+    elif actionable:
+        tier = "actionable"
+    else:
+        tier = "non_actionable"
+
+    warning, asks = None, []
+    if tier == "non_actionable":
+        weak = ", ".join(l["link"] for l in links)
+        warning = (
+            f"NOT ACTIONABLE: no edge nominating this target ({weak}) is primary "
+            f"or mixed -- the strongest carries basis '{strongest_basis}'. The "
+            f"nomination rests only on review citations or hedged claims, and no "
+            f"edge here asserts that a small molecule acts on this target. This "
+            f"is how a modality trap enters -- "
+            f"a review calling a compound 'a prototype of' a target whose real "
+            f"precedent is antibodies only manufactures small-molecule precedent "
+            f"that does not exist, and review-sourced means is_own_result: false, "
+            f"which surfaces as exactly this basis. Issue resolve_link on {weak} "
+            f"and read what comes back BEFORE spending a dossier run."
+        )
+        asks = [{"ask": "resolve_link", "target": l["link"], "depth": "deep"}
+                for l in links]
+    elif tier == "gap_only":
+        named = ", ".join(gaps)
+        warning = (
+            f"PROPOSAL, NOT EVIDENCE: nominated by {named} and by no link, so "
+            f"there is no `basis` to read -- a gap states that nobody "
+            f"wrote the edge, which is neither primary support nor a review "
+            f"citation. SCHEMA.md caps gaps[].confidence at 0.6 for this reason: "
+            f"a proposal, not a finding. This is the route that carries undrugged "
+            f"candidates, so the missing edge is not evidence against the target; "
+            f"issue test_gap on {named} before spending a dossier run."
+        )
+        asks = [{"ask": "test_gap", "target": g, "depth": "deep"} for g in gaps]
+
+    return {
+        "tier": tier,
+        "strongest_basis": strongest_basis,
+        "actionable": actionable,
+        "supporting_links": links,
+        "supporting_gaps": gaps,
+        "warning": warning,
+        # SKILL.md: one ask per request, one round per request. Listed here as
+        # candidates, not as a batch to fire.
+        "asks": asks,
+    }
+
+
 def symbol_shaped(token):
     """Shape test only. Says nothing about whether the token names a gene."""
     if not (2 <= len(token) <= 10):
@@ -512,6 +616,28 @@ def symbol_candidates(idx, nominated_ids, only=None):
                 "uniprot_accession": None,
             })
 
+    # Symbols scraped from ONE thing's name + aliases are alternative names for
+    # what the extractor thought was one entity, so verification must confirm
+    # they agree on an accession -- not stop at the first that resolves.
+    #
+    # Measured on the modality-trap fixture: t1 yields TL1A, TNFSF15, TNF and
+    # VEGI. TL1A and VEGI return no row, TNFSF15 returns O95150, and TNF -- a
+    # substring of the descriptive alias "TNF ligand superfamily member 15" --
+    # returns P01375, a different and heavily drugged protein. A resolver that
+    # takes the first symbol that verifies picks TNF and hands the dossier an
+    # accession with thousands of small-molecule actives against it. That is
+    # failure mode 3 with a clean-looking row behind it.
+    per_thing = {}
+    for c in candidates:
+        per_thing.setdefault(c["thing"], []).append(c["symbol"])
+    for c in candidates:
+        siblings = [x for x in per_thing[c["thing"]] if x != c["symbol"]]
+        c["sibling_symbols"] = siblings
+        # Sharing a phrase means different proteins; sharing a thing means
+        # possibly-different names for one. Both block a unilateral pick, for
+        # different reasons, so keep them as separate fields.
+        c["needs_agreement_check"] = bool(siblings)
+
     return {
         "note": (
             "PROPOSED, NOT CONFIRMED. Regex over thing `name` and `aliases`, run "
@@ -526,8 +652,18 @@ def symbol_candidates(idx, nominated_ids, only=None):
             "FROM uniprot_v.proteins WHERE gene_name IN (<query_forms>) "
             "AND organism = 'Homo sapiens'"
         ),
+        "agreement_rule": (
+            "Symbols from one thing are alternative names for one entity, so "
+            "verify ALL of them and require they agree on an accession. Two "
+            "symbols off the same thing resolving to DIFFERENT accessions is an "
+            "unresolved conflict, never a majority vote -- one of them is a "
+            "substring of a descriptive alias. Do not stop at the first that "
+            "resolves."
+        ),
         "ambiguous_things": sorted({c["thing"] for c in candidates
                                     if c["ambiguous"]}),
+        "things_needing_agreement": sorted({c["thing"] for c in candidates
+                                            if c["needs_agreement_check"]}),
         "candidates": candidates,
     }
 
@@ -553,6 +689,8 @@ def build(graph, only=None):
             "aliases": t.get("aliases", []),
             "mentions": t.get("mentions"),
             "nominated_by": reasons,
+            # Tier of the nomination itself. Never gates it -- see evidence_floor().
+            "evidence_floor": evidence_floor(reasons, idx),
             # Filled by the agent. Left null on purpose -- see SKILL.md.
             "gene_symbol": None,
             "uniprot_accession": None,
@@ -561,6 +699,10 @@ def build(graph, only=None):
             "mechanism_hypothesis": None,
             "evidence": neighbourhood(tid, idx),
         })
+
+    # Stable over the thing-id order above, so the SET is identical and only the
+    # order changes. A tier is a display rank, never an admission test.
+    out.sort(key=lambda n: TIER_ORDER.get(n["evidence_floor"]["tier"], 99))
 
     # `links` summarises `findings`, but nothing guarantees every finding is
     # summarised BY one. On the real g_1a4f, f6 is referenced by no link and is
