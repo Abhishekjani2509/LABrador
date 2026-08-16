@@ -57,7 +57,7 @@ def paper_key(paper):
     return "ty:" + title + "|" + year
 
 
-def dedupe_papers(new, existing):
+def dedupe_papers(new, existing, round_n=None):
     """Merge new papers into existing. Returns (merged, id_map).
 
     id_map maps the incoming paper's id -> the surviving id, so findings can be
@@ -90,6 +90,8 @@ def dedupe_papers(new, existing):
         used.add(new_id)
         row = dict(p)
         row["id"] = new_id
+        if round_n is not None and "round" not in row:
+            row["round"] = round_n
         id_map[p.get("id")] = new_id
         merged.append(row)
         by_key[k] = row
@@ -216,7 +218,8 @@ def resolve_entities(new, existing):
     The model proposes merges upstream (it is what knows a compound's target);
     this only applies them, so assembly stays deterministic.
     """
-    merged, id_map = _coalesce_by_accession([dict(t) for t in existing])
+    merged, coalesced = _coalesce_by_accession([dict(t) for t in existing])
+    id_map = {}
     index, acc_index = {}, {}
     for t in merged:
         for label in [t.get("name", "")] + list(t.get("aliases") or []):
@@ -296,7 +299,7 @@ def resolve_entities(new, existing):
                     index.setdefault(key, row)
         if acc:
             acc_index.setdefault(acc, row)
-    return merged, id_map
+    return merged, id_map, coalesced
 
 
 # --------------------------------------------------------------------------
@@ -768,7 +771,13 @@ def save_state(graph, dir_path):
     with open(os.path.join(dir_path, "meta.json"), "w", encoding="utf8") as fh:
         fh.write(_dump(meta))
     rnd = graph.get("round", 1)
-    findings = graph.get("findings", [])
+    # SCHEMA.md promises findings/r<N>.json is APPENDED per round. Writing the
+    # whole graph's findings into every round's file made each file a full
+    # snapshot, so a reload read every prior finding once per round and the
+    # dedupe reported fictitious duplicates_dropped counts. Write only the
+    # findings this round is responsible for; earlier rounds keep their files.
+    findings = [f for f in graph.get("findings", [])
+                if f.get("round", rnd) == rnd]
     blob = _dump(findings)
     if len(blob.encode("utf8")) <= _CHUNK:
         parts = [findings]
@@ -829,22 +838,41 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
     the answer survives the gap being re-ranked."""
     prior = load_state(prior_dir)
 
-    papers, pmap = dedupe_papers(new_papers or [], prior.get("papers") or [])
-    things, tmap = resolve_entities(new_things or [], prior.get("things") or [])
+    papers, pmap = dedupe_papers(new_papers or [], prior.get("papers") or [],
+                                 round_n=round_n)
+    things, tmap_new, tmap_existing = resolve_entities(
+        new_things or [], prior.get("things") or [])
 
     kept, discarded, duplicates = [], 0, 0
     src = {p.get("id"): p for p in papers}
     seen_content, seen_ids = {}, set()
-    for f in list(prior.get("findings") or []) + list(new_findings or []):
+    # A round's ids are LOCAL to that round. A bundle naming its first paper
+    # "p1" means "the first paper I found", not the p1 already in storage --
+    # and the shipped example uses exactly those ids, so collisions are the
+    # normal case, not an edge case.
+    #
+    # Applying this round's id map to STORED findings repoints them at whatever
+    # the incoming p1 became. Their quotes are then checked against the wrong
+    # paper's text, fail, and are discarded as unverifiable. The graph loses
+    # evidence and the coverage counter reports it as quote hygiene working.
+    # Reproduced: 2 findings in, 1 out, 1 silently dropped.
+    #
+    # So: stored findings already point at stored ids and take only the
+    # coalesce remap. Incoming findings take this round's map.
+    staged = ([(f, False) for f in (prior.get("findings") or [])]
+              + [(f, True) for f in (new_findings or [])])
+    for f, is_new in staged:
         f = dict(f)
-        f["paper"] = pmap.get(f.get("paper"), f.get("paper"))
+        if is_new:
+            f["paper"] = pmap.get(f.get("paper"), f.get("paper"))
         text = (src.get(f.get("paper")) or {}).get("source_text", "")
         if text and not verify_quote(f.get("quote"), text):
             discarded += 1
             continue
+        remap = tmap_new if is_new else tmap_existing
         for side in ("from", "to"):
-            if f.get(side) in tmap:
-                f[side] = tmap[f[side]]
+            if f.get(side) in remap:
+                f[side] = remap[f[side]]
 
         # Dedupe by CONTENT, not by id. A round that is retried -- after a
         # timeout, a dropped stream, a re-run -- re-extracts the same sentences
@@ -870,6 +898,12 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
             f["id"] = fid
         seen_ids.add(fid)
         seen_content[key] = fid
+        # Schema drift found downstream: findings and papers carried no `round`,
+        # so a consumer could not tell when evidence entered the graph and
+        # save_state could not tell which findings a round owns.
+        if "round" not in f:
+            f["round"] = round_n if is_new else prior.get("round", 1)
+        f.setdefault("flags", [])
         kept.append(f)
     kept.sort(key=lambda f: (str(f.get("from")), str(f.get("to")), str(f.get("paper")), str(f.get("quote"))[:80]))
 
@@ -1138,6 +1172,36 @@ def selftest():
           explain_disagreement([{"where": "a"}], [{"where": "a"}]) is None)
     check("missing prior dir is an empty graph, not an error",
           load_state("/nonexistent/dir/xyz")["things"] == [])
+
+    # Regression: round-local ids colliding with stored ids must not repoint
+    # stored findings. Before the fix this discarded prior evidence and reported
+    # it as a quote failure.
+    import tempfile as _tf
+    _d = _tf.mkdtemp()
+    save_state({"schema_version": "1.1", "graph_id": "g_c", "question": "q",
+                "round": 1, "status": "ok", "generated_at": "T", "error": None,
+                "things": [{"id": "t1", "name": "Alpha", "kind": "gene"}],
+                "papers": [{"id": "p1", "doi": "10.1/A", "title": "A",
+                            "source_text": "Alpha inhibits Beta."}],
+                "findings": [{"id": "f1", "paper": "p1", "from": "t1",
+                              "how": "inhibits", "to": "t2", "says": "yes",
+                              "is_own_result": True,
+                              "quote": "Alpha inhibits Beta."}],
+                "links": [], "gaps": [], "coverage": {}, "rounds": []}, _d)
+    gc = main(_d,
+              [{"id": "f1", "paper": "p1", "from": "t1", "how": "activates",
+                "to": "t3", "says": "yes", "is_own_result": True,
+                "quote": "Gamma activates Delta."}],
+              [{"id": "p1", "doi": "10.1/B", "title": "B",
+                "source_text": "Gamma activates Delta."}],
+              2, "expand_node", graph_id="g_c", generated_at="T",
+              new_things=[{"id": "t1", "name": "Gamma", "kind": "gene"}])
+    check("colliding round ids keep both findings", len(gc["findings"]) == 2)
+    check("colliding round ids discard nothing", gc["coverage"]["no_quote_discarded"] == 0)
+    _by = {p["id"]: p.get("doi") for p in gc["papers"]}
+    check("stored finding still points at its own paper",
+          any(_by.get(f["paper"]) == "10.1/A" and "Alpha" in f["quote"]
+              for f in gc["findings"]))
 
     a1 = _dump(main(None, finds, papers, 1, "new_question", question="q",
                     graph_id="g_test", generated_at="T", new_things=things))

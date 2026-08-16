@@ -71,6 +71,19 @@ cp <skill-dir>/example-round.json /tmp/round.json   # then edit
 `--save` writes state back under `--memory-dir` and updates `index.json`.
 Omit it to see what a round *would* produce without committing it.
 
+**Ids in `round.json` are LOCAL to that round.** Number your papers `p1, p2, …`
+and your things `t1, t2, …` from one each time — they mean "the first paper I
+found this round", not the `p1` already in storage. The assembler translates
+them and never lets a round's ids reach stored rows.
+
+That translation is the whole reason the rule is safe, and it was once broken:
+this round's id map was being applied to stored findings too, repointing them at
+whatever the incoming `p1` became. Their quotes were then checked against the
+wrong paper's text, failed, and were discarded — the graph lost evidence while
+`no_quote_discarded` made it look like quote hygiene working. Fixed, and covered
+by `--selftest`. Do not try to avoid collisions by guessing storage's numbering;
+that is the assembler's job.
+
 Two behaviours worth relying on:
 
 - **An extending ask against a graph that is not in memory returns
