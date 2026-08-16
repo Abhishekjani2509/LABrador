@@ -187,18 +187,33 @@ ask-image /papers/<id>/figures/<file> "<question>"    # --fn describe | --fn ext
 ls /papers/<id>/supplements/                          # then head/cat as text
 ```
 
-**Read figures on `resolve_link` and `test_gap` only**, and only for a paper that
-already gave you a finding from its text. On `new_question` and `expand_node`, do
-not open figures at all.
+**On `resolve_link` and `test_gap`, reading figures is expected, not optional.**
+For every paper carrying evidence on the target relationship: `ls` its
+`figures/`, then `ask-image` at least one — the figure whose caption most
+likely states the conditions (dose, timepoint, cell line, model, readout).
+Budget up to **6 `ask-image` calls per round** and spend them on the papers
+closest to the target, not the first ones you opened.
 
-That is a budget rule, not a style preference. One command per call and no loops
-means one `ask-image` per figure; an eight-figure paper is eight calls, and at
-`deep` that is hundreds on top of extraction. Targeted asks are also where a figure
-actually changes the answer: `resolve_link` needs the conditions each camp measured
-under, and those axes and dose labels are often the only place `where` is stated.
+On `new_question` and `expand_node`, do not open figures at all.
 
-When you skip figures, say so in `coverage`. "We did not look" must never be
-indistinguishable from "there was nothing there".
+The reason is not completeness, it is that the figure often holds the only
+statement of the thing the graph needs. `where` is what
+`explain_disagreement` compares, and dose, timepoint and cell-type conditions
+are frequently written **only** in an axis label or a panel caption. Two camps
+that look contradictory in prose routinely turn out to have measured different
+conditions, and the text alone will not tell you.
+
+A figure caption is quotable evidence like any other: quote it verbatim, set
+`section: "figure_caption"`, and it goes through the same verification as body
+text. A figure that contradicts what the body text hedges is a finding, not a
+footnote.
+
+Budget honestly: one `ask-image` per figure, no batching, so a 12-figure paper
+would exhaust the round on its own. Read the one or two that matter.
+
+Record `figures_read` in `coverage` every round, including `0`. If a paper has
+no figures at all, that is also a fact worth recording. "We did not look" must
+never be indistinguishable from "there was nothing there".
 
 ---
 
