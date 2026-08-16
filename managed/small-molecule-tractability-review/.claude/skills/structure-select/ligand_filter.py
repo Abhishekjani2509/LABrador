@@ -45,17 +45,37 @@ module three call sites depend on is worth more than RDKit's ring perception.
 Everything here is 2D topology; no conformer is generated and no force field is
 ever run, per the project's standing rule.
 
-MEASURED ACCURACY, NOT A CLAIM
+CHEMISTRY IS NOT ENOUGH, AND THE ENTRY SAYS SO. Added 2026-08-15 after the
+first measured false positive against the held-out result. `LFI` in 8QFZ — the
+TATA tri-electrophile that cyclises a Bicycle peptide — is drug-like chemistry
+and is not a ligand: it is covalently bonded to all three cysteines of a
+12-residue peptide that IS the ligand. Pass a `StructureContext` built from the
+entry (or header) mmCIF and four rules re-attribute it; a covalent inhibitor
+bonded to the TARGET is deliberately left alone. See `_apply_structure_context`
+for the rules and for why this is a new verdict rather than a flag.
+
+MEASURED ACCURACY, NOT A CLAIM. Every figure below re-measured 2026-08-15 with
+all rules added since; the two originals are unchanged.
   * 262-component ground-truth set (the four historical failures, every member
     of `modal_app.COFACTORS` and `NON_LIGANDS`, every member of
     `neighbour_precedent.EXCLUDED_LIGANDS`, known true-positive inhibitors,
     fragments, peptides, steroids, ions): **259/262 = 98.9%**. The three
     misses are `BTN` (biotin -> druglike), `ACE` and `NH2` (polymer capping
-    groups -> additive / ion).
+    groups -> additive / ion). `ACE`/`NH2` are CORRECT once a context is
+    supplied — the CCD lists them in `_entity_poly_seq`, so they are residues.
+  * The same set extended with 9 chemistry cases (`BEN`, `B3P`, `JEF` and the
+    crosslinker/controls `LFI`, `ZBR`, `A1I4O`, `8VY`, `260`, `0WN`) and 9
+    named-entry CONTEXT cases: **277/280 = 98.9%**, same three misses, no new
+    ones. The context block is 9/9 and includes both covalent-inhibitor
+    controls (6OIM `MOV`, 4G5J `0WN`), which must stay `druglike` and do.
   * 70-component HELD-OUT sample drawn blind from `pdb_v.chemcomps`:
-    **61/70 = 87.1%**, and — the number that matters — **0 false positives**.
-    Nothing that was really a cofactor, lipid or additive was called drug-like.
-    All 9 disagreements are the conservative direction.
+    **61/70 = 87.1%**, and — the number that matters — **0 false positives**,
+    unchanged by every rule added since. Nothing that was really a cofactor,
+    lipid or additive was called drug-like. All 9 disagreements are the
+    conservative direction. Two known boundaries on that zero: the sample
+    contained neither TNF 5UUI's `MTN` spin label (still a false positive; one
+    covalent bond to the target is rule C3, the covalent-inhibitor case) nor a
+    peptide-conjugated crosslinker (`LFI`, now fixed by context).
 
 KNOWN FALSE NEGATIVES, by class. Each was measured, not guessed. A false
 negative costs a holo structure; a false positive invents one, which is what
@@ -88,6 +108,14 @@ VERDICTS
     sugar_or_glycan          saccharides and glycans
     ion_or_solvent           bare ions, simple inorganics, water
     peptide_or_polymer       polymer residues and peptide-like components
+    polymer_conjugate        a covalent constituent of a polymer LIGAND — a
+                             crosslinker, staple or macrocyclisation reagent.
+                             NEEDS A `StructureContext`; `classify_record`
+                             never returns it. `evidence["conjugate_of"]` names
+                             the polymer so its precedent can be filed under
+                             the right MODALITY (rule 1), which is the whole
+                             point: the peptide is real evidence, just not
+                             small-molecule evidence
     unknown                  the CCD has no record, or has no SMILES and the
                              non-structural fields do not decide it
 
@@ -111,6 +139,16 @@ USAGE
     classify_record({"comp_id": "L44", "type": "non-polymer",
                      "formula": "C39 H76 O5", "formula_weight": 625.018,
                      "smiles": "CCCCCC...", "name": "..."})
+
+    # Context-aware. THE HEADER, NOT THE ASSEMBLY — RCSB strips _struct_conn
+    # from assembly files and the empty link table looks exactly like "nothing
+    # is bonded to anything".
+    ctx = StructureContext.from_mmcif_path("8QFZ_header.cif",
+                                           target_accession="Q969D9")
+    classify_ligand("LFI", context=ctx).verdict   # 'polymer_conjugate'
+    holo_call(["LFI"], context=ctx)["is_holo"]    # False
+    holo_call(["LFI"], context=ctx)["polymer_ligand_precedent"]
+    # [{'modality': 'peptide', 'n_monomers': 12, 'sequence': 'CHWLENCWRGFC'...}]
 """
 
 from __future__ import annotations
@@ -184,12 +222,23 @@ DRUGLIKE_MAX_MW = 1200.0
 UBIQUITY_MAX_HEAVY_ATOMS = 15
 
 #: Entries a small component must appear in before ubiquity overrides
-#: drug-like chemistry. Measured spread at the decision boundary: BEN 361 and
-#: B3P 232 against LZ1 10, ZBR 9, LFI 8, MOV 7, N5S 1. 150 sits in the empty
-#: band between them. **UNCALIBRATED** — it is fitted on one measured false
-#: positive, and it is a proposal in exactly the sense rule 4a's volume guide
-#: is. It gates only the small end, and it is reported in `evidence` and
-#: flagged (`ubiquity_prior_applied`) whenever it fires.
+#: drug-like chemistry.
+#:
+#: MEASURED BLAST RADIUS, which is the number that makes this safe. Across the
+#: whole 332-component union of the ground-truth and held-out sets, exactly
+#: **11** components are `druglike` AND at or below
+#: `UBIQUITY_MAX_HEAVY_ATOMS`, so those 11 are the only things this rule can
+#: ever touch. Their counts, from RCSB (paperclip agrees where it answered):
+#:
+#:     BEN 361 | CFF 87 | 4NC 24 | LZ1 10 | ZBR 9 | 8VY 2
+#:     260 1 | 363 1 | A1AX6 1 | KJM 1 | XLJ 1
+#:
+#: At 150 the rule fires on BEN and on nothing else, and the nearest thing it
+#: does not touch is caffeine at 87 — 4.1x below. **UNCALIBRATED**: it is
+#: fitted on one measured false positive and the margin is one case wide. It is
+#: a proposal in exactly the sense rule 4a's volume guide is a proposal. Every
+#: firing is flagged `ubiquity_prior_applied`, carries the count in `evidence`
+#: and drops confidence to `medium`.
 UBIQUITY_MIN_ENTRIES = 150
 
 _METALS = frozenset(
@@ -1032,6 +1081,16 @@ class StructureContext:
     target_accession: str | None = None
     target_basis: str | None = None
     source: str = "mmcif"
+    #: Was `_struct_conn` PRESENT AS A CATEGORY in the file this was built
+    #: from? This is not the same as "there were covalent links", and the
+    #: difference is the single easiest way to reintroduce the bug: an
+    #: ASSEMBLY file has no `_struct_conn` at all, so a context built from one
+    #: has an empty link table that looks exactly like "nothing is bonded to
+    #: anything". Verified on 8QFZ — a context built from
+    #: `8QFZ-assembly1.cif` puts `LFI` back to `druglike`. Every verdict
+    #: reached with this False carries the flag
+    #: `struct_conn_absent_from_context`.
+    has_struct_conn_category: bool = False
 
     # -- construction ----------------------------------------------------
 
@@ -1146,6 +1205,7 @@ class StructureContext:
             target_entity_ids=tgt,
             target_accession=target_accession,
             target_basis=basis,
+            has_struct_conn_category=("_struct_conn." in cats),
         )
 
     @classmethod
@@ -1177,10 +1237,15 @@ class StructureContext:
         return None
 
     def is_available(self) -> bool:
-        """False when the file carried no `_struct_conn` at all — which is what
-        an ASSEMBLY file looks like. A caller must not read a fall-through as
-        "no covalent linkage"; it may be "the category was stripped"."""
-        return bool(self.covalent_links) or bool(self.polymer_entities)
+        """Can the COVALENT rules run at all?
+
+        False when `_struct_conn` was not in the file, which is exactly what an
+        assembly file looks like. Deliberately NOT "there are polymer entities"
+        — that was the first version of this method and it returned True on
+        `8QFZ-assembly1.cif`, where the category is stripped, so `LFI` went
+        straight back to `druglike` with no sign anything had gone wrong.
+        """
+        return self.has_struct_conn_category
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1189,7 +1254,8 @@ class StructureContext:
             "target_entity_ids": list(self.target_entity_ids),
             "target_accession": self.target_accession,
             "target_basis": self.target_basis,
-            "has_struct_conn": bool(self.covalent_links),
+            "has_struct_conn_category": self.has_struct_conn_category,
+            "n_components_with_covalent_links": len(self.covalent_links),
             "source": self.source,
         }
 
@@ -1362,6 +1428,17 @@ class ChemCompSource:
         the analogous join against `uniprot_v.pdb_chains`, which would give the
         better statistic (distinct proteins rather than entries), times out at
         120 s and is not usable.
+
+        TWO SOURCES, BECAUSE ONE OF THEM FAILED UNDER LOAD ON THE DAY THIS WAS
+        WRITTEN. Paperclip's aggregate is tried first; with a dozen agents
+        against the same endpoint every batch of 35 came back empty over ten
+        minutes while single-row selects still answered in milliseconds. RCSB's
+        search API answers the identical question by `return_counts` and is
+        stdlib-reachable. The two agree where both answered: BEN 361/361,
+        LZ1 10/10, ZBR 9/9, LFI 8/8, MOV 7/7, GOL 26004/26117 (paperclip is a
+        snapshot, RCSB is current). A prior that silently degrades to "not
+        checked" whenever the cluster is busy is a prior that does nothing on
+        exactly the runs that matter.
         """
         want = [c.upper() for c in comp_ids if c]
         out: dict[str, int] = {}
@@ -1387,6 +1464,11 @@ class ChemCompSource:
                 n = _ni(r.get("n"))
                 if cid and n is not None:
                     out[cid] = n
+        for cid in want:
+            if cid not in out:
+                n = _rcsb_entry_count(cid)
+                if n is not None:
+                    out[cid] = n
         for cid, n in out.items():
             rec = self._cache.get(cid)
             if isinstance(rec, dict):
@@ -1397,6 +1479,36 @@ class ChemCompSource:
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
             self._cache_path.write_text(json.dumps(self._cache, sort_keys=True))
+
+
+def _rcsb_entry_count(comp_id: str, *, timeout: float = 30.0) -> int | None:
+    """How many PDB entries carry this component, from RCSB's search API.
+
+    The fallback for `ChemCompSource.with_entry_counts`. Stdlib `urllib` only —
+    no `requests`, no toolkit. The searchable attribute is
+    `rcsb_chem_comp_container_identifiers.comp_id`; `chem_comp.id` is NOT
+    indexed for search and returns HTTP 400 with
+    "search is not enabled on [ chem_comp.id ] attribute".
+
+    Returns None on any failure, which R14 reads as NOT CHECKED.
+    """
+    import urllib.parse
+    import urllib.request
+
+    q = {
+        "query": {"type": "terminal", "service": "text", "parameters": {
+            "attribute": "rcsb_chem_comp_container_identifiers.comp_id",
+            "operator": "exact_match", "value": comp_id.upper()}},
+        "return_type": "entry",
+        "request_options": {"return_counts": True},
+    }
+    url = ("https://search.rcsb.org/rcsbsearch/v2/query?"
+           + urllib.parse.urlencode({"json": json.dumps(q)}))
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:  # noqa: S310
+            return _ni(json.loads(r.read().decode()).get("total_count"))
+    except Exception:                                  # noqa: BLE001
+        return None
 
 
 def _looks_like_empty_result(out: str) -> bool:
@@ -2030,7 +2142,20 @@ def _apply_structure_context(v: LigandVerdict, context: "StructureContext | None
                   confidence="high", source=v.source)
 
     if not context.is_available():
-        return v
+        # SAID OUT LOUD. A context with no `_struct_conn` category cannot
+        # answer the covalent question, and the answer it appears to give —
+        # "no linkages" — is indistinguishable from the real thing. This is
+        # the assembly-file trap; see `has_struct_conn_category`.
+        ev["context_rule"] = "not_applied_no_struct_conn_category"
+        return _v(cid, _rec_of(v), v.verdict,
+                  v.reason + ". NOTE: the structural context supplied carries "
+                  "no _struct_conn category (an assembly file does not), so "
+                  "the covalent-attribution rules did NOT run. This is not "
+                  "evidence that the component is unbonded — fetch the entry "
+                  "or header mmCIF",
+                  ev, flags=tuple(v.flags) + ("struct_conn_absent_from_context",),
+                  confidence=("medium" if v.confidence == "high" else v.confidence),
+                  source=v.source)
 
     links = context.links_for(cid)
     poly_links = [l for l in links if l.partner_is_polymer]

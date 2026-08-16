@@ -185,40 +185,147 @@ exactly: report pockets for the biological assembly and state in
 `tractability.caveat` that no mechanism was specified. Same refusal, one stage
 earlier.
 
-### 1. Modality first, always
+### 1. Modality first, always — but `molecule_type` only decides DRUGS
 
-Before any precedent claim, classify every approved or clinical drug by
-modality: `small_molecule`, `antibody`, `peptide`, `fusion_protein`, `other`.
+Before any precedent claim, classify every drug **and every bioactivity
+compound** by modality: `small_molecule`, `peptide`, `macrocyclic_peptide`,
+`oligonucleotide`, `oligosaccharide`, `protein_or_antibody`, `modality_unknown`.
 
 Cross-reference databases list approved drugs without distinguishing these.
 IL-17A (Q16552) has three approved antibodies — secukinumab 2015, ixekizumab
 2016, bimekizumab 2021 — and zero approved small molecules. A dossier that
 reports "approved drugs exist" for IL-17A is wrong in the way that matters most.
 
-Only `small_molecule` entries count toward `target_precedent`. Biologics go in
-`biologic_precedent`, which exists specifically so a reader can see that the
-target is *validated* but not *small-molecule tractable*.
+Only `small_molecule` entries count toward `target_precedent`. Biologics and
+peptides go in `biologic_precedent`, which exists specifically so a reader can
+see that the target is *validated* but not *small-molecule tractable*.
 
-**The test is `chembl.molecule_dictionary.molecule_type`, read per drug.** Join
-`chembl_v.drugs_by_accession` to that raw table on `molregno` and take
-`molecule_type` (and `structure_type` alongside it, as description only). It
-separates the classes cleanly — verified: JAK1 (P23458) returns
-`Small molecule`/`MOL` on **11 of 11** approved rows; TNF-alpha (P01375) returns
-`Antibody`/`SEQ` for infliximab, adalimumab, certolizumab pegol and golimumab and
-`Protein`/`SEQ` for etanercept; IL-17A (Q16552) returns `Antibody`/`SEQ` for all
-three approvals.
+#### 1a. For approved and clinical DRUGS: `chembl.molecule_dictionary.molecule_type`
 
-`Unknown` is a returned value, not an absence — two TNF-alpha drugs (ABBV-3373,
-AZ9773) and two IL-17A drugs (M-1095, CJM-112) carry it. Map it, and a NULL, to
-modality-unknown, record it in `not_found`, and let it count toward **neither**
-block. Do not guess it in either direction.
+Join `chembl_v.drugs_by_accession` to that raw table on `molregno` and take
+`molecule_type` with `structure_type` alongside. On drugs it works — verified:
+JAK1 (P23458) returns `Small molecule`/`MOL` on **11 of 11** approved rows;
+TNF-alpha (P01375) returns `Antibody`/`SEQ` for infliximab, adalimumab,
+certolizumab pegol and golimumab and `Protein`/`SEQ` for etanercept; IL-17A
+(Q16552) returns `Antibody`/`SEQ` for all three approvals.
 
-**Do not infer modality from a missing chemical structure.** That test is
-superseded and its cross-accession confirmation is void — the confirmation query
-returns 0 rows for approved small molecules and approved antibodies alike, so it
-cannot tell them apart. Details and measurements are in
-`precedent-lookup`'s failure modes. `molecule_type` calls all four JAK1 salt
-forms `Small molecule` and needs no confirmation step.
+Its biologic values — `Antibody`, `Protein`, `Enzyme`, `Cell`, `Oligonucleotide`,
+`Oligosaccharide`, `Vaccine component`, `Gene`, `Antibody drug conjugate` — are
+authoritative and need no corroboration. **`Small molecule` is not.** Four
+measured false positives: ICOTROKINRA (molregno 3283615), an oral **IL-23R
+peptide**, is typed `Small molecule`; so are VANCOMYCIN, ORITAVANCIN and
+DAPTOMYCIN, all glycopeptide/lipopeptide antibiotics. ChEMBL has **no `Peptide`
+value at all**, so every peptide it types lands in `Small molecule` or `Protein`.
+
+So `Small molecule` is accepted only when corroborated:
+
+- **structure agrees** (rule 1b), or
+- **`structure_type` is `MOL` or `BOTH`** and no SMILES was retrieved — ChEMBL at
+  least claims to hold a molfile.
+
+**`Small molecule` with `structure_type = NONE` and no SMILES is unverifiable
+and must NOT be counted.** That is the ICOTROKINRA signature and **5,191**
+ChEMBL molecules carry it. Only the accession join kept icotrokinra out of the
+IL-17A dossier; nothing in `molecule_type` would have.
+
+#### 1b. For BIOACTIVITY COMPOUNDS: structure decides, not `molecule_type`
+
+**`molecule_type` does not transfer from drugs to compounds and fails in the
+worst direction.** Measured across all twelve fixture targets: **41,358 of
+69,824 compounds (59.2%) carry no usable value**, and the abstention is
+concentrated on the potent end. On IL-17A the field abstains on **91 of 117
+(78%)**; the 26 it types `Small molecule` top out at pchembl **6.26** — the
+RORgt secretion assay ceiling, a contaminated readout of exactly the kind rule 6
+requires you to detect — while the 91 it abstains on reach **9.10**. On IL-17C
+it abstains on **98 of 98**, and every one of those 98 is a **macrocyclic
+peptide**. The field is not merely sparse; it is anti-correlated with what the
+dossier is trying to measure, carrying the worse best-potency on 6 of 12 fixture
+targets and tying on 4.
+
+Compounds have SMILES: **99.6% of abstained compounds do** (IL-17A 91/91,
+IL-17C 98/98, JAK1 8,611/8,653, RORgt 10,000/10,008). So classify from
+structure, using `precedent-lookup/modality.py`:
+
+| modality | structural test |
+| --- | --- |
+| `oligonucleotide` | ≥2 phosphodiester/thiophosphate linkages **and** ≥2 nucleobases |
+| `oligosaccharide` | ≥3 glycosidically linked sugar rings |
+| `macrocyclic_peptide` | ≥4 alpha-amino-acid N-CA-C(=O)-N linkages, backbone ≥25% of heavy atoms, largest ring ≥12 |
+| `peptide` | same, largest ring <12 |
+| `protein_or_antibody` | MW ≥5,000 or ≥40 residue linkages |
+| `small_molecule` | none of the above, **and** MW ≤1,500 and ≤100 heavy atoms |
+| `modality_unknown` | everything else, including no parsable SMILES |
+
+The alpha-linkage count is **bimodal with an empty gap**, so the threshold is
+not tuned: across IL-17A's 117 compounds the counts are
+`{0:94, 1:5, 2:5, 3:2, 12:6, 13:1, 14:3, 24:1}`. Any threshold from 4 to 11
+gives the identical partition.
+
+One measured exception has its own gate: **glycopeptides**. Appended sugar
+dilutes the backbone fraction below the floor by construction — VANCOMYCIN sits
+at 0.248 and ORITAVANCIN at 0.20 — so `≥4 linkages AND ≥1 sugar ring` is a
+peptide regardless of backbone fraction. Do not instead lower the floor; that
+would be fitting to two points.
+
+**Structure outranks `molecule_type`, and an ambiguous structure is not rescued
+by it.** If the structure was read and came back `modality_unknown`, that is
+positive evidence against `Small molecule`, not an absence of evidence. Only a
+compound with *no* structure at all falls back to the field. Getting this
+backwards is what let vancomycin and oritavancin through as small molecules in
+testing.
+
+**Resolve the abstained bucket compound by compound. Never reassign it
+wholesale.** It is not a bag of small molecules: IL-17A's is **mixed — 106 small
+molecules and 11 peptides, and all 11 peptides are in it**. A blanket "the
+unknowns are small molecules" fix is wrong in the same direction as the rule it
+would replace, just less visibly.
+
+**Two named gaps in the classifier — untested holes, not measured passes.** It
+is 256/256 coarse with **zero false small-molecule calls**, and both remaining
+gaps run in the direction of over-calling small molecule, so report a call that
+lands in either as provisional:
+
+- **Depsipeptides are untested.** ROMIDEPSIN's backbone alternates amide and
+  *ester*, so only 2 alpha linkages are found and **structure alone calls it a
+  small molecule**. It is caught only because ChEMBL happens to type it
+  `Protein`. A depsipeptide typed `Small molecule` would pass. No such case is
+  in the fixture set, which is why this is a hole and not a measurement.
+- **The oligonucleotide rule is unverified against real data.** No control was
+  retrievable: every ChEMBL `Oligonucleotide` SMILES is 1,150–1,818 characters
+  and the Paperclip transport truncates long text (rule 15). The rule is written
+  but never exercised — treat an `oligonucleotide` call as untested.
+
+#### 1c. `modality_unknown` is COUNTED and DISCLOSED, never dropped
+
+The previous rule sent `Unknown` and NULL to neither block. On IL-17A that
+produced **zero small-molecule precedent** for a target with 20 drug-like holo
+structures across 9 publications, a 6.2 nM SPR Kd, and four oral small molecules
+in the clinic. A silently dropped compound is indistinguishable from a compound
+that does not exist.
+
+So report **three** figures, always, and never two:
+
+- `target_precedent.compound_modality_split` — the full count per modality
+- `target_precedent.distinct_actives` — small molecules only
+- `target_precedent.modality_unknown_count` — with a line in `not_found`
+
+Report it; do not fold it into either block. Folding unknowns into small
+molecules is what would admit ICOTROKINRA, an oral IL-23R peptide that ChEMBL
+types `Small molecule`. This costs almost nothing in practice: with structure,
+IL-17A's unknown count falls from 91 to **0** and IL-17C's from 98 to **0**, so
+the third bucket is nearly empty and disclosing it is close to free.
+
+#### 1d. A potency figure without a modality is not attributable
+
+`best_potency_nm` over a mixed pool is not a claim about small molecules.
+IL-17A's compound set **is** mixed — 106 small molecules and 11 peptides, and
+all 11 peptides sit in the bucket `molecule_type` abstains on. Carry
+`target_precedent.best_potency_modality`, and `family_precedent`'s equivalent
+`best_family_potency_modality`: IL-17C's "family best 1.4 nM" is a **macrocyclic
+peptide** and would otherwise read as small-molecule family precedent and go
+unchallenged.
+
+#### 1e. Salt and parent forms
 
 Salt and parent forms are distinct `molregno`s, so deduplicating on `molregno`
 does not deduplicate drugs: JAK1's 11 approved rows are **9 approved drugs**.
@@ -229,9 +336,20 @@ and the drugs you can name in `approved_small_molecules`. The two are allowed to
 disagree, and when they do the gap goes in `not_found`: the measured JAK1 run
 counted 9 after collapsing and could name only 8, and the ninth is left unnamed
 rather than guessed. Every entry in `approved_small_molecules` and
-`clinical_stage_small_molecules` carries its own `modality`, which is the
-per-drug `molecule_type` read you just made; the only value legal in those two
-lists is `small_molecule`.
+`clinical_stage_small_molecules` carries its own `modality`; the only value legal
+in those two lists is `small_molecule`.
+
+#### 1f. Two superseded tests — do not reinstate either
+
+**Do not infer modality from a missing chemical structure.** That test and its
+cross-accession confirmation are void — the confirmation query returns 0 rows for
+approved small molecules and approved antibodies alike, so it cannot tell them
+apart. Measurements are in `precedent-lookup`'s failure modes.
+
+**Do not use `molecule_type` as the authoritative field for compounds.** That is
+the rule this section replaces. It remains authoritative for drugs (1a) and
+useful as corroboration everywhere, and it is anti-correlated with potency on
+compounds.
 
 ### 2. Never predict what you can look up
 
@@ -363,15 +481,16 @@ happened to be detected in the same crystal cannot bear a verdict.
 4. **Do not substitute persistence.** See 4c. It is the obvious wrong fix.
 5. **PRANK rank is a site-finding aid, never a quality value.** See 4d.
 
-**4a — THE VOLUME SEPARATION IS SUSPENDED. Do not use it. 2026-08-15.**
+**4a — THE VOLUME SEPARATION IS RETRACTED. Do not use it, do not revive it. 2026-08-15.**
 
 This rule previously stated that pocket volume at D=1.6 separated all 15
 calibration targets perfectly at AUC 1.000, and gave a guide of 240 Å³ and above
-for druggable, 210 Å³ and below for hard. **That result is withdrawn pending
-re-measurement**, because the calibration anchors do not measure the proteins
-they are attributed to.
+for druggable, 210 Å³ and below for hard. **That result is retracted**, because the calibration anchors do not measure the
+proteins they are attributed to, and because a full residue-level audit found
+the evaluation could not have decided the question as posed.
 
-**What was found, by two agents independently:**
+**What was found — four of five hard anchors compromised, and one druggable
+anchor through the path we call trustworthy:**
 
 - **MYC's 188 Å³ — one of only five hard anchors — is a pocket containing zero
   MYC atoms.** Its lining residues in 6G6J and 6G6L are entirely **MAX
@@ -384,6 +503,29 @@ they are attributed to.
 - **KRAS's 400 Å³ is a median over two different pockets**, one of which is the
   **GDP site** — P-loop, NKCD and SAK motifs — not switch-II. The site-anchored
   value is 226 Å³.
+- **TNF-alpha's 207 Å³ has zero residue overlap** with its only genuinely
+  drug-anchored pocket. Its defensible value is 129.6 Å³.
+- **CD20's 154 Å³ is anchored on `Y01`, cholesterol hemisuccinate** — a detergent
+  site on a membrane protein.
+- **RORgt's 6C1P contains no RORgt.** Its sole entity is `A8EVM5`, an ion
+  transport protein. All eight lining residues are the channel, it was selected
+  by **`ligand_site_jaccard`** — the path we call trustworthy — and its anchor
+  ligand `1N7` is **CHAPSO**. So restricting scoring to the target's chains is
+  **necessary but not sufficient**: a wrong PDB ID passes straight through.
+- **There is no switch-II pocket in KRAS 4OBE at all** — no pocket has three or
+  more switch-II residues, because switch-II is closed in the GDP state. That is
+  the cryptic-pocket story, not a measurement.
+- **`chain_accessions` is `{}` on every single entry**, while the adjacent
+  `_why` string asserts chains are resolved by accession from `_struct_ref_seq`.
+  Resolution never once succeeded.
+
+**Two statistical points matter more than the anchors.** A bootstrap CI on a
+perfectly separated set is **degenerate by construction** — resampling cannot
+create an inversion, so `[1.000, 1.000]` was arithmetic, not evidence. And the
+binary flag *"a drug-like ligand was co-crystallised"* separates the two groups
+at **AUC 0.900 using no structural measurement at all**: the label and the
+measurability share a cause. That figure is itself unaudited and is doing
+load-bearing work inside this retraction — treat it as indicative until checked.
 
 **And the corrected numbers are unstable across the boundary.** Re-measured on
 wild-type entries, MYC's median moves **187.9 → 325.7 Å³**, from below the hard
@@ -1135,10 +1277,13 @@ list attributes nothing; it is the same as having none.
 
 ### 10b. Cross-check modality only where the local field abstains
 
-Our test is now `chembl.molecule_dictionary.molecule_type` (rule 1) — a local,
-explicit modality field, not an inference from structure records. It is
-authoritative for `Small molecule`, `Antibody` and `Protein`, and needs no
-corroboration for those.
+Our test is `chembl.molecule_dictionary.molecule_type` **for drugs only**
+(rule 1a), and **structure** for bioactivity compounds (rule 1b). The field is
+authoritative for `Antibody` and `Protein` and needs no corroboration for those.
+It is **not** authoritative for `Small molecule` — ICOTROKINRA, VANCOMYCIN,
+ORITAVANCIN and DAPTOMYCIN are all peptides typed `Small molecule` — and it is
+not authoritative for compounds at all, where it abstains on 59.2% of rows and
+does so preferentially on the potent ones.
 
 **Superseded:** this rule previously prescribed an Open Targets lookup as the
 primary cross-check on a `canonical_smiles IS NULL` test. Both the test and the
@@ -1355,6 +1500,17 @@ omit a key, never invent a value.
   "target_precedent": {
     "chembl_target_id": null,
     "distinct_actives": null,
+    "compound_modality_split": {
+      "_note": "Rule 1b/1c. Decided from SMILES via precedent-lookup/modality.py, NOT from molecule_type, which abstains on 59.2% of compounds and does so preferentially on the potent ones. distinct_actives above is the small_molecule entry here.",
+      "small_molecule": null,
+      "peptide": null,
+      "macrocyclic_peptide": null,
+      "oligonucleotide": null,
+      "oligosaccharide": null,
+      "protein_or_antibody": null,
+      "modality_unknown": null
+    },
+    "modality_unknown_count": null,
     "assay_concentration": {
       "top_assay_description": null,
       "top_assay_share_pct": null,
@@ -1362,6 +1518,7 @@ omit a key, never invent a value.
       "assay_type_split": {"binding_B": null, "functional_F": null}
     },
     "best_potency_nm": null,
+    "best_potency_modality": null,
     "best_potency_assay": null,
     "best_potency_characterised": null,
     "approved_small_molecules_count": null,
@@ -1392,6 +1549,7 @@ omit a key, never invent a value.
     "pfam": null,
     "family_actives": null,
     "best_family_potency_nm": null,
+    "best_family_potency_modality": null,
     "best_family_target": null,
     "sources": []
   },

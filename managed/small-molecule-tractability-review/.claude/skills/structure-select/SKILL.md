@@ -32,6 +32,25 @@ holo_call(["GNP", "GOL"])["is_holo"]          # False
 holo_call(["GNP", "GOL"])["determined"]       # True — and check this
 ```
 
+**Chemistry alone is not enough, and one call changes that.** Pass the entry's
+structural context and the classifier can tell a covalent inhibitor from a
+crosslinker stapling a peptide ligand:
+
+```python
+from ligand_filter import StructureContext, holo_call
+# THE HEADER, NOT THE ASSEMBLY — assembly files have no _struct_conn.
+ctx = StructureContext.from_mmcif_path("8QFZ_header.cif",
+                                       target_accession="Q969D9")
+holo_call(["LFI"], context=ctx)["is_holo"]                 # False
+holo_call(["LFI"], context=ctx)["polymer_ligand_precedent"]
+# [{'via_comp_id': 'LFI', 'modality': 'peptide', 'n_monomers': 12,
+#   'sequence': 'CHWLENCWRGFC', ...}]
+```
+
+Without the context `LFI` is `druglike` — see "A component covalently bonded
+inside a PEPTIDE ligand is not a small molecule" below, which is the measured
+false positive that put this here.
+
 `neighbour_precedent.py` uses it. Two rules that come with it:
 
 - **`unknown` is not apo.** A failed CCD lookup returns `unknown` with a
@@ -40,6 +59,21 @@ holo_call(["GNP", "GOL"])["determined"]       # True — and check this
   a lookup failure wearing that costume is the worst confusion available.
 - **Select candidates in SQL, classify in Python.** The SQL predicate cannot
   express chemistry. Pull the comp_ids unfiltered and decide afterwards.
+
+**Record the entry's OTHER polymer chains when you select it.** Structure
+selection is where the information exists and pocket scoring is where it is
+needed: `pocket-scan`'s prep keeps every polymer (`het_flag == 'A'`) and strips
+only non-polymer HETATM, so a peptide, nanobody, Fab or G-protein partner is
+present in the file fpocket scores. Measured on 8QFZ at D=1.6: with the
+12-residue Bicycle peptide kept, the headline pocket is 283.6 Å³ and **six of
+its ten lining residues are the peptide**; with the peptide chain dropped the
+site does not exist and the whole target has one pocket at 147.8 Å³, 15.4 Å
+away. Those two numbers straddle rule 4a's proposed 207–242 Å³ band. A census of
+this project's 15-target volume evaluation found **14 of 67 structures across 6
+of 15 targets** carrying a distinct non-target polymer entity — so emit, per
+selected entry, the list of polymer entities with their accessions and whether
+each is the target. See the failure mode below and
+`polymerfix/PATCHES_modal_app.md`.
 
 ## 1. Candidate structures with holo/apo classification
 
@@ -296,9 +330,31 @@ break:
 
 TNF-alpha needs no relaxation — the protomer is ~157 residues, so the strict
 120 floor holds and 236 of 302 entries pass. Both paths return the **TNF
-superfamily**, and **zero holo on either**, which is the cleanest negative on
-this axis: the entire TNF superfamily has no drug-like small molecule bound to
-the cytokine trimer.
+superfamily**, and **zero holo among the 25 carried neighbour entries**.
+
+**But do NOT read that as "the TNF superfamily has no small-molecule
+precedent" — an earlier draft of this section said exactly that and it is
+wrong.** The 25 carried entries are apo; the *accession* sweep behind them is
+not. Of the 8 neighbour accessions, **CD40L (P29965) returns 1 holo of 8
+structures: `3LKJ`, ligand `LKJ`, attribution `unambiguous`** (one protein, one
+polypeptide entity — no partner to misattribute to), titled:
+
+> Small Molecule Inhibition of the TNF Family Cytokine CD40L
+
+`LKJ` is a biphenyl-containing drug-like molecule, and this is the one hit on
+either calibration target that survives every filter we have: right chemistry,
+right protein, right entry, and a title that states the intent outright. **It is
+genuine small-molecule precedent on a TNF-superfamily cytokine trimer**, which
+is the single most decision-relevant thing this axis has produced.
+
+Two honest limits on it. Re-querying `3LKJ`'s ligand row to confirm the exact
+MW hit failure signature #3 (`vsh: cd: /papers/: Permission denied`) on three
+consecutive attempts, so the molecular weight is **unconfirmed**; the comp_id,
+the accession, the attribution flag and the title all came back cleanly from two
+independent retrievals. And it is **accession-level, not neighbour-level** — it
+did not appear among the 25 carried entries, so a reader looking only at
+`neighbours` would never see it. Read `neighbour_accessions`, not just
+`neighbours`.
 
 The multimer path's 1,206 complex assignments **of size 3** are the thing the
 single-chain path cannot produce — genuine trimer-to-trimer matches, ranked by
@@ -419,8 +475,15 @@ holo_call(["MOV", "GDP", "MG"])    # {'is_holo': True, 'druglike_ligands': ['MOV
 
 Verdicts: `druglike`, `cofactor`, `lipid_or_detergent`,
 `crystallisation_additive`, `sugar_or_glycan`, `ion_or_solvent`,
-`peptide_or_polymer`, `unknown`. Only `druglike` is evidence of a bindable site.
-Every verdict carries a `reason` string and the `evidence` it rests on.
+`peptide_or_polymer`, **`polymer_conjugate`**, `unknown`. Only `druglike` is
+evidence of a bindable site by a small molecule. Every verdict carries a
+`reason` string and the `evidence` it rests on.
+
+`polymer_conjugate` is the only verdict that needs a `StructureContext` and the
+only one `classify_record` can never return — it means "this component is a
+covalent constituent of a polymer, and here is which one", and
+`evidence["conjugate_of"]` names that polymer so its precedent can be filed
+under the right modality.
 
 What it keys on, none of which the old code read:
 
@@ -438,19 +501,33 @@ What it keys on, none of which the old code read:
 - **Any free phosphate ester** — the signature of endogenous metabolites.
 - **Longest unbranched alkyl chain**, as a fraction of the molecule.
 
-Measured, not claimed:
+- **The structural context of the entry**, when one is supplied: `_struct_conn`
+  covalent linkages and `_entity_poly_seq` membership. Four rules, and the one
+  that matters most is the one that does *nothing* — a component making ONE
+  covalent bond to the TARGET polymer is a covalent inhibitor and keeps its
+  chemistry verdict untouched.
 
-- **259/262 = 98.9%** on a ground-truth set that includes the four failures
-  above, every member of `modal_app.COFACTORS` and `NON_LIGANDS`, and every
-  member of `neighbour_precedent.EXCLUDED_LIGANDS` — none of which the
+Measured, not claimed. **Re-measured 2026-08-15 after the first false positive
+against the held-out result; both original figures are unchanged and the new
+cases are additive.**
+
+- **259/262 = 98.9%** on the original ground-truth set, which includes the four
+  failures above, every member of `modal_app.COFACTORS` and `NON_LIGANDS`, and
+  every member of `neighbour_precedent.EXCLUDED_LIGANDS` — none of which the
   classifier was told. Misses: `BTN` (biotin → `druglike`), `ACE`/`NH2` (capping
-  groups).
+  groups). **`NH2` and `ACE` are now correct when a context is supplied** — the
+  CCD lists them in `_entity_poly_seq`, so they are residues, not ligands.
+- **277/280 = 98.9%** on the ground-truth set extended with 9 chemistry cases
+  and 9 named-entry context cases (see below). The same three misses; no new
+  ones.
 - **61/70 = 87.1%** on a blind held-out sample from `pdb_v.chemcomps`, with
-  **0 false positives**. Nothing that was really a cofactor, lipid or additive
-  was called drug-like. **That sample did not contain TNF 5UUI's `MTN` spin
-  label, which is a genuine false positive no chemistry can fix** — see "A
-  ligand can be disqualified by why it is there" below. Quote the zero with that
-  boundary attached.
+  **0 false positives** — unchanged by every rule added since. Nothing that was
+  really a cofactor, lipid or additive was called drug-like. **That sample did
+  not contain TNF 5UUI's `MTN` spin label, which is a genuine false positive no
+  chemistry can fix** — see "A ligand can be disqualified by why it is there"
+  below. Quote the zero with that boundary attached, and with the second one
+  now: it also did not contain a peptide-conjugated crosslinker, and `LFI` was
+  the first measured false positive against it.
 
 Known false negatives — deliberate, since a false positive is what caused all
 four bugs: nucleoside/SAM-analog inhibitors and bisphosphonates → `cofactor`;
@@ -824,25 +901,163 @@ classifier having been shown either case**:
 IL-17A multimer accordingly went from 23 apo / 2 holo to **25 apo / 0 holo, 0
 undetermined**, which is the answer the previous run argued for by hand.
 
-**But it opens a new gap, and it is a regression in one place.** The classifier
-has no crystallisation-additive rule for small aromatic amines or polyol
-buffers, so three known artifacts come back `druglike`:
+**It opened a new gap, and it was a regression in one place. FIXED 2026-08-15;
+the three cases below are now in the ground-truth set and all three pass.**
+Recorded rather than deleted, because the two halves were fixed by two
+*different* instruments and which one applies to a new case is the reusable
+part.
 
-| comp_id | what it is | MW / heavy atoms | verdict |
-| --- | --- | --- | --- |
-| `BEN` | **benzamidine** — a protease crystallisation additive | 120 / 9 | `druglike` |
-| `B3P` | bis-tris propane — a buffer | 282 / 19 | `druglike` |
-| `JEF` | Jeffamine — a crystallisation additive | 598 / 41 | `druglike` |
+| comp_id | what it is | MW / heavy | was | now | fixed by |
+| --- | --- | --- | --- | --- | --- |
+| `BEN` | **benzamidine** — protease crystallisation additive | 120 / 9 | `druglike` | `crystallisation_additive` | ubiquity prior (R14) |
+| `B3P` | bis-tris propane — buffer | 282 / 19 | `druglike` | `crystallisation_additive` | chemistry (R11b) |
+| `JEF` | Jeffamine — precipitant | 598 / 41 | `druglike` | `crystallisation_additive` | chemistry (R11b) |
 
-`BEN` is the regression: at 120 Da the old `MW_MIN = 250` floor excluded it, and
-the classifier does not. It is the single holo call in the IL-17A **single-chain**
-top 25 (2GNN, an Orf virus VEGF variant), and the defensible count there is still
-**0 of 25**. `B3P` and `JEF` sit in the multimer neighbourhood's tail.
+**`B3P` and `JEF` were never a chemistry gap — they were an off-by-one.** Both
+are ring-free polyols/polyethers and both missed the existing rules by a hair:
+`B3P` clears the `heavy <= 18` polyol rule by ONE atom, and `JEF` fails the PEG
+rule only because a Jeffamine carries a terminal amine. R11b drops the size cap
+and the no-nitrogen requirement: **no ring system at all, no amide, and four or
+more hydroxyl/ether oxygens** is a polyol at 19 heavy atoms and at 41.
 
-So the reason to read `ligand_names` and `rejected_ligands` has not gone away —
-it has moved from cofactors and lipids, which are now handled, to bench
-chemistry that happens to have a ring. Report `BEN`, `B3P` and `JEF` upstream
-rather than adding a local denylist; a local list is the defect this replaced.
+**`BEN` is the regression, and it is the one case where a chemistry rule was
+the wrong instrument.** At 120 Da the superseded `MW_MIN = 250` floor excluded
+it; it was the single holo call in the IL-17A **single-chain** top 25 (2GNN, an
+Orf virus VEGF variant), where the defensible count is **0 of 25**. No
+structural test can reject benzamidine without rejecting a real ligand class —
+its close neighbours *are* thrombin and trypsin inhibitors, and it is a bona
+fide fragment. So the discriminator is not what it looks like but how it
+behaves across the PDB, which is a query and not an opinion:
+
+```sql
+SELECT comp_id, count(distinct entry_id) FROM pdb_v.entry_ligands ... GROUP BY 1
+```
+
+**A frequency prior alone would NOT have worked, and the measurement says so.**
+Entry counts: `BEN` 361, `B3P` 232, **`JEF` 21**, `LZ1` (a genuine fragment hit)
+10, `ZBR` 9, `LFI` 8, `MOV` 7, `N5S` 1 — against `GOL` 26004 and `EDO` 17548.
+JEF is a real additive at 21 entries, below any cut that keeps LZ1 safe. The
+chemistry fix and the frequency fix each catch what the other cannot.
+
+**Why a measured list here does not contradict "a denylist cannot decide holo".**
+That conclusion is about **cofactors**, and it holds: ADP/GDP/heme form an open,
+growing family, `2UK` was an analog nobody had listed, and chemistry generalises
+to molecules not yet made. **Crystallisation additives are not a chemical family
+— they are a laboratory practice**, a small slow-growing set that changes on the
+timescale of new screen kits rather than new medicinal chemistry, and one member
+of it is chemically indistinguishable from a real hit. That is the narrow case
+where measuring behaviour beats describing structure.
+
+**Bounded two ways so it cannot eat real chemistry**, and the blast radius is
+measured, not argued: across the whole 332-component union of the ground-truth
+and held-out sets, exactly **11** components are `druglike` *and* at or below the
+15-heavy-atom bar, so those 11 are the only things R14 can ever touch — `BEN`
+361, `CFF` 87, `4NC` 24, `LZ1` 10, `ZBR` 9, `8VY` 2, and five singletons. At the
+150-entry threshold it fires on `BEN` and nothing else; the nearest thing it does
+not touch is caffeine, 4.1x below. **The threshold is UNCALIBRATED** — fitted on
+one measured false positive, margin one case wide — so treat it exactly as rule
+4a's volume guide is treated. Every firing is flagged `ubiquity_prior_applied`,
+carries the count in `evidence` and drops confidence to `medium`.
+
+`ChemCompSource.with_entry_counts()` runs the query and falls back to RCSB's
+search API. **Use the fallback, do not remove it**: on the day this was written
+Paperclip's aggregate returned nothing for ten minutes under concurrent load
+while single-row selects answered in milliseconds, and a prior that silently
+degrades to "not checked" whenever the cluster is busy does nothing on exactly
+the runs that matter. The two sources agree where both answered (BEN 361/361,
+LZ1 10/10, LFI 8/8; GOL 26004/26117, paperclip being a snapshot).
+
+### A component covalently bonded inside a PEPTIDE ligand is not a small molecule — 8QFZ `LFI`
+
+**This is the first measured false positive against the "0 false positives on 70
+blind components" result, and it is not a gap in a list — it is the
+chemistry-based method getting it wrong.** It is fixed, and how it was fixed is
+the part worth carrying.
+
+`LFI` is `C12H18Br3N3O3`, 1,3,5-tris(3-bromopropanoyl)-1,3,5-triazinane: the
+**TATA tri-electrophile that cyclises Bicycle peptides**. In 8QFZ it is
+covalently bonded to all three cysteines of a 12-residue polypeptide
+(`CHWLENCWRGFC`, entity `8QFZ_2`) which is the actual ligand; the target is TSLP,
+entity 1. Context-free it classified `druglike`, confidence `high`, reason "no
+cofactor, lipid, sugar, peptide, polymer or additive signature fired", and that
+chemistry read is **defensible** — the molecule really is drug-like.
+
+**The damage was a MODALITY error, which is why it matters more than a
+misclassification.** `druglike` made 8QFZ a holo small-molecule structure: the
+run set `tier: holo`, `tier_note: "drug-like ligand LFI"`, auto-derived `LFI` as
+the site anchor and emitted `ligand_site_jaccard` of 0.769 and 1.000 — the
+strongest site-hypothesis basis this pipeline can produce — for what is
+**peptide** precedent. Dossier rule 1 exists to stop exactly that substitution.
+
+**What this is NOT.** It is not "a peptide-binding site is not a site". A groove
+that binds a bicyclic peptide is a demonstrated ligandable surface and a
+perfectly reasonable small-molecule target — MDM2/p53, protease substrate
+grooves, peptide GPCRs. A peptide-bound groove is a **lead**, not a
+disqualification. Nothing here rejects a site; it attributes a component to the
+right molecule so the peptide is reported as peptide precedent instead of being
+laundered into small-molecule precedent by the reagent that staples it.
+`holo_call(...)["polymer_ligand_precedent"]` carries the peptide's description,
+length and sequence for exactly that purpose.
+
+**The fix: pass a `StructureContext`.** Four rules, applied on top of the
+chemistry verdict, never instead of it — `classify_record` stays a pure function
+of the CCD row.
+
+| rule | test | outcome |
+| --- | --- | --- |
+| C0 | comp_id is in `_entity_poly_seq` for some polymer entity | `peptide_or_polymer` — it is a residue. Closes `NH2`/`ACE` |
+| C1 | covalently bonded to a polymer entity that is **not** the target | `polymer_conjugate` |
+| C2 | **two or more** covalent bonds to polymer residues | `polymer_conjugate`, and this needs no target identity at all |
+| C3 | **exactly one** bond, to the **target** polymer | **chemistry verdict untouched** + flag `covalent_to_target` |
+| C4 | exactly one bond, target identity unknown | verdict untouched, confidence → `medium`, flag |
+
+**C2 is the rule that does not need to know who the target is, and it is the
+general one.** A covalent drug carries one warhead and makes one bond; two or
+more means the component is stapling a chain rather than binding it. Measured:
+`LFI` 3 bonds, `ZBR` (TBMB) 3, `A1I4O` 3, `8VY` (bis(bromomethyl)benzene) 2 —
+and 8VY's two bonds are to Cys427 and Cys432 of the **same chain** in 5V2P, a
+crosslinked protein, which C1 could never catch because that chain may well be
+the target.
+
+**C3 is the control, and it is the reason this is not a worse bug in the other
+direction.** A genuine covalent inhibitor is bonded to the target too. Verified:
+6OIM's `MOV` (sotorasib, one bond to KRAS Cys12) and 4G5J's `0WN` (afatinib, one
+bond to EGFR Cys797) both stay `druglike`, and `MOV` stays `druglike` even with
+the accession withheld (C4). The distinction is bonded-to-a-**polymer-ligand**
+versus bonded-to-the-**target**, and C1/C2/C3 encode it three different ways so
+no single missing input collapses it.
+
+**THE TRAP, and it is silent: `_struct_conn` IS NOT IN THE ASSEMBLY FILE.**
+RCSB strips it exactly as it strips `_struct_ref`. Verified on 8QFZ:
+`8QFZ-assembly1.cif` carries 23 categories and neither of those two, so a
+context built from the coordinate file the pipeline already holds comes back
+with an **empty link table that is indistinguishable from "nothing is
+bonded"** — and `LFI` goes straight back to `druglike`. Build the context from
+`files.rcsb.org/header/<ID>.cif`, which `pocket-scan` already fetches once per
+entry for `_struct_ref`, so it costs no extra call. `StructureContext` detects
+this itself: `has_struct_conn_category` is False, `is_available()` returns False,
+every verdict reached that way is flagged `struct_conn_absent_from_context` and
+its confidence is lowered. **Do not read the absence of links as the absence of
+bonds.**
+
+**Context-free, the chemistry still says something useful.** A component with
+three or more **alkyl-halide** electrophiles is a bi/trifunctional crosslinking
+reagent, not a drug. That does **not** change the verdict — the chemistry cannot
+settle it — but it raises
+`multi_electrophile_may_be_a_crosslinking_reagent` and drops confidence to
+`medium`, so an isolated `LFI` is no longer a confident `druglike`. **The
+threshold is 3 and not 2 on purpose:** nitrogen mustards — chlorambucil,
+melphalan, bendamustine — are approved drugs with exactly two alkyl chlorides on
+one nitrogen, and a threshold of 2 would trade this false positive for a worse
+false negative. Aryl halides do not count, so `260`
+(2-(bromomethyl)-1,3-difluorobenzene) scores 1, not 3.
+
+**And it does NOT fix `MTN` (below).** MTSL makes exactly ONE covalent bond to
+the target's engineered cysteine, which is rule C3 — the covalent-inhibitor
+case — so it stays `druglike` by design. What context adds is the flag
+`covalent_to_target`, which narrows the set of entries whose **titles** must be
+read from "all of them" to "the ones with a covalent linkage". That is a
+smaller job, not a solved one.
 
 ### A ligand can be disqualified by why it is there, not by what it is — TNF 5UUI `MTN`
 
@@ -863,6 +1078,11 @@ Two consequences:
   that did not contain this case.** It is not a claim about the classifier's
   ceiling. Quote it with this caveat wherever it appears — including
   `pocket-scan/SKILL.md` and `OUTPUT_NOTES.md`, which quote the same number.
+  **A second boundary was measured on 2026-08-15**: the sample also contained no
+  peptide-conjugated crosslinker, and `LFI` was the first false positive
+  actually observed against it. That one IS fixed, by context rather than by
+  chemistry; `MTN` is not, and the two together mark the edge — a molecule's
+  identity is decidable from the CCD, its *role* often is not.
 - **Read the entry title before promoting a structure to holo.** Titles naming a
   spin label, a crosslinker, a fluorophore, a photo-affinity probe, a chaperone
   or a fusion describe why the chemistry is present, and that is information the
@@ -980,6 +1200,46 @@ the row cap and is not — a 200-row aggregate came back cut off mid-array at
 
 Parse the output by the `---+---` rule's `+` positions, not by splitting on
 `|` — titles contain pipes.
+
+### Paperclip fails with rc=0, and an empty list is the disguise
+
+**The most dangerous signature, because nothing announces it.** Three of
+Paperclip's failure modes come back on stdout with a **zero exit status** and no
+`---+---` rule line, so a table parser returns `[]` — and a failed query becomes
+indistinguishable from "there is nothing there". On this axis that is the worst
+possible confusion: the whole point is telling *no precedent exists* from *we
+failed to retrieve it*.
+
+| signature | seen |
+| --- | --- |
+| `vsh: cd: /papers/: Permission denied` | a **shell** error, returned for a **SQL** query, naming a path never queried. Three consecutive attempts on `3LKJ`, rc=0, 17 ms each. |
+| `[error] Something went wrong. Please try again.` | undocumented; no code, no way to tell transient from permanent |
+| `[error] Request timed out` | observed on queries that cost nothing; not a statement-cost signal |
+
+Measured damage before the guard existed: a TNF-alpha run got zero rows from
+`_entry_facts` with rc=0 and reported **"25 apo / 0 holo, 0 undetermined, 0
+accessions, 0 rejected ligands"** — a clean, confident, entirely fabricated
+negative. With the guard the same input reports **"25 apo / 0 holo,
+undetermined: 25"** plus a `not_found` entry naming all 25 entries.
+
+`_run_sql` now raises on all three signatures, and separately on any rc=0 output
+with no table and no `(N rows)` trailer. A genuine empty result set — which does
+have the rule line and the trailer — still returns `[]`. **Never let a bare
+`len(rows) == 0` mean "none exist".**
+
+`_run_sql_retry` wraps it with short-then-long budgets and returns **`None` when
+the query never ran**, which is deliberately a different value from `[]`. Every
+call site branches on that distinction:
+
+| call site | on `None` |
+| --- | --- |
+| `_entry_facts` | returns `{}`; the caller's missing-entry reconciliation then marks every neighbour `holo_determined: false` and names them in `not_found` |
+| `_druglike_comp_ids_for_accessions` | that accession goes in `failed_accs` → `lookup_failed: true` on its block |
+| `_accession_precedent` summary | `n_structures: null`, block marked undetermined |
+
+Verified live while writing this: `_run_sql_retry` on `3LKJ`'s ligand row
+returned `None` and printed `QUERY NEVER RAN` — not `[]`, and not an empty
+ligand list that would have made a holo entry look apo.
 
 Three more query shapes that fail, all measured on `pdb_v.entry_ligands`:
 

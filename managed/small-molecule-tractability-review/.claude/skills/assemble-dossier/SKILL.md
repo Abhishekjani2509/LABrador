@@ -163,13 +163,48 @@ and `_false_negative_rate`), `tractability.site_pocket_rank`,
 `tractability.ensemble_consensus_fraction`, `tractability.method`, and
 `site_pocket_selected_by` on each spread.
 
-**Volume at D=1.6 first, and it is not a stylistic preference.** Measured over
-15 targets, 67 structures and 134 measurements: volume at D=1.6 separates the
-set at **AUC 1.000**, stable under all 15 leave-one-target-out refits, while
-druggability manages **0.720 with a 95% CI of 0.44–0.94** at the same clustering
-and **0.520** at D=2.4. On 37 holo structures with a drug-like ligand physically
-bound and the pocket anchored to it, **41% of druggability scores fall below
-0.1** — EGFR 6LUD with osimertinib bound is 0.013. Druggability is a
+**Volume at D=1.6 first — but not because it separates anything.** It is the
+computed axis's primary number because D=1.6 and D=2.4 measure different
+cavities and a pooled spread is a spread over two different things, so one of
+them has to be carried explicitly. **A volume is a measurement of a cavity in a
+structure we scored. It carries no verdict, and there is no volume at which this
+output calls a target druggable or hard.**
+
+> **RETRACTED 2026-08-15 (`CLAUDE.md` rule 4a, `rubric.md`, `OUTPUT_NOTES.md`,
+> `pipeline.html` N2).** This passage previously reported, as a current result,
+> that volume at D=1.6 separated all 15 evaluation targets at **AUC 1.000** with
+> a CI of [1.000, 1.000], stable under all 15 leave-one-target-out refits.
+> **That claim is withdrawn in full.** It is recorded rather than deleted so a
+> reader meeting the number in an older dossier can find out what happened to
+> it. An audit resolved every lining residue of all 67 calibration structures to
+> an entity by aligning SEQRES to the target's UniProt sequence, and found that
+> the anchors did not measure the proteins they were attributed to: **MYC's
+> pocket is 100% MAX (P61244)** with zero MYC lining residues; **IL-11's is 100%
+> IL-11 receptor alpha (Q14626)**; **TNF's** sits on TNF but has **zero residue
+> overlap** with its only drug-anchored pocket; **CD20's anchor ligand is
+> cholesterol hemisuccinate, a detergent**; **TL1A had no anchor at all**; and
+> **RORgt's 6C1P contains no RORgt** — its sole entity is an ion transport
+> protein, and it arrived through `ligand_site_jaccard` anchored on CHAPSO,
+> another detergent. `chain_accessions` was `{}` on **every** entry while the
+> adjacent field asserted chains were resolved from `_struct_ref_seq`.
+>
+> Two points generalise past the anchors and should travel with any revival
+> attempt:
+>
+> - **A bootstrap CI on a perfectly separated set is degenerate by
+>   construction.** Resampling cannot produce an inversion that is not in the
+>   data, so `[1.000, 1.000]` was arithmetic, not evidence.
+> - **The label and the measurement share a cause.** The binary flag "a
+>   drug-like ligand was co-crystallised" separates the same groups at **AUC
+>   0.900** with no structural measurement at all.
+
+Druggability's own numbers are reported below for the separate purpose of
+demoting it, and that demotion is unaffected by the above — it does not turn on
+any retracted anchor. Druggability manages **0.720 with a 95% CI of 0.44–0.94**
+at D=1.6 and **0.520** at D=2.4. On holo structures with a drug-like ligand
+physically bound and the pocket anchored to it, a large fraction of druggability
+scores fall below 0.1 — EGFR 6LUD with osimertinib bound is 0.013 (see the
+denominator note below). Druggability is a
 three-descriptor logistic regression fitted on 21 positives, and
 `mean_loc_hyd_dens_norm` is min-max normalised across the *other* pockets of the
 same structure, so it is a property of a pocket relative to whatever else was
@@ -182,11 +217,19 @@ Three traps specific to the primary number:
   not measure the same cavity. Record the D=1.6 value or decline it.
 - A site volume above ~1000 Å³ means sites have merged with neighbours. That is
   the normal D=2.4 failure and it is not a big pocket.
-- **The volume guide is a proposal, not a threshold.** ≥240 Å³ fell entirely in
-  the druggable group and ≤210 Å³ entirely in the hard group, but that is a 17%
-  margin fitted post hoc on n=15 with only 5 hard targets, all PPI/cytokine/
-  membrane. It gates nothing. Mark it uncalibrated wherever you quote it, the
-  same way the 4 Å off-site distance is marked.
+- **The volume guide is RETRACTED, not merely uncalibrated.** It was previously
+  described here as an uncalibrated proposal resting on a real separation: ≥240 Å³
+  falling entirely in the druggable group and ≤210 Å³ entirely in the hard group.
+  **That separation is withdrawn** (rule 4a, 2026-08-15) — it was fitted post hoc
+  on n=15 with only 5 hard targets, and four of those five anchors did not measure
+  the target protein at all. **Do not quote it, do not mark it "uncalibrated" and
+  quote it anyway, and do not revive it from the constants in
+  `validate_dossier.py`.** `VOLUME_GUIDE_DRUGGABLE_A3` and `VOLUME_GUIDE_HARD_A3`
+  still exist there deliberately, but they are read by exactly one rule as a
+  *disclosure trigger* — deciding when a low druggability sitting beside a large
+  volume disagree loudly enough to force a `tractability.caveat`. That survives
+  the retraction precisely because it asserts nothing about which side of the
+  number a target falls on. Nothing gates on them; do not add a rule that does.
 
 **`prank_rank` goes in `site_pocket_rank.prank`, beside `site_pocket_rank.fpocket`,
 never instead of it.** PRANK promotes the true site in 79% of 70 ligand-anchored
@@ -290,9 +333,16 @@ stations answer.
 | thin chemistry, no holo structures, no approvals — not enough to say either way | `insufficient_evidence` |
 
 **A low druggability score is not a route to either negative verdict, and the
-validator now blocks it.** 41% of pockets with a drug-like ligand physically
-bound score below 0.1 — EGFR 6LUD with osimertinib in it is 0.013, RORgt 6C1P is
-0.009 at rank 55 of 60, JAK1's median across nine approved drugs is 0.009. A
+validator now blocks it.** A large fraction of pockets with a drug-like ligand
+physically bound score below 0.1 — EGFR 6LUD with osimertinib in it is 0.013,
+JAK1's median across nine approved drugs is 0.009, TYK2 6NZP with
+deucravacitinib is 0.169, BCL-2 6QGK is 0.025. (**That fraction was reported as
+41%, 15 of 37, and its denominator is now under audit.** RORgt 6C1P — cited here
+until 2026-08-15 as `0.009 at rank 55 of 60` — is **not a certain positive** and
+has been struck: the entry contains no RORgt, its sole entity is an ion
+transport protein, and its anchor ligand is CHAPSO, a detergent. So the
+denominator is **36, not 37**, and **the other 36 have never been audited at
+residue level.** Quote the direction and the named cases, not the rate.) A
 `not_tractable` reached on that number is a false negative in the most expensive
 direction available. `not_tractable` on computed grounds needs the D=1.6 volume
 behind it; if the volume was not measured, the answer is `insufficient_evidence`
@@ -426,8 +476,12 @@ being the threshold `CLAUDE.md` and `rubric.md` describe at most length.
 **The two volume-guide constants classify nothing, deliberately.** They are used
 in exactly one place: deciding when a low druggability and a large volume
 disagree loudly enough that `tractability.caveat` must say so. No verdict, no
-threshold, no gate — the boundary is a 17% margin fitted post hoc on n=15 and it
-needs out-of-sample validation first.
+threshold, no gate. **They are not a boundary awaiting out-of-sample
+validation** — an earlier version of this sentence said so, and that framing is
+withdrawn with the rest of rule 4a. The separation they encoded is RETRACTED,
+not pending: four of the five hard anchors did not measure their target. They
+survive only as a *disclosure trigger*, which asserts nothing about which side
+of the number a target falls on, and that is why it outlives the retraction.
 
 ### The gate's vocabulary is the TOOL's vocabulary, not a shorter one
 
@@ -576,11 +630,18 @@ runs and both return zero violations. Read them together — the pair is the poi
 | ensemble | 3EYG + 10PI, 2 structures / 4 measurements | 2AZ5 + 5 apo, 6 structures / 12 measurements |
 | verdict | `small_molecule_tractable`, basis `retrieved_precedent` | `small_molecule_tractable`, basis `both`, **`axis_conflict` populated** |
 
-**TNF beats JAK1 on every pocket metric and has none of its precedent.** That is
-why `axis_conflict` is earned rather than hedged: the target with the better
-computed number is the one with zero approved small molecules. Averaging these
-two axes would rank TNF above JAK1 on tractability, which is the exact inversion
-this agent exists to prevent.
+**TNF has none of JAK1's precedent, and its computed axis is refused rather than
+low — that is what earns `axis_conflict` here.** An earlier version of this line
+read "TNF beats JAK1 on every pocket metric", and it is **withdrawn**: the table
+above refuses TNF's volume, D=1.6 primary and druggability outright, and its
+same-site and off-site controls (14.43/16.49 Å, 29.57 Å) are *worse* than
+JAK1's, so "every metric" was false against the table it sits under. The
+cross-target ranking it implied also has no source left — it rested on the
+calibration retracted in rule 4a, and TNF's own 207 Å³ anchor was one of the
+compromised ones. The honest statement is narrower and still enough: a target
+with zero approved small molecules is not thereby untractable, and averaging the
+two axes would let the retrieved zero erase a computed axis that was never
+measured. That is the inversion this agent exists to prevent.
 
 **The most instructive thing in the pair is that one fills and one refuses, from
 the same tool on the same day.** Both dossiers previously reported no pocket
@@ -749,18 +810,20 @@ accompanied by a `not_found` line naming the gap, and that is the *minimum* — 
 honest response is to re-run for volume, which is why it is the JAK1 example's
 `next_experiment`.
 
-**As of 2026-08-15 the gap between the two numbers is measured, and it is much
-wider than "volume is more reproducible".** Over 15 targets, 67 structures and
-134 measurements:
+**As of 2026-08-15 the case against druggability is measured; the case *for*
+volume as a discriminator is retracted.** The two halves of this table have
+different standing and must not be read as one result. Over 15 targets, 67
+structures and 134 measurements:
 
 | | |
 | --- | --- |
-| volume at D=1.6, target level | **AUC 1.000**, CI [1.000, 1.000], stable under all 15 leave-one-target-out refits |
+| volume at D=1.6, target level | ~~**AUC 1.000**, CI [1.000, 1.000], stable under all 15 refits~~ — **RETRACTED 2026-08-15, rule 4a.** The anchors did not measure the proteins they were attributed to; the CI was degenerate by construction. **Volume carries no verdict.** See the retraction box above |
 | druggability at D=1.6, target level | **0.720**, 95% CI **0.44–0.94** — includes chance, P(AUC≤0.5) = 0.071 |
 | druggability at D=2.4 | **0.520** — chance |
-| druggability on certain positives | 37 ligand-anchored holo structures across all 10 druggable targets: median **0.320**, **25/37 < 0.5**, **15/37 (41%) < 0.1** |
+| druggability on certain positives | ligand-anchored holo structures across the druggable targets: median **0.320**, and a large majority below 0.5. **Denominator under audit** — it was quoted as 37, one of which (RORgt 6C1P) is now void, and the remaining 36 have never been checked at residue level. See the denominator note below |
 | persistence | site pocket detected in **100% of structures for all 15 targets** → **AUC 0.500** |
 | published consensus criterion | **AUC 0.560**, and it **ranks MYC top at 0.80** |
+| co-crystal flag alone, no structural measurement | **AUC 0.900** — the label and the measurement share a cause, which is why the volume separation above could not be evidence |
 
 Two things follow that are easy to get wrong in opposite directions.
 
@@ -777,12 +840,32 @@ Reaching for it would reproduce the same inversion one rung down. Keep the
 consensus fraction for what it does do — stopping you quoting your best
 conformer — and read no tractability from it.
 
-The measured caveat travels with the finding: **n = 5 hard targets**, all
+**The class caveat that used to sit here is now moot, and the mitigation that
+answered it is RETRACTED.** The caveat was **n = 5 hard targets**, all
 PPI/cytokine/membrane class, against a druggable set enriched in kinases,
-nuclear receptors and GPCRs, so volume may partly be tracking target class. The
-mitigation is that the two least classical druggable targets, NLRP3 at 242 Å³
-and IL-17A at 250 Å³, still land above every hard target. That is a mitigation,
-not a control.
+nuclear receptors and GPCRs, so volume might have been tracking target class.
+The mitigation offered was that the two least classical druggable targets —
+NLRP3 at 242 Å³ and IL-17A at 250 Å³ — still landed above every hard target.
+**That mitigation is void**, because "above every hard target" is a statement
+about the hard anchors, and four of those five did not measure their target at
+all. It was never a control, and it is now not even a mitigation. The class
+confound is subsumed by a larger one: a co-crystal flag alone separates the
+groups at **AUC 0.900**, so the label and the measurability were the same
+variable throughout.
+
+**The denominator note.** The label-free test above was reported on **37**
+ligand-anchored holo structures — "certain positives by construction", holo
+structures with a drug-like ligand physically bound and the pocket anchored to
+it. **RORgt 6C1P, quoted elsewhere as "0.009 at rank 55 of 60", is neither**: the
+entry contains no RORgt (its sole entity is an ion transport protein) and its
+"ligand" is CHAPSO, a detergent. So the denominator is **36, not 37** — and **the
+other 36 have never been audited at residue level**, which is the audit that
+caught this one. Do not quote "15 of 37", "25 of 37" or "41%": each rests on a
+denominator now known to contain at least one error and unverified in its
+remaining 36 entries. **Quote the direction and the named cases, not the rate,
+pending a residue-level audit of all 36.** The demotion of druggability itself is
+unaffected — it does not turn on that case, and MYC's inversion was reproduced
+independently.
 
 ### Laundering nulls through a vague `not_found` line
 
@@ -807,9 +890,15 @@ an over-claim, and substituting the nearest pocket that does have volume is how
 
 ### Cryptic and occluded are different, and the difference is checkable
 
-TNF-alpha's axial site is recovered in all five apo structures once the third
-subunit is removed, at roughly 280 to 550 cubic angstroms, with roughly 1.6 A of
-backbone C-alpha displacement. It is **occluded, not cryptic**, and citing it as
+TNF-alpha's axial site is recovered in **four of the five** apo structures once
+the third subunit is removed, at roughly 280 to 550 cubic angstroms, with
+roughly 1.6 A of backbone C-alpha displacement. (**Not all five** — this said
+"all five" until 2026-08-15, inheriting the in-repo calibration; measured at the
+transferred ligand site, 1TNF returns **0.00 A^3**, so `n_apo_site_absent` is 1.
+The call is unchanged, because one of five is far below the "all or nearly all"
+the definition requires, but the census is 4 of 5 and is written down rather
+than smoothed over. The same correction is recorded above and in
+`tnf_P01375.json`.) It is **occluded, not cryptic**, and citing it as
 a cryptic-pocket case is an error a reviewer finds immediately. KRAS switch-II —
 absent on apo, druggability 0.000, backbone displaced roughly 8.8 A — is cryptic.
 
