@@ -15,6 +15,7 @@ Answers: *given an indication thesis, could this trial actually be enrolled?*
 | `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
 | `economics-bridge.ts` | **Adapter B** (COORDINATION §5): RecruitabilityResult → launch-delay overlay for Vince's economics node, with best-effort pricing. See section below. |
 | `evidence-bridge.ts` | **Adapter A** (COORDINATION §5): research-evidence-mapper graph → `IndicationThesis.evidence[]`, validated row-by-row with `Evidence.parse`. Run against the real `runs/g_1a4f` graph. See section below. |
+| `INTEROP-highlander.md` | Verification report (COORDINATION §5): does `hypothesis-highlander` actually speak `RecruitabilityResult` + `thesis.ts`? Mismatch table + minimal adapter recommendation. Read-only on Vince's dir. |
 
 Verified end to end on 2026-08-15 (evening): typecheck + ultracite clean, all
 four fixtures coherent, hero retrospective solid, backtest runs. `managed/trial-recruitment-forecaster`
@@ -140,6 +141,21 @@ input — flagged for Soliman as the untested branch.
 Open question for Soliman: whether a `hedged: true` finding inside a `mixed`
 link should take a strength discount. It does not today; inventing a
 multiplier the mapper does not define would be worse than saying so.
+
+## Highlander interop (verified 2026-08-15 late, read-only)
+
+Full table in [`INTEROP-highlander.md`](./INTEROP-highlander.md). Headline:
+the two `RecruitabilityResult` fields `hypothesis-highlander` reads (`score`,
+`simulatedMonthsToEnroll`) **match this node exactly — nothing to rename here**.
+What has drifted is its hand-written Python mirror of `thesis.ts`: it puts
+`uniprotAccession` at the top level (zod strips it silently — Rafal's join key
+is lost in both directions, verified by running both parsers) and its
+`Evidence.direction` has only two values, so a thesis carrying the `no_effect`
+rows `evidence-bridge.ts` now emits raises `AssertionError` inside its
+`validate()`. It also ships its own Adapter A/B whose numbers disagree with
+this node's bridges (strength formula, `no_effect` handling, whole-vs-fractional
+delay years, a hardcoded $5.06M/yr rate). Fixes are all on highlander's side;
+this node changes nothing.
 
 ## Backtest results and what they mean
 
