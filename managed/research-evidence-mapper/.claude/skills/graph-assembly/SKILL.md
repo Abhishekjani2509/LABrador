@@ -71,6 +71,20 @@ cp <skill-dir>/example-round.json /tmp/round.json   # then edit
 `--save` writes state back under `--memory-dir` and updates `index.json`.
 Omit it to see what a round *would* produce without committing it.
 
+**To read a graph, never re-issue its question.** Use the read-only paths:
+
+```bash
+python3 assemble.py --list --memory-dir /mnt/memory/research-evidence-mapper
+python3 assemble.py --show g_e087 --memory-dir /mnt/memory/research-evidence-mapper
+```
+
+Re-issuing a question used to destroy the graph it was meant to show: the id is
+deliberately stable per question, but the round loaded no prior state, so
+`--save` wrote an empty assembly over several rounds of evidence. Fixed — a
+`new_question` against an existing graph now loads it and continues its round
+numbering — but reading via `--show` is still the right way, because it does not
+assemble or write at all.
+
 **Ids in `round.json` are LOCAL to that round.** Number your papers `p1, p2, …`
 and your things `t1, t2, …` from one each time — they mean "the first paper I
 found this round", not the `p1` already in storage. The assembler translates
