@@ -208,38 +208,25 @@ are dead — do not create files under them.
       The fix was framing: "read figures on X only, and only for a paper
       that…" reads as a reason not to; "reading figures is expected, with a
       budget of 6 per round" reads as an instruction.
-- [~] **`resolve_link` did not move its target — root cause found: node
-      granularity, not the ask.** The graph had built FOUR nodes for one
-      concept: `adenovirus-mediated IRAK4 knockdown`, `KIC-0101`,
-      `PF-06650833`, `IRAK4 kinase-deficient mice`. Every new paper uses a
-      different reagent, so new evidence necessarily lands on a different
-      `from` node and creates a NEW link — the target can never move, by
-      construction. It also understates confidence everywhere: `agreement`,
-      `evidence_quality` and `independence` are per link, so one relationship
-      split four ways gives four `single_source` links instead of one `agreed`
-      link with four independent papers.
-      Fixed in claim-extraction and CLAUDE.md step 6: **the node is the
-      intervention class, the reagent is a condition in `where`** (plus an
-      alias), with an explicit exception for claims about a compound itself
-      (head-to-head, selectivity, PK). Deployed v5; re-test in flight.
-      NOTE: my first hypothesis was verb fragmentation via an uncontrolled
-      `how` vocabulary — that was WRONG, the graph uses 3 verbs with no
-      duplicate pairs. Recording it because §6 item 6 (the `how` enum) is on
-      the ratification agenda and this is evidence it is not the pressing
-      problem; node granularity is.
-- [x] **Ratio re-measured — and the prediction was wrong.** v4 round: 16 MCP
-      vs 41 local calls, i.e. local went UP. The CLI *is* used (confirmed in
-      the session trace, not the console stream — the console does not render
-      bash command contents, which cost me a false "CLI unused" reading). The
-      remaining local calls are: re-deriving the input schema by grepping
-      assemble.py, writing a `build.py` to marshal `round.json`, and a dry run
-      against a **copy** of memory before the real `--save`. That last one is
-      the agent protecting live state from a bad write — good judgement, not
-      waste, and worth keeping.
-- [x] **`example-round.json` shipped** beside assemble.py — a complete working
-      round with every field annotated and the vocabularies inline, verified by
-      running it through the script rather than only reading well. SKILL.md now
-      says copy it rather than re-derive the shape from source.
+- [x] **`resolve_link` did not move its target — root cause fixed at both ends.**
+      The graph had FOUR nodes for one concept (adenoviral knockdown, KIC-0101,
+      PF-06650833, kinase-deficient mice), so new evidence always arrived under
+      a different `from` node and the target could not move by construction. It
+      also understated confidence everywhere, since scoring is per link.
+      Prevention: nodes are the intervention class, reagents go in `where`.
+      Repair: `resolve_entities` now merges on UniProt accession first, and a
+      new coalesce pass collapses duplicates ALREADY in the graph, returning an
+      id remap so findings and links follow.
+      Rejected along the way: a similarity/vector-DB merge. It fails in both
+      directions here — KIC-0101 and PF-06650833 are maximally dissimilar as
+      strings while being the same concept, and IL-6 vs IL-6R are nearly
+      identical strings while being different molecules. Accessions are exact,
+      auditable and species-safe (Q9NWZ3 vs Q8R4K2 are different keys).
+      Two pre-existing defects fell out of the testing: the module's OWN
+      docstring example was false (`normalize_name` gave "K-Ras" -> `k ra` and
+      "KRAS" -> `kra`, which never matched), and de-pluralization was eating
+      the trailing letter of gene symbols. Both fixed with a compact-name index
+      and a symbol guard.
 - [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
       the MCP; which header it accepts for a **long-lived API key** is still
       untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth

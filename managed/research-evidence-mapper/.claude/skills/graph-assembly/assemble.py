@@ -100,49 +100,183 @@ def normalize_name(s):
     """lowercase, strip punctuation, greek->latin, collapse space, de-pluralize."""
     if not s:
         return ""
+    raw = s
     s = unicodedata.normalize("NFKC", str(s))
     s = "".join(_GREEK.get(ch, ch) for ch in s)
     s = s.lower()
     s = _PUNCT.sub(" ", s)
     s = _WS.sub(" ", s).strip()
-    if len(s) > 3 and s.endswith("s") and not s.endswith("ss"):
+    # De-pluralize common nouns only. Applying it to symbols eats the trailing
+    # letter of real names -- KRAS -> KRA, RAS -> RA -- and silently forks the
+    # node it was meant to merge.
+    if (len(s) > 3 and s.endswith("s") and not s.endswith("ss")
+            and not _looks_like_symbol(raw)):
         s = s[:-1]
     return s
 
 
-def resolve_entities(new, existing):
-    """Merge things by normalized name OR any alias, against the WHOLE graph.
+def _looks_like_symbol(raw):
+    """Gene/protein symbols: all-caps, or containing digits (KRAS, IL6, TNFA)."""
+    letters = [c for c in str(raw) if c.isalpha()]
+    if not letters:
+        return False
+    return all(c.isupper() for c in letters) or any(c.isdigit() for c in str(raw))
 
-    The model proposes merges upstream; this only applies them, so assembly
-    stays deterministic.
+
+def compact_name(s):
+    """Separator-insensitive key: alphanumerics only.
+
+    normalize_name turns punctuation into spaces, so "IL-6" becomes "il 6" and
+    never matches "IL6" -- which made the merge example in this module's own
+    docstring untrue: "K-Ras" and "KRAS" did not join. This is the secondary
+    index that makes them.
     """
-    merged = [dict(t) for t in existing]
-    index = {}
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", str(s))
+    s = "".join(_GREEK.get(ch, ch) for ch in s)
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def _coalesce_by_accession(things):
+    """Collapse nodes ALREADY in the graph that share a UniProt accession.
+
+    Merging only new things into existing ones leaves prior fragmentation in
+    place forever. A real graph had four nodes for one concept -- an adenoviral
+    knockdown, two inhibitor compounds and a knockout mouse -- so evidence could
+    never pool onto one link and every confidence in that neighbourhood was
+    understated. Repairing that needs a pass over what is already stored, not
+    just over what is arriving.
+
+    The lowest-numbered id survives, so ids stay stable across rounds. Returns
+    (things, id_map); callers must remap findings through id_map, which is what
+    rebuilds the links.
+    """
+    def _order(t):
+        i = str(t.get("id") or "")
+        return (int(i[1:]) if i[1:].isdigit() else 10**9, i)
+
+    by_acc = {}
+    for t in sorted(things, key=_order):
+        acc = _accession(t)
+        if acc:
+            by_acc.setdefault(acc, []).append(t)
+
+    id_map, dropped = {}, set()
+    for acc in sorted(by_acc):
+        group = by_acc[acc]
+        if len(group) < 2:
+            continue
+        keep = group[0]
+        for other in group[1:]:
+            id_map[other.get("id")] = keep.get("id")
+            dropped.add(other.get("id"))
+            labels = [other.get("name", "")] + list(other.get("aliases") or [])
+            known = {normalize_name(a)
+                     for a in [keep.get("name", "")] + list(keep.get("aliases") or [])}
+            extra = sorted({a for a in labels if a and normalize_name(a) not in known})
+            if extra:
+                keep["aliases"] = sorted(set(list(keep.get("aliases") or []) + extra))
+            keep["mentions"] = int(keep.get("mentions") or 0) + int(other.get("mentions") or 0)
+            amb = sorted(set(list(keep.get("ambiguity") or [])
+                             + list(other.get("ambiguity") or [])))
+            if amb:
+                keep["ambiguity"] = amb
+            prov = list(keep.get("merged_from") or [])
+            prov.append({"name": other.get("name"), "via": "accession"})
+            keep["merged_from"] = sorted(prov, key=lambda m: (str(m.get("name")),
+                                                              str(m.get("via"))))
+    return [t for t in things if t.get("id") not in dropped], id_map
+
+
+def _accession(t):
+    """Normalized UniProt accession, or '' when absent or unusable.
+
+    A node carrying a non-empty `ambiguity` list is deliberately excluded: an
+    unresolved node must never become a merge key. Resolving the string "IL-6"
+    yields P05231, the ligand, while receptor-blockade evidence is P08887 --
+    merging on a contested accession propagates the wrong protein through every
+    link that touches it.
+    """
+    if t.get("ambiguity"):
+        return ""
+    return str(t.get("uniprot_accession") or "").strip().upper()
+
+
+def resolve_entities(new, existing):
+    """Merge things against the WHOLE graph, accession first, then name/alias.
+
+    Accession is the stronger key and is checked first, because names fragment
+    in both directions. Four nodes -- KIC-0101, PF-06650833, adenovirus-mediated
+    IRAK4 knockdown, IRAK4 kinase-deficient mice -- are one concept that no
+    string comparison relates, while "IRAK4" alone matches three different
+    UniProt entries across human, mouse and cow. An exact accession match is
+    species-safe by construction: Q9NWZ3 and Q8R4K2 are simply different keys.
+
+    The model proposes merges upstream (it is what knows a compound's target);
+    this only applies them, so assembly stays deterministic.
+    """
+    merged, id_map = _coalesce_by_accession([dict(t) for t in existing])
+    index, acc_index = {}, {}
     for t in merged:
         for label in [t.get("name", "")] + list(t.get("aliases") or []):
-            key = normalize_name(label)
-            if key:
-                index.setdefault(key, t)
+            for key in (normalize_name(label), compact_name(label)):
+                if key:
+                    index.setdefault(key, t)
+        acc = _accession(t)
+        if acc:
+            acc_index.setdefault(acc, t)
+
     used = {t.get("id") for t in merged}
-    id_map = {}
     counter = len(merged)
     for t in new:
         labels = [t.get("name", "")] + list(t.get("aliases") or [])
-        hit = None
-        for label in labels:
-            key = normalize_name(label)
-            if key and key in index:
-                hit = index[key]
-                break
+        acc = _accession(t)
+        hit = acc_index.get(acc) if acc else None
+        via = "accession" if hit is not None else None
+        if hit is None:
+            for key in [k for lb in labels
+                        for k in (normalize_name(lb), compact_name(lb)) if k]:
+                if key in index:
+                    cand = index[key]
+                    # A contradicting accession OUTRANKS a name match. Human
+                    # IRAK4 (Q9NWZ3) and mouse Irak4 (Q8R4K2) normalize to the
+                    # same string, so without this the name fallback silently
+                    # fuses two species into one node and pools their evidence.
+                    cand_acc = _accession(cand)
+                    if acc and cand_acc and acc != cand_acc:
+                        continue
+                    hit = cand
+                    via = "name"
+                    break
         if hit is not None:
             id_map[t.get("id")] = hit.get("id")
-            known = {normalize_name(a) for a in [hit.get("name", "")] + list(hit.get("aliases") or [])}
+            known = {normalize_name(a)
+                     for a in [hit.get("name", "")] + list(hit.get("aliases") or [])}
             extra = sorted({a for a in labels if a and normalize_name(a) not in known})
             if extra:
                 hit["aliases"] = sorted(set(list(hit.get("aliases") or []) + extra))
             hit["mentions"] = int(hit.get("mentions") or 0) + int(t.get("mentions") or 1)
+            # Carry identity forward, and keep every ambiguity ever raised --
+            # a merge must never quietly resolve a question someone flagged.
+            for field in ("uniprot_accession", "gene_symbol", "resolved_by"):
+                if t.get(field) and not hit.get(field):
+                    hit[field] = t[field]
+            amb = sorted(set(list(hit.get("ambiguity") or [])
+                             + list(t.get("ambiguity") or [])))
+            if amb:
+                hit["ambiguity"] = amb
+            # Auditable, and reversible: a bad merge is otherwise unrecoverable.
+            prov = list(hit.get("merged_from") or [])
+            prov.append({"name": t.get("name"), "via": via})
+            hit["merged_from"] = sorted(prov, key=lambda m: (str(m.get("name")),
+                                                             str(m.get("via"))))
             for label in extra:
-                index.setdefault(normalize_name(label), hit)
+                for key in (normalize_name(label), compact_name(label)):
+                    if key:
+                        index.setdefault(key, hit)
+            if acc:
+                acc_index.setdefault(acc, hit)
             continue
         counter += 1
         new_id = "t%d" % counter
@@ -157,9 +291,11 @@ def resolve_entities(new, existing):
         merged.append(row)
         id_map[t.get("id")] = new_id
         for label in labels:
-            key = normalize_name(label)
-            if key:
-                index.setdefault(key, row)
+            for key in (normalize_name(label), compact_name(label)):
+                if key:
+                    index.setdefault(key, row)
+        if acc:
+            acc_index.setdefault(acc, row)
     return merged, id_map
 
 

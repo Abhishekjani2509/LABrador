@@ -407,7 +407,10 @@ Emit exactly this object. Fill every field. Empty lists where nothing was found;
 
   "things": [
     { "id": "t1", "name": "antibody 38C2", "kind": "protein",
-      "aliases": ["38C2"], "mentions": 14 }
+      "aliases": ["38C2"], "mentions": 14,
+      "uniprot_accession": "Q9NWZ3", "gene_symbol": "IRAK4",
+      "resolved_by": "f7 quote names the kinase directly",
+      "ambiguity": [], "merged_from": [] }
   ],
 
   "papers": [
