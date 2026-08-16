@@ -911,6 +911,104 @@ threshold), NLRP3 7ZGU `true` (0.63 Å site RMSD against 17.86 Å at `A:679`),
 S1PR1 receptor-to-receptor `true` (0.62 Å against 6.07 Å). The 5.0 Å notable
 threshold is PROPOSED, NOT CALIBRATED.
 
+### The chain resolver worked and the pocket selector ignored it
+
+**This is the defect that suspended the volume metric**, and it is the twin of
+the uniformly-null field below: a number that was uniformly *present* and quietly
+measuring a different molecule.
+
+The payload announced `"target_chains_basis": "chains mapping to P11836 in
+_struct_ref_seq"`, with a `_why` naming the S1PR1/Gβ1 case it was built to
+prevent — and then selection picked **the most druggable pocket anywhere in the
+file**, with no check that a single lining residue was on those chains.
+
+Measured. Selected pockets that were actually on the target:
+
+| target | on-target | what the others were |
+| --- | --- | --- |
+| IL-13 | **1 of 8** (reproduced here; 1 of 9 as first reported) | cavities inside the Fabs of **tralokinumab** and **lebrikizumab** (3L5X, 5L6Y, 3L5W, 4PS4), the **receptor** chain in 3LB6 and 3BPO, chain B in 5E4E |
+| BAFF | 2 of 5 | 5Y9J's rank-1 pocket, druggability **0.762**, lined 81% by **belimumab** |
+| CD20 | 4 of 7 | 6Y90 and 6Y97 lined by **rituximab's Fab** |
+
+Re-measured at D=1.6 over eight IL-13 entries after the fix:
+
+| entry | old pick | on-target | new pick |
+| --- | --- | --- | --- |
+| 3L5X | rank 2, 261.7 Å³ | **0.00** (chain H) | rank 7, 68.1 Å³ |
+| 5L6Y | rank 1, 225.3 Å³ | **0.00** (chain H) | rank 12, 82.9 Å³ |
+| 3L5W | rank 1, 328.9 Å³ | **0.00** (chain L) | rank 3, 301.9 Å³ |
+| 4PS4 | rank 15, 825.3 Å³ | **0.00** (H, L) | rank 17, 209.5 Å³ |
+| 3G6D | rank 2, 188.9 Å³ | 0.67 | unchanged |
+| 3LB6 | rank 1, 312.6 Å³ | **0.00** (chain C) | rank 3, 94.1 Å³ |
+| 3BPO | rank 4, 317.3 Å³ | **0.00** (chain C) | rank 1, 361.6 Å³ |
+| 5E4E | rank 3, 311.8 Å³ | 0.42 | rank 6, 102.4 Å³ |
+
+**Median volume 312.2 → 145.7 Å³.** (The first report measured 312.3 → 106.8 on a
+slightly different entry set and hand-filter; the *old* medians agree to 0.1 Å³,
+so the disagreement is in how the corrected value is taken, not in the defect.
+Quote the payload, not either of these.) BAFF and CD20 move the same way.
+
+**So: `on_target_residue_fraction` is now computed for every pocket, and only
+pockets above `POCKET_MIN_ON_TARGET_FRACTION` (0.5, PROPOSED and NOT CALIBRATED)
+are eligible to be selected as the site.** Read
+`by_clustering.<D>.on_target_selection` before quoting any volume. It carries the
+selected pocket's fraction, the off-target chains lining it, and three counts:
+`n_pockets_on_target`, `n_pockets_off_target`, and `n_pockets_fully_on_target`.
+
+Three things to know about the rule:
+
+- **A majority, not unanimity.** A genuine orthosteric pocket at a target/partner
+  interface is legitimately lined by both, and requiring 1.0 would refuse exactly
+  the pockets rule 2b exists to find. The failures being caught are not marginal
+  — they sit at **0.00**.
+- **`n_pockets_fully_on_target` is reported so you can be stricter than the
+  module.** BAFF 5Y9J has **0 of 22** fully on-target and exactly one above 0.5
+  (at 0.667, druggability 0.000). Under `≥0.5` that entry contributes 118.8 Å³;
+  under `==1.0` it contributes nothing. Both are defensible; the module applies
+  the looser one and gives you the number to apply the stricter.
+- **An entry where no pocket is on-target contributes NOTHING.**
+  `site_pocket_selected_by` becomes `no_on_target_pocket`, `site_pocket` is null,
+  and no volume or druggability is emitted — rather than emitting a partner's.
+  A sixth value therefore exists on `site_pocket_selected_by`.
+
+**Off-target pockets are still returned**, with their fractions, in `pockets`. A
+cavity inside an antibody is a real cavity. It is just not this target's site and
+must never be quoted as its volume.
+
+### Failing open on the accession is what let the selector loose
+
+`_target_chains` used to return **every** chain with the note *"no chain of this
+entry maps to P35225; using every chain scored, which may include partners"* — a
+warning in a string, downstream of nothing. It now **fails closed**: an entry
+that declares UniProt references and contains none matching the target is
+refused, with `tier: "none"` and the declared accessions named.
+
+**Refusing on a string comparison is not safe, and two real cases prove it.**
+Both were caught before shipping, and both would have thrown away valid data:
+
+- **UniProt merges accessions.** TL1A's 2O0O, 2QE3, 2RJK, 2RJL and 2RE9 declare
+  **Q8NFE9**, whose record reads `inactiveReason: {inactiveReasonType: "MERGED",
+  mergeDemergeTo: ["O95150"]}`. It *is* O95150. A literal comparison would have
+  refused **five of six** entries of the target's own ensemble.
+- **One gene can have several live accessions.** IL-13's 3BPO declares
+  **Q4VB50**, which is not merged into P35225 and never will be — it is an
+  unreviewed TrEMBL entry named "Interleukin-13", gene `IL13`, human. Refusing
+  3BPO would have been wrong in the damaging direction; what the entry needed was
+  for chain A to be recognised as target so that B and C — IL-4Rα and IL-13Rα1 —
+  are recognised as **partners**.
+
+So a declared accession matches the target if it is the same string, **or**
+UniProt has merged one into the other, **or** they are the same gene in the same
+organism. And when UniProt cannot be reached, the entry is **not refused and not
+verified** — an unanswered question is not a negative answer. Three statuses now
+exist where there was one: `verified` (checked and matched), unverified
+(mapping unreadable, or no accession supplied), and refused.
+
+**`target_chains_verified: false` disables the on-target filter**, deliberately.
+An unreadable accession mapping must not silently drop pockets — `on_target` is
+null throughout and `on_target_selection._unverified_note` says the selected
+pocket has not been shown to be on the target.
+
 ### Which chain is the target is a lookup, not the longest one
 
 Anything that identifies the target by chain **length** is wrong the moment a

@@ -1042,6 +1042,10 @@ Before reporting any actives count:
   not strong precedent. MYC: 1,079 compounds, 0 of 25 structures with any ligand
   above 120 Da.
 
+**And none of those figures may be a row-set length that was not reconciled
+against an independent `COUNT` — see rule 14.** The row cap moves, silently, and
+a capped count is about the cap and not about the target.
+
 ### 7. Clinical failure is not evidence against tractability
 
 They are different questions and other stations answer the second one. RORgt has
@@ -1218,6 +1222,90 @@ depends on `proto_tools` being installed on the operator's machine, and when it
 is not, the tool returns a `ModuleNotFoundError` rather than an empty result.
 Read that as unavailability, null the axis, and record it in `not_found` —
 never as "no structural neighbours found".
+
+### 14. Every count is reconciled against an independently issued `COUNT`. A mismatch is a hard failure.
+
+**Paperclip serves a *moving* row cap.** Measured 2026-08-15 while regenerating
+fixture counts: the same query returned **200 rows one moment and exactly 10 the
+next** — well-formed table, no error, no warning, no truncation marker, no
+change to the query. The first run recorded **KRAS as 10 PDB entries against a
+true 522**. Nothing in the output told the two runs apart. Only reconciling
+against a separately issued `COUNT` caught it.
+
+Read what that does to this station. The dossier's central claim is that it can
+tell *there is no evidence* from *we failed to retrieve the evidence*. A result
+set silently truncated to 5% of its rows, correctly formatted, defeats that
+claim completely: every count taken from a row set is a lower bound of unknown
+tightness and is indistinguishable from a real answer. **Every count anyone has
+produced against this source could be wrong this way.** It is also the leading
+explanation for several things we have been attributing elsewhere — a "degraded"
+table that came back in 7 ms on re-test, timings varying by two orders of
+magnitude, and two agents reading the same source and reporting different
+figures.
+
+So, binding:
+
+1. **Any number that enters the dossier as a count is reconciled against an
+   independently issued aggregate.** Issue a second call — `SELECT COUNT(*)` or
+   `COUNT(DISTINCT …)` over the same predicate — and compare it to the length of
+   the row set you counted. Not optional on well-studied targets, and not
+   optional on small results: **10 rows is exactly what the cap looked like.**
+2. **The same applies to any query whose result *length* is the answer** — a
+   list of structures, compounds, trials, approved drugs, clinical candidates,
+   terminated programs, ensemble entries, Foldseek neighbours. If `len(rows)` is
+   going to become a number in the JSON, it needs its own `COUNT`.
+3. **A mismatch is a hard failure, not a warning.** Do not report the larger of
+   the two, do not report the aggregate with a note beside it, do not pick.
+   The field is `null`, and `not_found` records the reason naming **both**
+   figures and **both** queries. A reconciled count and an unreconciled one must
+   never sit side by side in one dossier as plain numbers.
+4. **Prefer never needing it.** Aggregate server-side in the first place
+   (`COUNT`, `MAX`, `STRING_AGG … GROUP BY`) — a one-row result cannot be
+   capped. Reconciliation is what you do when you genuinely needed the rows.
+5. **A round number at a known cap is the tell, not the test.** 200 and 10 are
+   the two caps observed. Exactly 200 or exactly 10 rows is capped until an
+   aggregate says otherwise — but 47 rows is **not** thereby safe, because we do
+   not know what sets the cap or what other values it takes. Only the aggregate
+   clears a count.
+6. **Record that you did it.** There is no template field for a reconciliation
+   and this rule does not add one silently. Until one exists, put the pair in
+   the owning block's existing `sources` list — e.g. `"structure.total_pdb_structures:
+   522 rows reconciled against COUNT(*) = 522 (paperclip_sql -s proteins)"` —
+   and put any mismatch in `not_found`. The field this rule *would* want is a
+   per-block `count_reconciliation` object (`{"field", "rows", "count_aggregate",
+   "agrees"}`) on `target_precedent`, `structure` and `family_precedent`; it is
+   **proposed, not added**, because the template's 17 top-level keys and their
+   shapes are read by the validator and by consumers, and changing them is not
+   this rule's call to make.
+
+### 15. Four Paperclip failure signatures. Every one of them means the query did not run.
+
+A failed retrieval that reaches the JSON as `0` or `[]` is the one error this
+dossier cannot survive, and Paperclip fails in more ways than the documentation
+admits: **11 of 30 SQL calls in one dry run failed, across four distinct
+signatures, three of them undocumented.**
+
+| signature | what it actually is |
+| --- | --- |
+| `[error] Request timed out` | observed at 120 s on a **tableless `SELECT 1`**. It is therefore not a statement-cost signal and carries no information about your query. |
+| `[error] Something went wrong. Please try again.` | undocumented. No code, no detail, no way to tell transient from permanent. |
+| `vsh: cd: /papers/: Permission denied` | returned by `paperclip sql` **for a SQL query** — a shell error from another subsystem, naming a path you never queried. |
+| a silently capped row set | rule 14. Well-formed table, correct columns, **no error text at all** — the only one of the four that does not announce itself. |
+
+**Any of these means the query did not run.** The value is `null`, the reason is
+recorded in `not_found` quoting the signature verbatim, and the retry is
+short-then-long, never long-twice. Never `0`. Never `[]`. Never "no approved
+small molecules", "no holo structures", "no terminated programs" or "no
+precedent found". A timeout is not a zero, a shell error is not a zero, and a
+capped table is not a count.
+
+**Only auth failures are guarded today, and that guard catches none of the
+four.** The tool layer throws on `401`/`403`/`unauthorized`/`forbidden`/`invalid
+api key` and friends, and only when the process also exits non-zero. Timeouts,
+"Something went wrong", `Permission denied` and a capped-but-well-formed table
+match none of those patterns — and the fourth is not even a failed run. **Do not
+expect the tool layer to stop any of them.** The guard is these rules, the
+reconciliation in rule 14, and nothing else.
 
 ## Falsification pass
 
