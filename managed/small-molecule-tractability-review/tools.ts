@@ -1026,7 +1026,7 @@ function dropContactResidueLists(root: JsonObject): number {
  * which are what separate a real apo call from a failed lookup — are untouched.
  */
 function dropRejectedLigands(root: JsonObject): number {
-  const neighbours = root.neighbours;
+  const { neighbours } = root;
   if (!Array.isArray(neighbours)) {
     return 0;
   }
@@ -1261,7 +1261,7 @@ function fitText(text: string, target: FitTarget): string {
         `--- first 2000 characters ---\n${text.slice(0, 2000)}`
     );
   }
-  return fitParsed({ parsed, fullChars: text.length, target });
+  return fitParsed({ fullChars: text.length, parsed, target });
 }
 
 /**

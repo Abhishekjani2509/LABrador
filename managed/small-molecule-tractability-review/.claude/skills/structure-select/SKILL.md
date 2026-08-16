@@ -511,6 +511,22 @@ Measured, not claimed. **Re-measured 2026-08-15 after the first false positive
 against the held-out result; both original figures are unchanged and the new
 cases are additive.**
 
+**Reproduce every figure in this section with one command:**
+
+```bash
+python3 .claude/skills/structure-select/tests/test_v2.py
+```
+
+Offline, pure stdlib, no Paperclip call and no network — so it does not depend
+on the row cap or the `cli_cwd` bug. The harnesses, the cached
+`pdb_v.chemcomps` rows and the 7 context mmCIFs are in
+`.claude/skills/structure-select/tests/`; read `tests/README.md` for how the
+sets were drawn. **Before 2026-08-15 these harnesses existed only in session
+scratch under `/private/tmp`, which meant none of the figures below traced to
+anything in this checkout** — the same failure mode that let the retracted
+volume separation survive. If a quoted number ever disagrees with what the
+harness prints, the harness wins.
+
 - **259/262 = 98.9%** on the original ground-truth set, which includes the four
   failures above, every member of `modal_app.COFACTORS` and `NON_LIGANDS`, and
   every member of `neighbour_precedent.EXCLUDED_LIGANDS` — none of which the
@@ -1083,6 +1099,31 @@ Two consequences:
   actually observed against it. That one IS fixed, by context rather than by
   chemistry; `MTN` is not, and the two together mark the edge — a molecule's
   identity is decidable from the CCD, its *role* often is not.
+### Where these figures are quoted
+
+The accuracy figures are cited in **six places outside the harness**, and the
+sole authority for all six is `tests/test_v2.py`. If you change a rule, re-run
+it and update every row — a figure that disagrees with the harness is the
+citation's defect, not the harness's.
+
+| file | what it quotes |
+| --- | --- |
+| `structure-select/ligand_filter.py` (module docstring) | 259/262, 277/280, 61/70, 0 FP |
+| `structure-select/SKILL.md` (this file, above) | 259/262, 277/280, 61/70, 0 FP |
+| `pocket-scan/modal_app.py` (header comment) | 259/262, 61/70, zero FP |
+| `pocket-scan/modal_app.py` (`method.ligand_classification.accuracy`) | 259/262, 61/70, zero FP — **this one ships in the output JSON** |
+| `pocket-scan/SKILL.md` | 259/262, 61/70, zero FP |
+| `OUTPUT_NOTES.md` | 259/262 (98.9%), 61/70 (87.1%), zero FP |
+
+All six were **verified against a live run on 2026-08-15 and every figure is
+correct as written**. Two of the six quote only the pair `259/262` + `61/70` and
+omit the combined `277/280`; that is not wrong, but the combined figure is the
+one that covers the crosslinker and context rules, so prefer it.
+
+Also note `fixtures/targets.json` and `fixtures/README.md` cite the zero-FP
+claim in order to *rebut* it with the `MTN` counterexample. Those are correct
+and should stay.
+
 - **Read the entry title before promoting a structure to holo.** Titles naming a
   spin label, a crosslinker, a fluorophore, a photo-affinity probe, a chaperone
   or a fusion describe why the chemistry is present, and that is information the
