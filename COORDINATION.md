@@ -183,8 +183,18 @@ are dead — do not create files under them.
       `changed_in_round: 1`; the round added a neighbouring link instead. For
       an ask whose purpose is "more evidence on this exact relationship", not
       touching the target is a miss worth investigating.
-- [ ] **Over-fetch / under-extract ratio is widening**: `found: 96, read: 3,
-      used: 1` at `standard`. Search is cheap, extraction is the bottleneck.
+- [x] **Diagnosed the over-fetch / under-extract ratio, and fixed the cause.**
+      `found: 96, read: 3, used: 1` was not laziness. Call mix for that round:
+      21 MCP calls vs **35 local sandbox calls** — the agent was hand-authoring
+      a driver script to marshal findings into `assemble.main()`, running it
+      twice for determinism, and writing state, every round. `assemble.py` now
+      has a CLI (`--input round.json --memory-dir … --save`), so that is one
+      command. This also closes a correctness hole nobody had named: freshly
+      written, unreviewed glue was sitting in front of the deterministic core,
+      and a byte-stable script reached through a different caller each round is
+      not reproducible.
+- [ ] Re-measure the ratio on the next deployed run — the fix should shift
+      calls from sandbox to corpus, but that is a prediction until measured.
 - [ ] **Findings are not idempotent across a retried round.** `main()` appends
       without deduping on id, so a retried round double-counts findings and
       inflates `agreement` and `independence` for every affected link. Real
