@@ -39,7 +39,7 @@ const TRACTABILITY = join(
 const FORECASTER = join(REPO_ROOT, "managed", "trial-recruitment-forecaster");
 const OBSERVATORY = join(REPO_ROOT, "managed", "pipeline-observatory");
 const HYPGEN = join(REPO_ROOT, "managed", "hypothesis-generator");
-const GRAPH = join(MAPPER, "runs", "g_1a4f.json");
+const GRAPH = join(MAPPER, "runs", "g_e087.json");
 const DOSSIER_EXAMPLES = join(
   TRACTABILITY,
   ".claude",
@@ -49,11 +49,11 @@ const DOSSIER_EXAMPLES = join(
 );
 
 /**
- * The mapper's own bridge found 11 actionable rows in g_1a4f. A drop below 10
+ * The mapper's own bridge found 41 actionable rows in g_e087 (typed reference graph, replaced g_1a4f 2026-08-16). A drop below 35
  * means the graph changed, the schema drifted, or the bridge started dropping
  * rows — all three are things the team must hear about immediately.
  */
-const MIN_EVIDENCE_ROWS = 10;
+const MIN_EVIDENCE_ROWS = 35;
 const SUBPROCESS_TIMEOUT_MS = 600_000;
 /** hyp_gen's dry-run tail line, e.g. "5 shortlisted. No model calls made." */
 const SHORTLISTED_LINE = /(\d+) shortlisted/;
@@ -156,7 +156,7 @@ function checkEvidenceBridge(): Check {
   if (!res.ok) {
     return {
       detail: "evidence-bridge.ts exited non-zero",
-      name: `evidence-bridge on g_1a4f (≥${MIN_EVIDENCE_ROWS} rows)`,
+      name: `evidence-bridge on g_e087 (≥${MIN_EVIDENCE_ROWS} rows)`,
       ok: false,
       output: res.out,
     };
@@ -168,7 +168,7 @@ function checkEvidenceBridge(): Check {
   const rows = parsed.evidence.length;
   return {
     detail: `${rows} evidence rows (${parsed.dropped.total} dropped, counted not silent)`,
-    name: `evidence-bridge on g_1a4f (≥${MIN_EVIDENCE_ROWS} rows)`,
+    name: `evidence-bridge on g_e087 (≥${MIN_EVIDENCE_ROWS} rows)`,
     ok: rows >= MIN_EVIDENCE_ROWS,
     output: rows >= MIN_EVIDENCE_ROWS ? undefined : res.out.slice(0, 2000),
   };
@@ -276,7 +276,7 @@ function checkHypGen(): Check {
     detail: res.ok
       ? `${shortlisted} hypotheses shortlisted, no model calls`
       : "hyp_gen dry-run failed",
-    name: "hyp_gen structural dry-run on g_1a4f (≥1 shortlisted)",
+    name: "hyp_gen structural dry-run on g_e087 (≥1 shortlisted)",
     ok: res.ok && shortlisted >= 1,
     output: res.ok && shortlisted >= 1 ? undefined : res.out.slice(-2000),
   };
