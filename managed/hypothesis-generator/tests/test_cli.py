@@ -9,7 +9,7 @@ import pytest
 
 from hyp_gen.cli import _overrides, main
 
-GRAPH = Path(__file__).resolve().parents[1] / "data" / "example_graph.json"
+GRAPH = Path(__file__).resolve().parents[1] / "fixtures" / "example_graph.json"
 
 
 def test_overrides_parse_json_values() -> None:
@@ -103,7 +103,7 @@ def test_params_travel_with_the_slate(tmp_path: Path, monkeypatch) -> None:
         assert group in slate["params"]
 
 
-FRAME = Path(__file__).resolve().parents[1] / "data" / "example_frame.json"
+FRAME = Path(__file__).resolve().parents[1] / "fixtures" / "example_frame.json"
 
 
 def test_emit_programs_refuses_without_a_frame(tmp_path: Path, capsys) -> None:

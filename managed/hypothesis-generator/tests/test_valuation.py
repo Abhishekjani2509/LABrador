@@ -32,7 +32,7 @@ from hyp_gen.valuation import (
     unsupported,
 )
 
-FRAME = Path(__file__).resolve().parents[1] / "data" / "example_frame.json"
+FRAME = Path(__file__).resolve().parents[1] / "fixtures" / "example_frame.json"
 
 
 @pytest.fixture

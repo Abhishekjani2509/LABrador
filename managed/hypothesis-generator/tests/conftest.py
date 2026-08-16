@@ -7,7 +7,7 @@ import pytest
 from hyp_gen.graph import GraphIndex, KnowledgeGraph
 from hyp_gen.params import Params
 
-FIXTURE = Path(__file__).resolve().parents[1] / "data" / "example_graph.json"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "example_graph.json"
 
 
 @pytest.fixture

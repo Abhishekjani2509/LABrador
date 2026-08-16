@@ -19,10 +19,10 @@
     "deploy": "bun scripts/deploy.ts",
     "dev": "eve dev",
     "fix": "ultracite fix",
-    "hyp-gen:programs": "cd hyp_gen && .venv/bin/python -m hyp_gen.cli --graph data/example_graph.json --profile valuation --dry-run --emit-programs runs/programs --frame data/example_frame.json",
-    "hyp-gen:setup": "cd hyp_gen && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
+    "hyp-gen:programs": "cd managed/hypothesis-generator && .venv/bin/python -m hyp_gen.cli --graph fixtures/example_graph.json --profile valuation --dry-run --emit-programs runs/programs --frame fixtures/example_frame.json",
+    "hyp-gen:setup": "cd managed/hypothesis-generator && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
     "hyp-gen:smoke": "bun managed/hypothesis-generator/fixtures/smoke.ts",
-    "hyp-gen:test": "cd hyp_gen && .venv/bin/python -m pytest -q",
+    "hyp-gen:test": "cd managed/hypothesis-generator && .venv/bin/python -m pytest -q",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
