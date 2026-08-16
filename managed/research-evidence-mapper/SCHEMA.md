@@ -51,6 +51,8 @@ other by `id`. Nothing nested.
     "truncated": true,           // true = a sample, not the literature
     "no_quote_discarded": 6,
     "duplicates_dropped": 0,
+    "years": 5,                  // the request's time window; null = unbounded
+    "defaults_applied": ["depth: standard (not supplied)"],   // every substitution
     "figures_read": 1,           // ask-image calls; 0 on new_question/expand_node
 
     // Reported, never enforced — a shortfall is visible instead of silent.
@@ -146,13 +148,42 @@ One ask per request. Point at a row **by id** — never describe it in prose.
 
 ```jsonc
 {
-  "graph_id": "g_7f2a",     // omit only for new_question
-  "ask": "resolve_link",    // expand_node | resolve_link | test_gap | new_question
-  "target": "L2",           // an id from that graph; free text for new_question
+  "graph_id": "g_7f2a",     // omit for new_question
+  "ask": "resolve_link",    // new_question | expand_node | resolve_link | test_gap
+  "target": "L2",           // an id from that graph; the QUESTION for new_question
   "depth": "deep",          // quick | standard | deep | exhaustive
+  "years": 5,               // only papers from the last 5 years. omit = no limit
   "reason": "blocking a downstream decision"   // logged, not acted on
 }
 ```
+
+**Only `target` is required.** Every other field defaults, and a missing field
+never refuses a round — `{"target": "does X affect Y"}` is a valid request.
+
+| omitted or unusable | default |
+|---|---|
+| `ask` | `new_question` |
+| `depth`, or not one of the four tiers | `standard` |
+| `years`, or not a positive number | unbounded — all years |
+| `reason` | `null` |
+| `graph_id` | treated as `new_question` |
+| the string is not JSON at all | the whole text becomes the question |
+
+Every substitution is listed in `coverage.defaults_applied`, so two different
+requests never produce indistinguishable output and a caller who wanted `deep`
+can see they got `standard`.
+
+**The one hard failure is the question.** A missing or empty `target` on
+`new_question`, or a `target` naming an id that does not exist on an extending
+ask, returns `status: "failed"` with `error` set and every list empty. Nothing
+is guessed.
+
+**`years` is a minimum publication year, applied as `--year-min`.** Note for
+implementers: `--since` is accepted by the search and then does not filter
+(a `--since 2025-06-01` query returned 2024 and 2018 papers), and some sources
+reject the flag outright. `coverage.years` records the window and must never
+claim a bound the search did not apply. A windowed absence is also a weaker
+claim than an unbounded one — "nothing in 5 years" is not "nothing".
 
 - **`expand_node`** — `target` is a `things` id (`"t1"`). *What else connects to
   this?* Searches that thing's `name` + `aliases`. Returns new links touching it,

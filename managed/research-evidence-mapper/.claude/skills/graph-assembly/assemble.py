@@ -1177,6 +1177,15 @@ def cli(argv=None):
     )
     if r.get("status"):
         graph["status"] = r["status"]
+    # Carry the request's time window and any defaults the caller had to
+    # substitute, so a consumer can tell a windowed absence from a real one and
+    # can see which fields were not actually supplied.
+    if "years" in r or "years" not in graph.get("coverage", {}):
+        graph.setdefault("coverage", {})["years"] = r.get("years")
+    if r.get("defaults_applied"):
+        cov = graph.setdefault("coverage", {})
+        cov["defaults_applied"] = sorted(
+            set(list(cov.get("defaults_applied") or []) + list(r["defaults_applied"])))
     for p in graph.get("papers", []):
         p.pop("source_text", None)
 

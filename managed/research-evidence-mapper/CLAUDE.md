@@ -25,21 +25,71 @@ Your task string is one JSON object:
 
 ```jsonc
 {
-  "graph_id": "g_7f2a",   // omit only for new_question
+  "graph_id": "g_7f2a",   // omit for new_question
   "ask": "resolve_link",  // new_question | expand_node | resolve_link | test_gap
-  "target": "L2",         // an id from that graph; free text for new_question
-  "depth": "deep",        // quick | standard | deep | exhaustive
-  "reason": "..."         // log it into rounds[]; do not act on it
+  "target": "L2",         // an id from that graph; the QUESTION for new_question
+  "depth": "standard",    // quick | standard | deep | exhaustive
+  "years": 5,             // only papers from the last 5 years. omit = no limit
+  "reason": "..."         // logged into rounds[]; never acted on
 }
 ```
 
-If the task string is not valid JSON, read the intent from the text and treat it
-as `{"ask": "new_question", "target": "<the text>", "depth": "standard"}`.
+### Be generous with the input, and say what you assumed
 
-`target` always points at a row **by id**. Resolve it against the loaded state.
-If `graph_id` names a graph that is not in memory, or `target` names an id that
-is not in that graph, return a graph with `status: "failed"`, `error` populated,
-and empty lists. Do not guess which row was meant.
+**Exactly one thing is required: the question.** Everything else has a sensible
+default, and a missing field is never a reason to refuse a round. A caller who
+sends `{"target": "does X affect Y"}` gets a real graph.
+
+| missing or unusable | what you do |
+|---|---|
+| `ask` | `new_question` |
+| `depth` | `standard` |
+| `years` | no time limit — search all years |
+| `reason` | leave it null |
+| `graph_id` | treat as `new_question` |
+| unrecognised extra fields | ignore them |
+| the whole string is not JSON | treat the entire text as the question |
+| `depth` is not one of the four tiers | `standard` |
+| `years` is not a positive number | ignore it, search all years |
+
+**Record every substitution in `coverage.defaults_applied`**, as a list of short
+strings like `"depth: standard (not supplied)"`. Defaulting silently would make
+two different requests indistinguishable in the output, and a caller who meant
+`deep` deserves to see that they got `standard`.
+
+**The one hard failure is a missing or empty question.** No `target` on a
+`new_question`, or a target naming an id that does not exist on an extending
+ask, returns `status: "failed"` with `error` populated and every list empty — do
+not guess which row was meant, and do not invent a question. Everything else,
+compensate and keep running.
+
+### Time window — `years`
+
+`years: 5` means *published in the last 5 years*. Convert it to a **minimum
+year** computed from today, and pass it as `--year-min`:
+
+```
+search -s pmc,biorxiv,medrxiv "query" --year-min 2021 -n 25
+```
+
+**Use `--year-min`, never `--since`.** `--since` is accepted on a PMC search and
+then does not filter — a `--since 2025-06-01` query returned 2024 and even 2018
+papers. A window that silently does nothing is worse than no window, because
+`coverage.years` would claim a bound the results do not honour. `--year-min` was
+checked and does bind: `--year-min 2025` returned only 2025 papers.
+
+Two things to be honest about, both of which go in `coverage`:
+
+- **Not every source accepts it.** `--since` is rejected outright for arxiv,
+  medrxiv and abstracts; when a source refuses the flag, either drop that source
+  for the windowed query or run it unwindowed and say so. Never report a window
+  the search did not apply.
+- **A window makes absence weaker, not stronger.** "No evidence in 5 years" is a
+  much smaller claim than "no evidence", and the two must not be confused. If a
+  windowed search returns nothing, `status` is `empty`, `coverage.years` states
+  the window, and it is never reported as the literature being silent.
+
+Record `coverage.years` on every round — `null` when unbounded.
 
 ### The four asks
 

@@ -124,21 +124,37 @@ Full contract in [`SCHEMA.md`](./SCHEMA.md). Summary:
 
 ```jsonc
 {
-  "graph_id": "g_7f2a",    // omit only for new_question
+  "graph_id": "g_7f2a",    // omit for new_question
   "ask": "resolve_link",   // new_question | expand_node | resolve_link | test_gap
-  "target": "L2",          // an id from that graph; free text for new_question
+  "target": "L2",          // an id from that graph; the QUESTION for new_question
   "depth": "deep",         // quick | standard | deep | exhaustive
+  "years": 5,              // only papers from the last 5 years. omit = no limit
   "reason": "..."          // logged, never acted on
 }
 ```
 
-Non-JSON input is treated as `{"ask":"new_question","target":"<the text>","depth":"standard"}`.
+**Only `target` is required.** `{"target": "does X affect Y"}` is a valid
+request and returns a real graph. Everything else defaults rather than refusing:
+
+| omitted or unusable | default |
+|---|---|
+| `ask` | `new_question` |
+| `depth`, or not one of the four tiers | `standard` |
+| `years`, or not a positive number | unbounded |
+| `reason` | `null` |
+| `graph_id` | treated as `new_question` |
+| not JSON at all | the whole text becomes the question |
+
+Every substitution appears in `coverage.defaults_applied`, so a caller who
+wanted `deep` can see they got `standard`. **The one hard failure is the
+question** — a missing `target`, or one naming an id that does not exist,
+returns `status: "failed"` rather than a guess.
 
 | ask | target | does |
 |---|---|---|
 | `new_question` | free text | mints a new `graph_id` at round 1 |
 | `expand_node` | a `things` id | what else connects to this node |
-| `resolve_link` | a `links` id | more evidence on one relationship, biased to the under-represented side |
+| `resolve_link` | a `links` id | more evidence on one relationship, biased to the thin side |
 | `test_gap` | a `gaps` id | has anyone actually stated this? sets `searched_in_round` either way |
 
 | depth | papers | queries | extraction |
@@ -149,6 +165,12 @@ Non-JSON input is treated as `{"ask":"new_question","target":"<the text>","depth
 | `exhaustive` | 300 | 12 | full text throughout — minutes, not a demo tier |
 
 `quick` may never report "no evidence" — ten papers is page one, and page one lies.
+
+**`years` is a publication-year floor.** It is applied as `--year-min`, and
+`coverage.years` records the window. Two honest limits: a windowed absence is a
+much weaker claim than an unbounded one — *"nothing in 5 years"* is not
+*"nothing"* — and not every source accepts the flag, so `coverage` states which
+sources the window actually reached.
 
 ### Output — always the full graph, never a delta
 

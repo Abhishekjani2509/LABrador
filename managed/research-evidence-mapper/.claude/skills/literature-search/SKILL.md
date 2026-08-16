@@ -82,6 +82,25 @@ From `meta.json` build one record per paper:
 Keep the fetched text with its `L<n>` prefixes. Those line numbers are the quote
 anchors and the citation anchors, and stripping them destroys both.
 
+## The `years` window
+
+`years: N` on the request means *published in the last N years*. Compute the
+minimum year from today and pass `--year-min`:
+
+```
+search -s pmc,biorxiv,medrxiv "query" --year-min 2021 -n 25
+```
+
+**`--since` is a trap.** It is accepted on a PMC search and then does not
+filter — `--since 2025-06-01` returned papers from 2024 and 2018. `--year-min`
+was tested and binds correctly. Some sources reject the flag entirely
+(`arxiv`, `medrxiv`, `abstracts` refuse `--since`), so check the error rather
+than assuming the window applied.
+
+Record the window in `coverage.years`, and record which sources it actually
+reached. A window that silently does nothing is worse than no window, because
+the graph then claims a bound its evidence does not honour.
+
 ## Failure modes
 
 The longest section, because this is where runs actually go wrong. Every entry
