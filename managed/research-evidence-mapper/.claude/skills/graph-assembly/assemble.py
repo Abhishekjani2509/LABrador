@@ -205,7 +205,7 @@ def _accession(t):
     return str(t.get("uniprot_accession") or "").strip().upper()
 
 
-def resolve_entities(new, existing):
+def resolve_entities(new, existing, round_n=None):
     """Merge things against the WHOLE graph, accession first, then name/alias.
 
     Accession is the stronger key and is checked first, because names fragment
@@ -290,6 +290,8 @@ def resolve_entities(new, existing):
         row = dict(t)
         row["id"] = new_id
         row["mentions"] = int(t.get("mentions") or 1)
+        if round_n is not None and "round" not in row:
+            row["round"] = round_n
         row["aliases"] = sorted(set(row.get("aliases") or []))
         merged.append(row)
         id_map[t.get("id")] = new_id
@@ -533,6 +535,49 @@ def interventions_without_target(things, links):
     return sorted(t.get("id") for t in things
                   if t.get("kind") in _INTERVENTION_KINDS
                   and t.get("id") not in linked)
+
+
+def compute_delta(prior, graph, round_n):
+    """What this round changed, derived from the graph rather than stored.
+
+    The reply stays the FULL graph on purpose: one parser, no reassembly, and no
+    ordering dependency, so a consumer that misses a round is not left holding a
+    graph it cannot complete. This block just saves every consumer from
+    recomputing the same diff.
+
+    It is derived, never persisted separately. A delta file would be a second
+    source of truth that can disagree with the graph, and a consumer would have
+    to decide which one is right.
+
+    Note what is NOT here: links and gaps are recomputed every round by design,
+    because a link's confidence legitimately moves when new evidence arrives.
+    `links_changed` reports that movement; it is not drift.
+    """
+    def ids(rows):
+        return {r.get("id") for r in (rows or [])}
+
+    prior_links = {l.get("id"): l for l in (prior.get("links") or [])}
+    prior_gap_ids = ids(prior.get("gaps"))
+    now_gap_ids = ids(graph.get("gaps"))
+
+    added_links, changed_links = [], []
+    for l in graph.get("links") or []:
+        if l.get("id") not in prior_links:
+            added_links.append(l.get("id"))
+        elif l.get("changed_in_round") == round_n:
+            changed_links.append(l.get("id"))
+
+    return {
+        "round": round_n,
+        "things_added": sorted(ids(graph.get("things")) - ids(prior.get("things"))),
+        "papers_added": sorted(ids(graph.get("papers")) - ids(prior.get("papers"))),
+        "findings_added": sorted(f.get("id") for f in (graph.get("findings") or [])
+                                 if f.get("round") == round_n),
+        "links_added": sorted(added_links),
+        "links_changed": sorted(changed_links),
+        "gaps_added": sorted(now_gap_ids - prior_gap_ids),
+        "gaps_resolved": sorted(prior_gap_ids - now_gap_ids),
+    }
 
 
 def confidence_profile(findings):
@@ -841,7 +886,7 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
     papers, pmap = dedupe_papers(new_papers or [], prior.get("papers") or [],
                                  round_n=round_n)
     things, tmap_new, tmap_existing = resolve_entities(
-        new_things or [], prior.get("things") or [])
+        new_things or [], prior.get("things") or [], round_n=round_n)
 
     kept, discarded, duplicates = [], 0, 0
     src = {p.get("id"): p for p in papers}
@@ -965,7 +1010,7 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
         "outcome": outcome,
     })
 
-    return {
+    graph = {
         "schema_version": "1.1",
         "graph_id": graph_id or prior.get("graph_id"),
         "question": question or prior.get("question"),
@@ -981,6 +1026,8 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
         "coverage": cov,
         "rounds": rounds,
     }
+    graph["delta"] = compute_delta(prior, graph, round_n)
+    return graph
 
 
 # --------------------------------------------------------------------------

@@ -10,13 +10,13 @@
   },
   "deployment": {
     "agent_id": "agent_015feTqKz3Bmtec2RaWaE2sW",
-    "agent_version": 10,
+    "agent_version": 11,
     "memory_store_id": "memstore_01NGZC8ti7PMqpqzUKcxuiaY",
     "skills": {
       "graph-assembly": {
-        "hash": "676c7380be51d77febf5d572add0d31b963bff9ad57664dad30fa57341a80730",
+        "hash": "53ba710bc80319571265d3a73702da058889e03450c7d78cbacc97c144dde319",
         "skill_id": "skill_01BnhBZtKmt8G1Wj7f5ZFGaW",
-        "version": "1786852167879260"
+        "version": "1786853035280236"
       },
       "literature-search": {
         "hash": "ef7187e6e2af34b77bee905b01c806032c1a11bd51ece6dbc9b60cad8eba3cb4",
@@ -29,7 +29,7 @@
         "version": "1786851260672737"
       }
     },
-    "system_hash": "cff1001287d0a9db99f62233bc94d0c89309b116d389e3f917ee326dd3da3959",
+    "system_hash": "65bf3ec87fb51d3cb933231443e907966e31db7da9e5bf836125a8d2d8bc9e4b",
     "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d"
   },
   "description": "Turns one question about the scientific literature into a machine-readable knowledge graph of things, quoted findings, scored links and gaps, and grows it across rounds.",

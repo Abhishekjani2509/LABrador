@@ -24,6 +24,16 @@ other by `id`. Nothing nested.
   "status": "ok",                // ok | empty | partial | failed — see note 6
   "generated_at": "2026-08-15T14:20:00Z",
 
+
+  "delta": {
+    "round": 2, "things_added": ["t34"], "papers_added": ["p9"],
+    "findings_added": ["f40", "f41"], "links_added": ["L36"],
+    "links_changed": ["L12"], "gaps_added": ["g7"], "gaps_resolved": ["g3"]
+  },
+  // derived, never stored. The reply is still the FULL graph -- one parser, no
+  // reassembly, no ordering dependency. `links_changed` is scores MOVING, which
+  // is correct behaviour, not drift.
+
   "rounds": [                    // what each round asked, and what it cost
     { "n": 1, "ask": "new_question", "target": null, "depth": "standard",
       "papers_added": 25, "outcome": "new_evidence" },
