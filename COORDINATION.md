@@ -592,3 +592,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:52 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Render the brief report as prose rather than labelled fragments — typecheck+check green.
 
 - **2026-08-16 01:53 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: ship example-round.json so the agent copies the contract, not the source — typecheck+check green.
+
+- **2026-08-16 01:55 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: nodes are concepts, not reagents — the root cause of resolve_link's miss; merged `rafwiewiora/druggability-dossier` (MERGED) — Merge commit 'f48011243a333b32b480ae471fe6b191ffbfd0fd' into HEAD · Foldseek multimer wired; output notes; TSLP finds a polymer-ligand false positive — typecheck+check green.
