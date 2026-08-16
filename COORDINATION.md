@@ -98,6 +98,40 @@ are dead — do not create files under them.
   off a hub. Ranking now weights basis, paper-independence, a hub penalty and
   multi-route implication → 12 distinct scores, top gap becomes a real
   missing edge (PF-06650833 vs tofacitinib, never directly compared).
+- **Fixtures written** (BUILD.md step 1) — three corpus-validated questions,
+  each grading something specific rather than demonstrating success:
+  EGFR/TKI (`deep`, dense consensus; sets traps for text-only sponsorship
+  disclosure and same-group repetition), antioxidants-and-metastasis
+  (`standard`, two labs in direct conflict with one challenging the other in
+  its own text — and `quick` fails it on purpose, because the opposing camp is
+  unreachable from the obvious phrasing), microbiome-and-FOP (`deep`, one
+  primary study appearing as three corpus records that disagree on their own
+  effect size). See `fixtures/README.md`.
+- **Three of four ask types verified in production.** `new_question`,
+  `test_gap` and `resolve_link` have all run against the deployed agent;
+  `resolve_link` loaded prior state from memory, recorded both rounds in
+  `rounds[]`, and stamped the new link `changed_in_round: 2`.
+- **A retried round is now a no-op.** Findings dedupe on content (paper +
+  relationship + normalized quote), not on id, because a retry re-extracts the
+  same sentences and may assign fresh ids. Previously a retried round doubled
+  every finding and inflated `agreement` and `independence` — silently, since
+  the graph merely looked richer. Duplicates are reported in
+  `coverage.duplicates_dropped`.
+- **`assemble.py` has a CLI**: one command per round
+  (`--input round.json --memory-dir … --save`) instead of a hand-authored
+  driver. The budget win is real (that round spent 35 local calls against 21
+  corpus calls on marshalling) but the correctness win matters more: unreviewed
+  glue was standing in front of the deterministic core, and a byte-stable
+  script reached through a different caller each round is not reproducible.
+  `--selftest` covers quote verification, dedupe, scoring, disagreement
+  explanation, the missing-directory case and byte-identical output.
+- **The liveness path was proven by a real outage, not a synthetic test.** The
+  vault token lapsed mid-round and the agent did exactly what it was told to:
+  `status: "partial"`, `stop_reason: "search_unavailable"`, an `error` prefixed
+  `PAPERCLIP UNAVAILABLE:`, findings verified before the outage retained, and
+  candidate quotes that could not be line-anchored **dropped rather than
+  emitted unverified**. That last one is the discipline the whole design rests
+  on.
 - Renamed `literature-graph` → `research-evidence-mapper` and merged `main`
   (2026-08-16). Trap worth knowing repo-wide: **the memory store's NAME sets
   the `/mnt/memory/<slug>` mount path**, and `deploy.ts` only provisions a
@@ -159,53 +193,34 @@ are dead — do not create files under them.
 - [ ] Pin the `proto-tools` git dependency (unpinned ref = unreproducible image).
 
 **Soliman**
-- [x] Implementation drop, deploy, router wrapper, `acl.ts` (`{public: true}`),
-      manifest. Agent live and verified end to end.
-- [x] Committed session id in CONTRACT.md — scrubbed 2026-08-16.
-- [x] **`fixtures/` written** — three questions, each corpus-validated and
-      each grading something specific: EGFR/TKI (`deep`, dense consensus),
-      antioxidants-and-metastasis (`standard`, real conflict where one paper
-      challenges the other in its own text), microbiome-and-FOP (`deep`, one
-      primary study appearing as three corpus records). See fixtures/README.md.
-- [x] **`resolve_link` verified in production** (g_5cb6 round 2): prior state
-      loaded from memory, `rounds[]` records both asks, a new link stamped
-      `changed_in_round: 2`, raw-JSON contract held, duplicates 0.
-- [ ] **`expand_node` still never executed** — last unexercised ask type.
-- [ ] **The figure path (`ask-image`) has never fired, and the gate may be why.**
-      `resolve_link` is exactly where policy permits figures, yet the run made
-      21 MCP calls and zero `ask-image` calls. CLAUDE.md only permits a figure
-      read "for a paper that already gave you a finding from its text", and
-      with `used: 1` there was barely a candidate. Either loosen the gate or
-      the capability is dead code. Deciding this matters because dose and
-      timepoint conditions — the `where` field `explain_disagreement` runs on —
+
+*Done items moved to §3 per §7.6 — this list is open work only.*
+
+- [ ] **`expand_node` has never executed** — the last unexercised ask type.
+- [ ] **The figure path (`ask-image`) has never fired, and the gate is the
+      suspect.** `resolve_link` is exactly where policy permits figures, yet
+      that run made 21 MCP calls and zero `ask-image` calls. `CLAUDE.md` only
+      permits a figure read "for a paper that already gave you a finding from
+      its text", and with `used: 1` there was barely a candidate — so the gate
+      may be written so tightly it never opens. Worth settling because dose and
+      timepoint conditions, the `where` field `explain_disagreement` runs on,
       are often stated only in figure axes.
-- [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64`,
+- [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64` at
       `changed_in_round: 1`; the round added a neighbouring link instead. For
-      an ask whose purpose is "more evidence on this exact relationship", not
-      touching the target is a miss worth investigating.
-- [x] **Diagnosed the over-fetch / under-extract ratio, and fixed the cause.**
-      `found: 96, read: 3, used: 1` was not laziness. Call mix for that round:
-      21 MCP calls vs **35 local sandbox calls** — the agent was hand-authoring
-      a driver script to marshal findings into `assemble.main()`, running it
-      twice for determinism, and writing state, every round. `assemble.py` now
-      has a CLI (`--input round.json --memory-dir … --save`), so that is one
-      command. This also closes a correctness hole nobody had named: freshly
-      written, unreviewed glue was sitting in front of the deterministic core,
-      and a byte-stable script reached through a different caller each round is
-      not reproducible.
-- [ ] Re-measure the ratio on the next deployed run — the fix should shift
-      calls from sandbox to corpus, but that is a prediction until measured.
-- [ ] **Findings are not idempotent across a retried round.** `main()` appends
-      without deduping on id, so a retried round double-counts findings and
-      inflates `agreement` and `independence` for every affected link. Real
-      risk: the first deployed run hit a 10-minute timeout mid-round.
-- [ ] Long-lived Paperclip auth. `Authorization: Bearer` is proven against the
-      MCP with a session token; which header it accepts for a **long-lived API
-      key** is untested, and the CLI cannot mint one (`paperclip login` is
-      browser-OAuth only). **The vault token expires ~2026-08-16 02:00 UTC**;
-      after that the agent returns `search_unavailable` until it is replaced.
-- [ ] `targets[]` + `uniprot_accession` handoff for the tractability node —
-      needs Rafal's sign-off, not a unilateral schema change (see §5).
+      an ask whose whole purpose is "more evidence on this exact relationship",
+      leaving the target untouched is a miss.
+- [ ] **Re-measure the call ratio on the next deployed run.** The CLI should
+      shift calls from sandbox to corpus. That is a prediction until measured.
+- [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
+      the MCP; which header it accepts for a **long-lived API key** is still
+      untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth
+      only). Credential rotation is a one-call vault update, so this is not
+      blocking — but the deployed agent's searches stop whenever the token
+      behind the vault entry lapses.
+- [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node —
+      a contract change against a LIVE consumer (Rafal's `graph-intake` already
+      reads mapper graphs), so it needs his sign-off rather than a unilateral
+      schema edit. See §5.
 
 **Moamen**
 - [ ] Nothing owed. Optional high-leverage favor: add `clinicaltrials.gov`
