@@ -258,19 +258,29 @@ are dead — do not create files under them.
       only). Credential rotation is a one-call vault update, so this is not
       blocking — but the deployed agent's searches stop whenever the token
       behind the vault entry lapses.
-- [~] **Interventions must link to their target.** Accession merging fixed
-      protein nodes but structurally could not touch the fragmentation that
-      actually mattered: small molecules have no UniProt accession. A run then
-      grew the reagent nodes from four to SEVEN (KIC-0101, PF-06650833,
-      KT-474, ND2158, BI1543673, an adenoviral knockdown, a knockout mouse) of
-      which only two stated their target — the other five floated with no path
-      to IRAK4, so every relationship they supported scored as a lone
-      single_source link. Decision (Soliman's call): do NOT collapse compounds
-      into a class node — for "what inhibits IRAK4?" seven compounds IS the
-      answer. Require the EDGE instead, so evidence pools along the mechanism
-      path while the compounds stay distinct. Shipped in claim-extraction and
-      CLAUDE.md step 6; assembly reports unlinked ones in
-      `coverage.interventions_without_target`. Deployed v7, test in flight.
+- [x] **Interventions link to their target — verified, 0 orphans.** Before
+      (v6): 7 intervention nodes, 2 with a target edge, 5 floating. After (v7):
+      8 nodes, 8 edges, `coverage.interventions_without_target: []`. Every
+      compound now reaches IRAK4, so evidence pools along the mechanism path
+      while the compounds stay distinct — the graph answers "what inhibits
+      IRAK4?" with eight compounds AND lets resolve_link on one reach the
+      others' evidence. Collapsing into a class node would have destroyed the
+      first to buy the second.
+      Accession merging alone could not have done this: small molecules have no
+      UniProt accession, so it structurally could not touch the nodes that were
+      fragmented. It fixed proteins, which were not the problem.
+- [ ] **`how` verb drift, for the §6 enum discussion.** Seven of the eight
+      target edges came back as `decreases` and only one as `inhibits`. "KT-474
+      decreases IRAK4" is semantically off — these inhibit activity, not
+      abundance. It does not break pooling, since the edge exists either way,
+      but it is concrete evidence for the `how` enum already on the ratification
+      agenda (§6 item 6). Raising there rather than fixing unilaterally, since
+      `how` is shared vocabulary.
+- [ ] **The missing-tool liveness path has only ever been exercised by
+      accident** — twice, when the vault token lapsed and the platform exposed
+      no Paperclip tool at all. The rule now covers it (stop, report, do not go
+      hunting for a local CLI), but it deserves a deliberate test before anyone
+      relies on it.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node —
       a contract change against a LIVE consumer (Rafal's `graph-intake` already
       reads mapper graphs), so it needs his sign-off rather than a unilateral
