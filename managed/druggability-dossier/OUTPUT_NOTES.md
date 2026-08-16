@@ -259,6 +259,42 @@ explained in `not_found` and the ninth deliberately unnamed rather than guessed.
 **Use the count for arithmetic and the list for display; do not assume
 `len(list) == count`.**
 
+## Reading rule 3b — Four precedent axes, four separate blocks. Never merged, never discounted into one another.
+
+Activity against something else is real signal and it is not activity against
+this target. Each axis is its own top-level block, and no discount factor folds
+one into another.
+
+| block | similarity by | strength |
+| --- | --- | --- |
+| `target_precedent` | measured on this protein | direct evidence |
+| `pocket_neighbour_precedent` | pocket descriptors plus cofold transfer | **strongest transfer** |
+| `structural_neighbour_precedent` | Foldseek fold similarity | middle |
+| `family_precedent` | Pfam sequence family | weakest |
+
+**The pocket is the transferable unit, not the family.** TNF-alpha and IL-17A are
+both cytokines, both PPI targets, both drugged with antibodies first — and their
+small-molecule stories share nothing mechanically. TNF-alpha's site is a cavity
+on the trimer 3-fold axis, opened by displacing a subunit. IL-17A's is a groove
+at the homodimer interface, addressed by macrocycles from 2016. A jump along
+"same cytokine family" transfers nothing.
+
+Two consequences for a consumer:
+
+- **When the axes disagree, that is the informative thing on the page, not noise
+  to reconcile.** Measured: IL-17A has a strong `target_precedent` — 44
+  structures, 20 holo, a real macrocycle series — and an empty
+  `structural_neighbour_precedent`, on the same target. Both KRAS and IL-17A
+  landed **0 of 25** defensible small-molecule holo fold-neighbours. That is a
+  real and reportable finding, not a retrieval failure.
+- **Everything in `pocket_neighbour_precedent` is a hypothesis, not a
+  measurement.** It is labelled transferred, names its source target, and carries
+  the similarity value so you can discount it. Its `cofold_transfer` sub-block —
+  the sharp falsifiable test — is `null` throughout this deployment (reading rule
+  4), so what remains is a descriptor similarity with no confirmation. Weight it
+  accordingly. "No actives on this target; 340 actives across the Pfam family,
+  best 2 nM" is an honest and useful statement. "Moderate precedent" is not.
+
 ## Reading rule 4 — `null` means not measured. `0` means measured zero. Read `not_found`.
 
 `null` is never a stand-in for a low or absent value. It means the measurement
@@ -810,6 +846,9 @@ unclassifiable ligand or a refused superposition must never read as a finding.**
 | `holo_count: null` | the census was not run. Deliberately does **not** trigger that rule | zero |
 | `terminated_programs: []` | no terminations were retrieved | none exist |
 | `terminated_programs: null` | the sweep could not run | none exist |
+| `approved_small_molecules: []` with a non-null count of 0 | **a real and common finding.** Validated target, zero approved small molecules | nothing was ever made — the drug view only lists drugs with a curated direct mechanism, so a target can carry thousands of bioactivities and no rows here |
+| `pocket_volume_a3` values of `0.00` | a measured zero. mdpocket returned 0.00 at the true site rather than substituting a nearby pocket | a failed run |
+| `druggability_status: "not_available"` quoted in a reason | the quantity is **undefined by construction** on a fixed grid | unavailable, missing, or something a future release might add |
 | `falsification.survived: false` | a check undercut the *precedent claim* | the target is not tractable |
 | `affinity.*` all null | no predictor exists in this deployment | poor predicted affinity |
 | `structural_neighbour_precedent` null with an unavailability reason | the neighbour tool raised `ModuleNotFoundError` | no structural neighbours found |
@@ -848,11 +887,16 @@ The pocket-scan tool emits a per-stage `<stage>_status`. Its values are `ok`,
   druggability 0.890, and it is the hydrophobic core of the domain, not a site.
   Read the flag as "this druggability value is uninterpretable", not as "this
   pocket is not there".
-- **`LigandSourceError`** — a run-killing error, never a result. Ligands are
-  classified from their SMILES graph; a record source with no SMILES returns
-  `unknown` for every component, nothing is `druglike`, and **the whole ensemble
-  comes back apo-free and holo-free while every `<stage>_status` still says
-  `ok`.` The error exists so that state cannot ship silently.
+- **`LigandSourceError`** — a run-killing error, never a result. See the next
+  subsection; it is the guard against the worst failure shape in the pipeline.
+- **`frames_dropped`** and `n_processed < n_submitted_to_mdpocket` — structures
+  fell out of the ensemble. Silent frame dropping inflates a persistence
+  frequency, so **the failure looks like a stronger result**. The run refuses
+  below three surviving structures once a drop occurred.
+- **`filter.auto_relaxed`** on the structural-neighbour axis — the alignment
+  floor was lowered because too few neighbours passed the verified one. The
+  relaxed floor is a judgement call, not a calibrated threshold. A relaxed run is
+  never reported without that block.
 
 ### A stage can be unavailable while every status field reads `ok`
 
@@ -1029,6 +1073,19 @@ dossiers are `small_molecule_tractable`. There is no reference dossier for
 shipped example. If your station handles those cases, test against a synthetic
 one first.
 
+**Figures that are withdrawn, and may still appear in older dossiers.** If you
+are ingesting a backlog, treat every one of these as void rather than as data:
+
+| figure | status |
+| --- | --- |
+| the **651-fold** (also written 650x) apo TNF-alpha druggability spread, and `±16%` beside it | withdrawn. A pocket-matching artifact — the matcher tracked a pocket 7.7 Å from the site it claimed, with 12.2 Å internal inconsistency |
+| the volume range **206.7–309.2 Å³** for TNF-alpha | withdrawn, same cause |
+| the CV improvement quoted as "**27.8% to 10.2%**" | withdrawn. The precision was never warranted; the measured figures are ~28% and ~10%, and about one percentage point of any CV is method noise |
+| **8.83 Å** (KRAS) and **1.62 Å** (TNF-alpha) quoted as pipeline output | these are hand-calibration numbers from a protocol the deployment does not run. The deployed defaults are 8.65 Å and ~1.55 Å. The finding is the order-of-magnitude separation, not the decimals |
+| a **1.97-log** systematic bias in the affinity predictor | overturned at n=17. Mean signed error is +0.23 log, CI (−0.28, +0.74) |
+| "affinity prediction can be used to rank candidates within a target" | withdrawn. Within-target Spearman is +0.48, CI (−0.05, +0.77) |
+| "PRANK rescoring has not yet helped, and once it hurt" | falsified at n=70 and void |
+
 **One internal contradiction to be aware of.** `assemble-dossier`'s worked pair
 states that "TNF beats JAK1 on every pocket metric", and TNF-alpha's own
 `axis_conflict` calls its pocket "the strongest pocket signal in the fixture
@@ -1056,8 +1113,10 @@ every verdict; check `not_found` before interpreting any null; read
 `primary_d1_6_a3` as the computed number; run `validate_dossier.py` on what you
 receive.
 
-**Do not:** average the axes; treat `insufficient_evidence` as `not_tractable`;
-count a biologic as small-molecule precedent; treat a null as a zero; threshold
-on `pocket_druggability`; threshold on volume; read a refusal as a low score;
-read an empty `terminated_programs` as a clean safety record; block on a pending
-`ASK[...]`.
+**Do not:** average the axes; merge the four precedent blocks; treat
+`insufficient_evidence` as `not_tractable`; count a biologic as small-molecule
+precedent; treat a null as a zero; threshold on `pocket_druggability`; threshold
+on volume; sort neighbours on `evalue`; trust `has_druglike_holo` without reading
+`ligand`; read a refusal as a low score; read an empty `terminated_programs` as a
+clean safety record; block on a pending `ASK[...]`; validate strictly against the
+template.

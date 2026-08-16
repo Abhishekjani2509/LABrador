@@ -208,14 +208,40 @@ and are allowed to disagree.
 | Foldseek hits | 992 | 283 |
 | passing the filter | 285 | **2** (relaxed to 81) |
 | neighbourhood | Rab / Ran / Rac / Ypt GTPases, TM 0.73-0.89 | cystine-knot growth factors: IL-25, VEGF-A/B/C/F, NGF/NT-3, BMP-2, PDGF-B, TGF-beta2, sclerostin, coagulogen; TM 0.34-0.78 |
-| entries apo / holo | **24 / 1** (4PHH) | **24 / 1** (4EC7) |
+| entries apo / holo, old MW+denylist | **24 / 1** (4PHH) | **24 / 1** (4EC7) |
 | the one "holo" | 2UK = a GppNHp analog | L44 = a 625 Da diacylglycerol |
+| with `ligand_filter` | — | **25 / 0** on the multimer path |
 | honest read | **no small-molecule precedent** | **no small-molecule precedent** |
 
-Both "holo" hits are exclusion-list leaks, so the defensible count on both
-targets is **0 of 25**. This is why `ligand_names` is returned alongside
-`comp_id`: a comp_id tells you nothing, `"5'-O-[(R)-hydroxy…]guanosine"` tells
-you it is a nucleotide.
+Both of those "holo" hits were denylist leaks and `ligand_filter` now rejects
+both, so the defensible count on both targets — **0 of 25** — is what the tool
+returns rather than what a reader has to work out. Keep reading `ligand_names`
+anyway: the classifier's remaining gap is crystallisation additives.
+
+A third target, and the one the single-chain limitation was most likely to
+break:
+
+| | TNF-alpha, single-chain (1TNF asm1) | TNF-alpha, multimer (1A8M asm1) |
+| --- | --- | --- |
+| chains in | 3 | 3 |
+| rows | 1,010 | **6,891** |
+| query chains present | job_A/B/C (349/320/341) | job_A/B/C (2,119/2,113/2,659) |
+| complex assignments | none — no such column | **4,244; 1,206 of size 3** |
+| distinct entries | 302 | 361 |
+| passing strict 120 | 236 entries | 279 entries |
+| entries apo / holo | **25 / 0** | **25 / 0** |
+| neighbourhood | TL1A, LIGHT, RANKL, TRAIL/DR4/DR5, CD40L, FasL, LT-alpha | TL1A, LIGHT, RANKL, TRAIL/DR4/DR5, CD40L, FasL, zebrafish TNF |
+
+TNF-alpha needs no relaxation — the protomer is ~157 residues, so the strict
+120 floor holds and 236 of 302 entries pass. Both paths return the **TNF
+superfamily**, and **zero holo on either**, which is the cleanest negative on
+this axis: the entire TNF superfamily has no drug-like small molecule bound to
+the cytokine trimer.
+
+The multimer path's 1,206 complex assignments **of size 3** are the thing the
+single-chain path cannot produce — genuine trimer-to-trimer matches, ranked by
+complex TM-score (TL1A 0.878 at the top, which matters because TL1A is itself a
+target in this pipeline).
 
 ### Multimer versus single chain on the same IL-17A input
 
@@ -224,14 +250,19 @@ you it is a nucleotide.
 | | single-chain | multimer |
 | --- | --- | --- |
 | rows | 283 | 863 |
-| query chains searched | 1 of 2 | **2 of 2** |
+| query chains present | job_A 144 + job_B 139 | job_A 433 + job_B 430 |
+| target chains of the SELF hit | `8dyg_A` only | `8dyg_A` **and** `8dyg_B` |
+| complex assignments | none | 570 (293 of size 2) |
+| distinct entries | 125 | 174 |
 | passing strict 120 | 2 | 2 rows / **1** entry |
 | relaxed floor | 67 | **67 — same** |
 | entries after relaxation | 81 | 137 |
 | carried (top 25) | 25 | 25 |
-| entries apo / holo | 24 / 1 | **23 / 2** |
-| the "holo" | 4EC7 `L44` diacylglycerol | 4EC7 `L44` + 4XPJ `LPY` lysophospholipid |
+| apo / holo, old MW+denylist | 24 / 1 | 23 / 2 |
+| those "holo" | 4EC7 `L44` diacylglycerol | 4EC7 `L44` + 4XPJ `LPY` lysophospholipid |
+| apo / holo, `ligand_filter` | 24 / 1 (2GNN `BEN`, benzamidine) | **25 / 0** |
 | defensible small-molecule holo | **0 of 25** | **0 of 25** |
+| entries shared with the other path | 105 | 105 (69 multimer-only, 20 single-chain-only) |
 | neighbourhood | cystine-knot superfamily | **cystine-knot superfamily** |
 
 The 42 chain accessions across the whole 137-entry multimer neighbourhood are
