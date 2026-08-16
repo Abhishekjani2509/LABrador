@@ -67,6 +67,32 @@ REQUIRED_TOP_LEVEL = (
     "not_found",
 )
 
+# The interface-classification vocabulary, and it is the TOOL's vocabulary, not
+# a shorter one invented here. `interface_analysis.classify_pocket` and
+# `modal_app`'s aggregation step between them emit all six of these, and a
+# validator that accepts fewer than the tool emits forces the agent to launder
+# a real value through `not_found` — which is what happened before `mixed` and
+# `no_pocket_to_classify` were admitted.
+#
+# `mixed` is the one that matters. It is a MEASURED DISAGREEMENT, not a hedge:
+# two symmetry copies of one ligand in one structure can land either side of the
+# 0.25 overlap boundary. Measured on 8DYG, ligand U5Q — copy A
+# `allosteric_candidate` at 0.22, copy B `orthosteric_candidate` at 0.36, both
+# flagged borderline. `pocket-scan`'s aggregation rule produces `mixed` there
+# deliberately, because the alternative is a coin flip between two different
+# mechanistic claims. Admitting it is not a loosening; see
+# `check_mixed_interface_is_resolvable`, which is what stops it becoming one.
+INTERFACE_CLASSES = frozenset(
+    {
+        "orthosteric_candidate",
+        "allosteric_candidate",
+        "destabiliser_candidate",
+        "no_partner_structure",
+        "mixed",
+        "no_pocket_to_classify",
+    }
+)
+
 ENUMS: dict[str, frozenset[str]] = {
     "verdict": VERDICTS,
     "verdict_basis": VERDICT_BASES,
@@ -95,14 +121,7 @@ ENUMS: dict[str, frozenset[str]] = {
     "tractability.cryptic_potency_prior.expected_ceiling": frozenset(
         {"nanomolar", "micromolar_at_best", "unknown"}
     ),
-    "tractability.pocket_vs_interface.classification": frozenset(
-        {
-            "orthosteric_candidate",
-            "allosteric_candidate",
-            "destabiliser_candidate",
-            "no_partner_structure",
-        }
-    ),
+    "tractability.pocket_vs_interface.classification": INTERFACE_CLASSES,
 }
 
 # A key whose value is a source. Presence of any one of these, with a non-empty
@@ -1252,6 +1271,123 @@ def check_site_consistency(d: dict) -> list[Violation]:
                     "is the number the classification is made from",
                 )
             )
+    return v
+
+
+@rule
+def check_mixed_interface_is_resolvable(d: dict) -> list[Violation]:
+    """`mixed` is admitted as a value; this is the price of admitting it.
+
+    Rule 6c. `mixed` is the honest output when symmetry copies of one ligand
+    classify differently — 8DYG U5Q gave `allosteric_candidate` at overlap 0.22
+    and `orthosteric_candidate` at 0.36 across the 0.25 boundary — and
+    `pocket-scan`'s aggregation rule mandates it rather than letting a caller
+    take whichever copy came first. The validator used to reject it, so a run
+    that produced it had to record the conflict in `not_found` and hide the true
+    value in a `_consensus_note`. That is laundering, and it is exactly what the
+    dossier exists to stop.
+
+    But a bare `mixed` is a worse output than either label it replaces: it names
+    no mechanism, so a reader cannot act on it at all. So the value is legal only
+    when it carries the two things that make it actionable:
+
+    1. **Mixed between what.** `classifications_seen` — the tool's own key —
+       must name at least two distinct classes. One class repeated is a
+       consensus, not a disagreement.
+    2. **How far apart.** `pocket_interface_overlap` must carry the individual
+       overlaps, not one scalar. 0.22 and 0.36 straddling 0.25 is a pocket
+       sitting on the boundary; a single 0.22 is a claim that it is not.
+
+    Plus two clauses that stop the disagreement being quietly resolved:
+
+    3. A classification is measured against a complex, so `partner_pdb_id` is
+       required for `mixed` exactly as it is for a substantive class.
+    4. `matches_mechanism_hypothesis` may not be `true`. A disagreement cannot
+       confirm a hypothesis, and the copy that agrees with the caller's prior is
+       precisely the one that gets quoted.
+
+    The last clause runs in the other direction and is the first-wins bug
+    itself: `classifications_seen` naming two labels while `classification`
+    reports one of them is a disagreement collapsed to a coin flip.
+    """
+    v: list[Violation] = []
+    pvi = _get(d, "tractability.pocket_vs_interface")
+    if not isinstance(pvi, dict):
+        return v
+
+    base = "tractability.pocket_vs_interface"
+    classification = pvi.get("classification")
+    seen_raw = _as_list(pvi.get("classifications_seen"))
+    seen = {s for s in seen_raw if isinstance(s, str) and s.strip()}
+
+    if classification == "mixed":
+        if len(seen) < 2:
+            v.append(
+                Violation(
+                    "INTERFACE_MIXED_UNRESOLVED",
+                    f"{base}.classifications_seen",
+                    f"{sorted(seen)!r} — 'mixed' does not say mixed between what. "
+                    "Name every class the run measured (the tool returns them in "
+                    "`classifications_seen`); at least two distinct ones, or the "
+                    "value is not a disagreement",
+                )
+            )
+        for s in sorted(seen - INTERFACE_CLASSES):
+            v.append(
+                Violation(
+                    "INTERFACE_MIXED_UNRESOLVED",
+                    f"{base}.classifications_seen",
+                    f"{s!r} is not an interface class ({sorted(INTERFACE_CLASSES)})",
+                )
+            )
+
+        overlaps = [x for x in _as_list(pvi.get("pocket_interface_overlap")) if _is_num(x)]
+        if len(overlaps) < 2:
+            v.append(
+                Violation(
+                    "INTERFACE_MIXED_UNRESOLVED",
+                    f"{base}.pocket_interface_overlap",
+                    "'mixed' with fewer than two measured overlaps — one scalar "
+                    "cannot show a pocket sitting on the boundary. 8DYG U5Q was "
+                    "0.22 and 0.36 against a 0.25 boundary; report both, so a "
+                    "reader can see how far apart the copies were",
+                )
+            )
+
+        if not _nonempty(pvi.get("partner_pdb_id")):
+            v.append(
+                Violation(
+                    "INTERFACE_MIXED_UNRESOLVED",
+                    f"{base}.partner_pdb_id",
+                    "'mixed' asserted with no partner structure named — rule 2b "
+                    "requires the classification be measured against a complex "
+                    "containing the partner, and a disagreement is still a "
+                    "measurement",
+                )
+            )
+
+        if pvi.get("matches_mechanism_hypothesis") is True:
+            v.append(
+                Violation(
+                    "INTERFACE_MIXED_UNRESOLVED",
+                    f"{base}.matches_mechanism_hypothesis",
+                    "a disagreement cannot confirm a mechanism hypothesis. Do not "
+                    "pick the copy that matches the prior — that is the coin flip "
+                    "the aggregation rule exists to prevent",
+                )
+            )
+
+    elif len(seen) >= 2 and classification in INTERFACE_CLASSES:
+        v.append(
+            Violation(
+                "INTERFACE_MIXED_UNRESOLVED",
+                f"{base}.classification",
+                f"{classification!r} reported while {sorted(seen)!r} were "
+                "measured — a disagreement collapsed to one label. The consensus "
+                "over classifications that disagree is 'mixed'; never reach into "
+                "per_structure and take the first entry",
+            )
+        )
     return v
 
 

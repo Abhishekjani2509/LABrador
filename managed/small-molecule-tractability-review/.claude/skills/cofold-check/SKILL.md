@@ -123,8 +123,8 @@ a correction, a gate or a downweighting:
 | observation | n | what it is |
 | --- | --- | --- |
 | sealed-pocket confidence | **5 targets, 3 seeds/state, 30 folds** | pLDDT family (`complex_plddt`, `complex_iplddt`, `confidence_score`) drops beyond 2x seed spread on **5/5**; `iptm`/`ligand_iptm` on only **3/5**, and `ligand_iptm` *rose* on TNF-alpha (0.864 → 0.906). Magnitudes mostly too small to act on (JAK1 0.967 → 0.948). Supersedes the earlier 1-target/2-seed result |
-| affinity absolute error | **17 pairs, 2 targets** | mean signed error **+0.23 log**, 95% CI (-0.28, +0.74), p=0.38 — no systematic offset; 11 too weak / 6 too strong; MAE 0.85 against a ground-truth spread of 0.58. The old 1.97 was one compound vs one literature value; vs the 64-measurement consensus tofacitinib is +0.96 |
-| affinity ranking vs triage | **12 actives, 6 decoys (JAK1)** | triage works: AUC **0.972** on affinity, **1.000** on binder probability, 2.08 log separation. Within-target ranking does **not**: Spearman rho +0.48, 95% CI (-0.05, +0.77), p=0.11. The old 2.36 figure was 1 active vs 2 decoys |
+| affinity absolute error | **23 pairs, 3 targets** (`out/claim2_*.json`, 2026-08-15) | mean signed error **+0.32 log**, 95% CI (-0.07, +0.72), p=0.12 — no systematic offset; 16 too weak / 7 too strong; MAE **0.82**, RMSE 1.01 against a ground-truth spread of **0.76** (n=17 compounds with ≥3 measurements) — error is now indistinguishable from the noise of the data scoring it. The old 1.97 was one compound vs one literature value and sits ~5 SE outside the CI; vs the 64-measurement consensus tofacitinib is +0.96 |
+| affinity ranking vs triage | **12 actives × 12 decoys = 144 pairs (JAK1)** (`out/claim2_JAK1.json`, 2026-08-15, 0 run failures) | triage works: AUC **0.958** on affinity, **1.000** on binder probability, **2.13 log** separation, Cohen's d 2.41. Within-target ranking does **not**, on any of 3 targets: JAK1 rho +0.483, 95% CI (-0.05, +0.77), p=0.11 (n=12); BCL-2 +0.600, p=0.28 (n=5); EGFR +0.314, p=0.54 (n=6, **provisional** — still being repaired at the read; JAK1/BCL-2 final). Void, all mid-repair reads of this same artifact: 12×6→2.08/0.972, 12×9→2.32/0.981, 12×10→2.36/0.983, 12×11→2.27/0.977; and older still, 2.36 from 1 active vs 2 decoys |
 | ESMFold at interfaces | **14 complexes x 2 constructions (28 runs)** | bimodal — 6/14 above 50% contact recovery, 6/14 at zero. pTM vs recovery rho **+0.79** (+0.57, +0.91); at pTM >= 0.80, 5/5 succeed, zero false alarms in 28 runs. The 1-contact IL-17A case reproduces **only** with the full mature chain; the ordered core gives 42% recovery |
 | seed dispersion / site convergence | 1 target, 24 runs, 8 seeds of one probe | median 0.21 Å dispersion, and 21 of 24 runs on a real site that was **not the one asked about** — still `benchmarked: False` |
 
@@ -136,7 +136,7 @@ cross-target benchmark has now landed, and **all three n=1 claims moved**:
 - the sealed-pocket claim was **overturned as stated** — the pLDDT family does
   notice, on 5/5; the treacherous metrics are `iptm`/`ligand_iptm`;
 - the 1.97-log affinity bias was **overturned** — no offset is detectable over
-  17 pairs;
+  23 pairs across 3 targets;
 - the ESMFold interface failure was **reproduced exactly and then explained** —
   it was an input-construction artifact, not a property of the tool.
 
@@ -310,11 +310,11 @@ under `absolute` as `affinity_pred_value_log10_ic50_um`, marked `is_a_kd:
 False`, `is_a_potency_measurement: False`, `benchmarked_against_measured_affinities:
 False` and `correction_applied: None`.
 
-**It has now been benchmarked against measured affinities — 17 pairs across
-JAK1 and BCL-2 — and the result is still "do not quote a potency", for a
-different reason.** There is no systematic offset to correct for (mean signed
-error +0.23 log, 95% CI (-0.28, +0.74), p=0.38), but MAE is **0.85 log** — a
-factor of 7. So do not compare it against a nanomolar threshold and do not
+**It has now been benchmarked against measured affinities — 23 pairs across
+JAK1, EGFR and BCL-2 (`out/claim2_*.json`, 2026-08-15) — and the result is still
+"do not quote a potency", for a different reason.** There is no systematic
+offset to correct for (mean signed error +0.32 log, 95% CI (-0.07, +0.72),
+p=0.12), but MAE is **0.82 log** — a factor of 6.6. So do not compare it against a nanomolar threshold and do not
 quote it as a Kd or an IC50. The `benchmarked_against_measured_affinities:
 False` flag on the returned payload means *this run* was not calibrated against
 measurements, not that the head is unstudied.
@@ -322,13 +322,32 @@ measurements, not that the head is unstudied.
 **And `ranking` is the primary output for a narrower reason than it used to
 be.** The benchmark separates two uses that the earlier text ran together:
 
-- **Triage — supported.** Actives vs decoys on JAK1: ROC AUC **0.972** on
-  affinity and **1.000** on binder probability, 2.08 log separation
-  (12 actives × 6 decoys).
-- **Ordering actives against each other — NOT supported.** Within-target
-  Spearman **+0.48**, 95% CI (-0.05, +0.77), p=0.11 (n=12 on JAK1); +0.60,
-  p=0.28 (n=5 on BCL-2). Both intervals include zero. The pooled +0.60
-  (p=0.012) is inflated by between-target potency offsets and is not usable.
+- **Triage — supported.** Actives vs decoys on JAK1: ROC AUC **0.958** on
+  affinity and **1.000** on binder probability, **2.13 log** separation,
+  Cohen's d 2.41 — **12 actives × 12 decoys = 144 pairs**, from
+  `out/claim2_JAK1.json` as of **2026-08-15** with zero remaining run failures.
+  Quote this with its n. Four earlier values (2.08/0.972 at 12×6, 2.32/0.981 at
+  12×9, 2.36/0.983 at 12×10, 2.27/0.977 at 12×11) are **void** — each was read
+  while a repair pass was still recovering decoys that had failed to run.
+  **A decoy that failed to run is not a decoy that scored badly:** the six
+  missing decoys were tautomer-matching failures, and dropping them shrank the
+  effective n while flattering the AUC. The verdict is the same under all five
+  counts.
+- **Ordering actives against each other — NOT supported.** Three targets, all
+  positive, **none significant**: JAK1 **+0.483**, 95% CI (-0.05, +0.77), p=0.11
+  (n=12); BCL-2 **+0.600**, p=0.28 (n=5); EGFR **+0.314**, p=0.54 (n=6,
+  **provisional** — that artifact was still being repaired at the 2026-08-15
+  18:46 read and its n is still growing toward 12; JAK1 and BCL-2 are final, and
+  the JAK1-only triage figures above are unaffected). Every
+  interval includes zero. **The pooled +0.564 (p=0.005, n=23) must not be
+  quoted** — it is inflated by between-target potency offsets.
+- **The untested case.** All of the above is **diverse chemistry only**. No
+  congeneric series could be assembled — Paperclip's statement timeout blocks
+  the `GROUP BY assay_id` needed to find one — and a congeneric series is
+  exactly the setting where chemists would use ranking and where it would most
+  plausibly look better. Read this as *not supported and not yet tested where it
+  matters*, not as *shown to fail*. **The missing series, not the missing
+  compounds, is the real limitation.**
 
 So read `ranking` as a binder/non-binder split, not as a series ordering. Ranks
 are **within-target only** — a pooled ranking manufactures rank correlation out
@@ -352,8 +371,10 @@ field says plainly that it is one compound and is not applied as an offset to
 the other ligands.
 
 **Two calibration notes the benchmark added to that one-log criterion.** First,
-**one control compound is not a control.** MAE is 0.85 log against a
-ground-truth spread of 0.58 log, so whether a single pair lands inside or
+**one control compound is not a control.** MAE is 0.82 log against a
+ground-truth spread of 0.76 log (n=17 compounds with >=3 ChEMBL measurements) —
+the model's error is now essentially indistinguishable from the noise of the
+data scoring it — so whether a single pair lands inside or
 outside one log is largely a coin flip on that pair's own measurement noise —
 which is exactly how the withdrawn 1.97 was produced. Against the
 **64-measurement** ChEMBL consensus rather than one 0.50 nM paper value,

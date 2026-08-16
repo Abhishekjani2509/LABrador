@@ -25,8 +25,8 @@ declare any of them unreliable. Observations about the tools are carried in
 The cross-target benchmark landed on 2026-08-15 and ALL THREE of the former
 n=1 observations moved: the sealed-pocket claim was overturned as stated (the
 pLDDT family drops on 5 of 5 targets; ipTM/ligand-ipTM are the unreliable ones),
-the 1.97-log affinity bias was overturned (no offset detectable over 17 pairs,
-and within-target ranking is NOT supported), and the ESMFold interface failure
+the 1.97-log affinity bias was overturned (no offset detectable over 23 pairs,
+and within-target ranking is NOT supported on any of 3 targets), and the ESMFold interface failure
 was reproduced exactly and shown to be an input-construction artifact. Every one
 had failed in the flattering direction. Nothing downstream needed un-picking,
 because no correction was ever applied to a returned number — and that is still
@@ -62,7 +62,7 @@ __all__ = [
 #
 # As of the 2026-08-15 cross-target benchmark, three entries carry
 # ``benchmarked: True`` with a real n (sealed-pocket confidence, 5 targets /
-# 30 folds; affinity, 17 pairs / 2 targets; ESMFold at interfaces, 14 complexes
+# 30 folds; affinity, 23 pairs / 3 targets; ESMFold at interfaces, 14 complexes
 # / 28 runs). Each of those entries also carries a ``supersedes`` field naming
 # the n=1 claim it replaced, because all three of the originals were wrong in
 # the flattering direction and a reader who remembers the old figure needs to
@@ -182,23 +182,38 @@ OBSERVATIONS: dict[str, Any] = {
             "from non-binders."
         ),
         "how": (
-            "17 protein-ligand pairs with ChEMBL consensus potencies (assay "
-            "confidence 9, relation '='), across JAK1 (12) and BCL-2 (5), "
-            "spanning pChEMBL 5.30-10.36, plus 6 decoys on JAK1."
+            "23 protein-ligand pairs with ChEMBL consensus potencies (assay "
+            "confidence 9, relation '='), across JAK1 (12), EGFR (6) and "
+            "BCL-2 (5), spanning pChEMBL 5.30-10.36, plus 12 decoys on JAK1. "
+            "Diverse chemistry only -- no congeneric series (see "
+            "'untested_case')."
         ),
         "sample_size": {
-            "targets": 2,
-            "target_list": ["JAK1", "BCL2"],
-            "pairs": 17,
+            "targets": 3,
+            "target_list": ["JAK1", "EGFR", "BCL2"],
+            "pairs": 23,
             "actives_for_triage": 12,
-            "decoys": 6,
+            "decoys": 12,
             "ground_truth": "ChEMBL consensus, not a single cherry-picked value",
+        },
+        "provenance": {
+            "artifact": "out/claim2_{JAK1,EGFR,BCL2}.json",
+            "regenerated_by": "analyze.py 2",
+            "measured_on": "2026-08-15",
+            "remaining_run_failures_on_JAK1": 0,
+            "_rule": (
+                "Every figure in this entry is regenerated from those "
+                "artifacts by analyze.py 2. Quote any of them ONLY with its n "
+                "and this date attached -- a number that cannot be traced back "
+                "to a file will drift, which is exactly what happened to the "
+                "separation figure below."
+            ),
         },
         "replicated_on_other_compounds": True,
         "benchmarked": True,
         "benchmark_date": "2026-08-15",
         "generalises": (
-            "MEASURED over 17 pairs / 2 targets. There is no offset to "
+            "MEASURED over 23 pairs / 3 targets. There is no offset to "
             "generalise — the mean signed error is indistinguishable from zero, "
             "so nothing is applied as a correction anywhere in this module and "
             "nothing needs to be."
@@ -208,23 +223,36 @@ OBSERVATIONS: dict[str, Any] = {
             "value: tofacitinib predicted at 46.4 nM against 0.50 nM measured, "
             "reported as a 1.97-log systematic bias, with a 2.36-log separation "
             "from decoys that was 1 active against 2 decoys and had no n at "
-            "all. BOTH figures are withdrawn as stated."
+            "all. BOTH figures are withdrawn as stated. ALSO WITHDRAWN: four "
+            "later separation figures -- 12x6 -> 2.08 log / AUC 0.972, "
+            "12x9 -> 2.32 / 0.981, 12x10 -> 2.36 / 0.983, 12x11 -> 2.27 / "
+            "0.977. Each was a read of THIS SAME artifact taken while a repair "
+            "pass was still recovering decoys that had failed to run, so each "
+            "is the full actives set scored against an incomplete decoy set. "
+            "A DECOY THAT FAILED TO RUN IS NOT A DECOY THAT SCORED BADLY: the "
+            "six missing decoys were tautomer/CCD-matching failures, not weak "
+            "binders, and dropping them shrank the effective n while "
+            "flattering the AUC. 12x12 -> 2.13 / 0.958 supersedes all of them. "
+            "The verdict -- triage supported -- holds under every one of the "
+            "five counts."
         ),
         "result": {
             "absolute_accuracy": {
-                "n_pairs": 17,
-                "mean_signed_error_log": 0.23,
-                "ci95_of_mean_offset": [-0.28, 0.74],
-                "p_vs_zero": 0.38,
-                "sign_split": "11 predicted too weak / 6 too strong",
-                "mae_log": 0.85,
-                "rmse_log": 1.06,
-                "ground_truth_own_spread_log": 0.58,
+                "n_pairs": 23,
+                "mean_signed_error_log": 0.32,
+                "ci95_of_mean_offset": [-0.07, 0.72],
+                "p_vs_zero": 0.12,
+                "sign_split": "16 predicted too weak / 7 too strong",
+                "mae_log": 0.82,
+                "rmse_log": 1.01,
+                "ground_truth_own_spread_log": 0.76,
                 "_ground_truth_note": (
-                    "mean ChEMBL sd over the 11 compounds with >=3 "
+                    "mean ChEMBL sd over the 17 compounds with >=3 "
                     "measurements; ruxolitinib 0.72 over n=38, osimertinib 1.14 "
-                    "over n=264. The model runs at ~1.5x the experimental noise "
-                    "floor."
+                    "over n=264. The model's error is now essentially "
+                    "INDISTINGUISHABLE from the experimental noise of the data "
+                    "scoring it, and 1.97 sits about five standard errors "
+                    "outside the confidence interval."
                 ),
                 "tofacitinib_rescored": {
                     "measured_pchembl_consensus": 8.35,
@@ -237,31 +265,68 @@ OBSERVATIONS: dict[str, Any] = {
             "within_target_ranking_NOT_SUPPORTED": {
                 "JAK1": {"n": 12, "spearman": 0.483, "ci95": [-0.05, 0.77], "p": 0.11},
                 "BCL2": {"n": 5, "spearman": 0.600, "p": 0.28},
+                "EGFR": {
+                    "n": 6,
+                    "spearman": 0.314,
+                    "p": 0.54,
+                    "_provisional": (
+                        "The EGFR artifact was STILL BEING REPAIRED at the "
+                        "2026-08-15 18:46 read; its n is growing toward 12. "
+                        "JAK1 and BCL-2 are final. Re-run analyze.py 2 before "
+                        "quoting this row. The actives-vs-decoys figures are "
+                        "JAK1-only and are NOT affected."
+                    ),
+                },
+                "_summary": (
+                    "Three targets, all three positive, NONE significant. "
+                    "Every interval includes zero."
+                ),
                 "pooled_DO_NOT_USE": {
-                    "n": 17,
-                    "spearman": 0.596,
-                    "p": 0.012,
+                    "n": 23,
+                    "spearman": 0.564,
+                    "p": 0.005,
                     "_why_not": (
-                        "pooling two targets with different potency offsets "
+                        "pooling targets with different potency offsets "
                         "manufactures rank correlation out of the offset"
                     ),
                 },
+                "untested_case": (
+                    "Measured on DIVERSE CHEMISTRY ONLY. No congeneric series "
+                    "could be assembled, because Paperclip's statement timeout "
+                    "blocks the GROUP BY assay_id needed to find one. A "
+                    "congeneric series is the setting chemists actually rank "
+                    "in, and the one where this would most plausibly look "
+                    "better -- so read this as NOT SUPPORTED AND NOT YET "
+                    "TESTED WHERE IT MATTERS, not as shown to fail. The "
+                    "missing series, not the missing compounds, is the real "
+                    "limitation of this benchmark."
+                ),
             },
             "actives_vs_decoys_CONFIRMED": {
                 "n_actives": 12,
-                "n_decoys": 6,
+                "n_decoys": 12,
+                "n_pairs": 144,
+                "source_artifact": "out/claim2_JAK1.json",
+                "measured_on": "2026-08-15",
+                "run_failures_remaining": 0,
                 "predicted_pchembl_actives": [7.07, 0.94],
-                "predicted_pchembl_decoys": [4.99, 0.64],
+                "predicted_pchembl_decoys": [4.94, 0.83],
                 "binder_probability_actives": [0.724, 0.200],
-                "binder_probability_decoys": [0.116, 0.091],
-                "separation_log_units": 2.08,
-                "roc_auc_on_affinity": 0.972,
+                "binder_probability_decoys": [0.137, 0.075],
+                "separation_log_units": 2.13,
+                "roc_auc_on_affinity": 0.958,
                 "roc_auc_on_binder_probability": 1.000,
-                "cohens_d": 2.44,
+                "cohens_d": 2.41,
                 "_caveat": (
                     "these decoys (caffeine, metformin) are trivially easy — an "
                     "AUC of 1.0 measures binder/non-binder triage, not potency "
                     "ranking"
+                ),
+                "_provenance": (
+                    "12 actives x 12 decoys on JAK1, from out/claim2_JAK1.json "
+                    "as of 2026-08-15 with zero remaining run failures, "
+                    "regenerated by analyze.py 2. QUOTE THIS ONLY WITH ITS n. "
+                    "See 'supersedes' for the four void mid-repair values."
                 ),
             },
         },
@@ -1106,15 +1171,17 @@ def cofold_affinity(
 
     The primary output is ``ranking``, and after the 2026-08-15 benchmark it
     should be read as a **binder/non-binder split, not a series ordering**:
-    within-target Spearman is +0.48 with a 95% CI of (-0.05, +0.77), p=0.11
-    (n=12 on JAK1), while actives-vs-decoys separation is ROC AUC 0.972 on
-    affinity and 1.000 on binder probability.
+    within-target Spearman is +0.483 with a 95% CI of (-0.05, +0.77), p=0.11
+    (n=12 on JAK1) and is not significant on any of 3 targets, while
+    actives-vs-decoys separation is ROC AUC 0.958 on affinity and 1.000 on
+    binder probability, 2.13 log units, on 12 actives x 12 decoys (JAK1,
+    out/claim2_JAK1.json, 2026-08-15).
 
     Absolute values are returned under ``absolute`` marked ``is_a_kd: False``
     and ``benchmarked_against_measured_affinities: False`` — meaning THIS RUN
     was not calibrated against measurements, not that the head is unstudied.
-    Benchmarked over 17 pairs it carries no systematic offset (mean signed error
-    +0.23 log, p=0.38) but an MAE of 0.85 log, a factor of 7, so nothing it
+    Benchmarked over 23 pairs it carries no systematic offset (mean signed error
+    +0.32 log, p=0.12) but an MAE of 0.82 log, a factor of 6.6, so nothing it
     emits is quotable as a potency. No correction, offset or calibration is
     applied to any returned value.
 
@@ -1182,10 +1249,10 @@ def cofold_affinity(
                     "warning": (
                         "Do NOT report this as a Kd, IC50 or potency and do NOT "
                         "compare it against a nanomolar threshold. Benchmarked "
-                        "2026-08-15 over 17 pairs the head carries NO "
-                        "systematic offset (mean signed error +0.23 log, 95% CI "
-                        "-0.28 to +0.74, p=0.38) but an MAE of 0.85 log — a "
-                        "factor of 7 — so there is nothing to correct and "
+                        "2026-08-15 over 23 pairs the head carries NO "
+                        "systematic offset (mean signed error +0.32 log, 95% CI "
+                        "-0.07 to +0.72, p=0.12) but an MAE of 0.82 log — a "
+                        "factor of 6.6 — so there is nothing to correct and "
                         "nothing quotable. Use the ranking as a binder/"
                         "non-binder split (NOT as an ordering of actives: "
                         "within-target Spearman +0.48, p=0.11), and use the "
@@ -1273,14 +1340,15 @@ def cofold_affinity(
             "potency offsets manufactures rank correlation out of the offset. "
             "And read this ordering as a BINDER/NON-BINDER split, not as an "
             "ordering of actives: benchmarked 2026-08-15, within-target "
-            "Spearman is +0.48, 95% CI (-0.05, +0.77), p=0.11 (n=12, JAK1), "
-            "while actives-vs-decoys is ROC AUC 0.972 / 1.000."
+            "Spearman is +0.483, 95% CI (-0.05, +0.77), p=0.11 (n=12, JAK1) "
+            "and not significant on any of 3 targets, while actives-vs-decoys "
+            "is ROC AUC 0.958 / 1.000 at 2.13 log on 12 actives x 12 decoys."
         ),
         "control": control,
         "per_ligand": rows,
         "single_compound_observations": {
             "_read_this_first": (
-                "Benchmarked 2026-08-15 over 17 pairs / 2 targets, and still "
+                "Benchmarked 2026-08-15 over 23 pairs / 3 targets, and still "
                 "NOT applied to anything above. Read it for what it withdraws: "
                 "there is no 1.97-log bias to correct for, and ordering actives "
                 "against each other is NOT supported (Spearman +0.48, "
