@@ -40,7 +40,7 @@ adapters A and B are both built (§5) and await their upstream owners' review.
 | Moamen | `moamen` | ~~`sandbox-capability-probe`~~ — **deleted from repo** ("delete useless spike", 2026-08-15 late): throwaway that served its purpose; findings preserved in research-evidence-mapper's CONTRACT.md | ✅ (then removed) |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
 | Vince | `vaalessi/hypothesis-highlander` | `hypothesis-highlander` (meta-search ABOVE the pipeline) | ✅ |
-| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | `hyp_gen/` (top level, NOT managed/ — layout deviation) — hypothesis node: graph-in → candidate programs out, own valuation adapter | ✅ (2026-08-16) |
+| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | `managed/hypothesis-generator/` — hypothesis node: graph-in → candidate programs out, own valuation adapter, managed-agent scaffolding | ✅ (2026-08-16) |
 | Cyrus | works on `main` | infra, merges, renames, README | — |
 
 Note: Cyrus renamed all node dirs on 2026-08-15 (`d6b8451`). Old names
@@ -140,7 +140,7 @@ are dead — do not create files under them.
   see §5.
 
 **Abraham (+ Sean, Weichi) — hyp_gen** *(landed 2026-08-16, first drop)*
-- Python package at top-level `hyp_gen/`: mapper-style graph in → candidate
+- Python package at `managed/hypothesis-generator/` (moved from top-level 2026-08-16): mapper-style graph in → candidate
   program briefs out (graph/candidates/evidence/reason/pipeline modules, LLM
   step, CLI). 212 tests pass. Ships its OWN adapter to economics
   (`valuation.py` + VALUATION_HANDOFF.md) and an eve wrapper
@@ -223,7 +223,7 @@ are dead — do not create files under them.
 - [ ] Emit `IndicationThesis` (or an adapter to it) so the thesis-based chain
       (mapper evidence → forecaster → economics) gets an entry point — today
       hyp_gen joins economics directly and skips recruitability entirely.
-- [ ] Decide layout: move under `managed/` or document why top-level.
+- [x] Moved under `managed/hypothesis-generator/` with agent scaffolding (2026-08-16).
 - [ ] Fix stale path in VALUATION_HANDOFF.md (`program-strategy-valuation` →
       `therapeutic-program-economics`).
 
@@ -505,3 +505,4 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:15 UTC** — merged `AbrehamT/Hypothesis_Generator` (9bf1682, tier-2: biome format fix on his JSON fixtures) — hyp_gen lands, 212 tests pass; §11 wiring map added per Abhishek — typecheck+check green.
 
 - **2026-08-16 01:15 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: one command from graph_id to dossier inputs — typecheck+check green.
+- **2026-08-16 01:18 UTC** — merged `AbrehamT/Hypothesis_Generator` (09e03cd, tier-2: modify/delete on his dir move — move wins, formatting reapplied) — hyp_gen now managed/hypothesis-generator with agent scaffolding; 212 tests green.

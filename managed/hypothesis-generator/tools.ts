@@ -2,14 +2,15 @@
  * Custom tools for the hypothesis-generator agent.
  *
  * These run in *this* process, not in the agent's cloud sandbox. That is the
- * whole reason they exist: the generator is a Python package (`hyp_gen/`) that
- * lives on this machine, and the deployed agent cannot run it. When the agent
- * calls one of these, its session parks at `requires_action`, the handler here
- * shells out to the real CLI, and the result is posted back.
+ * whole reason they exist: the generator is a Python package (`src/hyp_gen/`,
+ * beside this file) that lives on this machine, and the deployed agent cannot
+ * run it. When the agent calls one of these, its session parks at
+ * `requires_action`, the handler here shells out to the real CLI, and the
+ * result is posted back.
  *
  * Every handler shells out to `hyp_gen`'s own entry point. Nothing about
  * traversal, scoring, or validation is reimplemented here — a second copy in
- * TypeScript would be an untested one, and the Python side has 119 tests.
+ * TypeScript would be an untested one, and the Python side has 212 tests.
  */
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -18,12 +19,12 @@ import { dirname, join } from "node:path";
 import type { CustomToolSpec } from "@/lib/claude-managed-agent.ts";
 import { repoRoot } from "@/lib/claude-managed-agent.ts";
 
-const HYP_GEN = join(repoRoot, "hyp_gen");
+const HYP_GEN = join(repoRoot, "managed", "hypothesis-generator");
 const RUNS = join(HYP_GEN, "runs");
-const FIXTURES = join(repoRoot, "managed", "hypothesis-generator", "fixtures");
+const FIXTURES = join(HYP_GEN, "fixtures");
 
 /** Where a graph may be read from. Keeps the agent off the rest of the disk. */
-const GRAPH_ROOTS = [FIXTURES, join(HYP_GEN, "data")];
+const GRAPH_ROOTS = [FIXTURES];
 
 /**
  * The interpreter to run the CLI with.
@@ -81,7 +82,7 @@ function resolveGraph(ref: string): string {
   // knowledge graph is exactly the kind of input an injection would ride in on.
   if (ref.includes("..") || ref.startsWith("/")) {
     throw new Error(
-      `graph must be a bare filename under fixtures/ or hyp_gen/data/, got "${ref}"`
+      `graph must be a bare filename under fixtures/, got "${ref}"`
     );
   }
   for (const root of GRAPH_ROOTS) {

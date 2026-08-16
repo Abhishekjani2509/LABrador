@@ -2,14 +2,14 @@
 
 `managed/program-strategy-valuation/` (LABrador) is the downstream evaluator: a
 provenance-aware program brief goes in, and rNPV, protected years, payer access,
-patient affordability and a decision grade come out. `hyp_gen/src/hyp_gen/valuation.py`
+patient affordability and a decision grade come out. `src/hyp_gen/valuation.py`
 is the adapter between the two.
 
 ```bash
-hypgen --graph data/example_graph.json --emit-frame-template frame.json
+hypgen --graph fixtures/example_graph.json --emit-frame-template frame.json
 $EDITOR frame.json                       # the four year fields are null on purpose
 
-hypgen --graph data/example_graph.json --profile valuation --dry-run \
+hypgen --graph fixtures/example_graph.json --profile valuation --dry-run \
        --emit-programs out/ --frame frame.json
 
 labrador analyze out/g_demo1-metformin.program.json \

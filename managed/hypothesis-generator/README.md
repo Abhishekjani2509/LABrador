@@ -13,10 +13,36 @@ A hypothesis here is a function of `(graph, params)` and nothing else. Two runs
 with the same inputs produce the same slate, so a disagreement about the output
 is a disagreement about parameters rather than about luck.
 
-- The graph contract is [`../SCHEMA.md`](../SCHEMA.md) (Stage 1 owns it).
+- The graph contract is Stage 1's `SCHEMA.md`, which lives with Stage 1 and not
+  in this repo.
 - The knobs and where their defaults come from are in
   [`docs/PARAMETERS.md`](docs/PARAMETERS.md).
 - The design and its failure modes are in [`docs/DESIGN.md`](docs/DESIGN.md).
+- The handoff to the valuation stage is in
+  [`docs/VALUATION_HANDOFF.md`](docs/VALUATION_HANDOFF.md).
+
+## Layout
+
+The Python package sits inside the managed agent that fronts it, the same shape
+`managed/program-strategy-valuation/` uses for `labrador_roi`:
+
+```
+managed/hypothesis-generator/
+  CLAUDE.md        the deployed agent's system prompt, uploaded verbatim
+  manifest.json    build output: the Managed Agent definition
+  tools.ts         custom tools; they shell out to the CLI below
+  acl.ts           who may call the agent
+  src/hyp_gen/     this package — the generator itself
+  tests/           212 offline tests, no network
+  fixtures/        example graphs and the analyst frame
+  docs/            design, parameters, valuation handoff
+  runs/            output (gitignored)
+```
+
+One directory holds the agent and the code it runs, so a checkout of the agent
+is a checkout of the thing that does the work. `tools.ts` resolves the package
+relative to this directory; nothing outside it needs to know where the
+generator lives.
 
 ## Quickstart
 
@@ -25,13 +51,13 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 
 # Structural slate: enumeration, scoring, selection. No model calls, no API key.
 PYTHONPATH=src .venv/bin/python -m hyp_gen.cli \
-  --graph data/example_graph.json --dry-run
+  --graph fixtures/example_graph.json --dry-run
 
 # Full run — articulate, critique, validate citations (needs ANTHROPIC_API_KEY).
 PYTHONPATH=src .venv/bin/python -m hyp_gen.cli \
-  --graph data/example_graph.json --profile repurposing --out reports/
+  --graph fixtures/example_graph.json --profile repurposing --out reports/
 
-.venv/bin/python -m pytest        # 148 offline tests, no network
+.venv/bin/python -m pytest        # 212 offline tests, no network
 ```
 
 Start with `--dry-run`. Most early failures are traversal or parameter
@@ -147,9 +173,9 @@ any field on top.
 the graph; craziness picks *how far out* to reach for an answer.
 
 ```bash
-hypgen --graph data/example_graph.json --craziness 0.1    # defensible today
-hypgen --graph data/example_graph.json --craziness 0.9    # a real leap
-hypgen --graph data/example_graph.json --profile repurposing --craziness 0.8
+hypgen --graph fixtures/example_graph.json --craziness 0.1    # defensible today
+hypgen --graph fixtures/example_graph.json --craziness 0.9    # a real leap
+hypgen --graph fixtures/example_graph.json --profile repurposing --craziness 0.8
 ```
 
 At 0.0 you get two-hop chains between strongly-supported links, corroborated by
@@ -185,8 +211,8 @@ fluent nonsense. The full schedule and the things it is forbidden to move are in
 brief in, rNPV and a decision grade out. `valuation.py` emits its input.
 
 ```bash
-hypgen --graph data/example_graph.json --emit-frame-template frame.json
-hypgen --graph data/example_graph.json --profile valuation --dry-run \
+hypgen --graph fixtures/example_graph.json --emit-frame-template frame.json
+hypgen --graph fixtures/example_graph.json --profile valuation --dry-run \
        --emit-programs out/ --frame frame.json
 labrador analyze out/*.program.json --comparables out/comparables.json --seed 42
 ```
@@ -211,7 +237,7 @@ price, which is not the same thing as a worthless program.
 evidence recomputation, multi-objective scoring, MMR selection with quotas,
 evidence packs, staged six-gate verification with halting, articulation,
 multi-lens critique, Elo tournament, evolution rounds, Stage 1 asks, markdown
-and JSON output, CLI, 148 offline tests.
+and JSON output, CLI, 212 offline tests.
 
 **Two report lengths.** `report.md` is the short read — statement, chain,
 scores, what would kill it, the decisive experiment, the strongest objection,
