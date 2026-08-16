@@ -1,0 +1,146 @@
+{
+  "assumed": [
+    {
+      "field": "biomarkerPopulation",
+      "label": "ASSUMED",
+      "value": "seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate @ prevalence 0.6, assay true",
+      "why": "ASSUMED. The trial population an IRAK4-inhibitor RA program would realistically enrol, mirroring the entry criteria of the RA JAK-inhibitor and biologic trials this class competes with (seropositive, inadequate response to methotrexate). The graph contains no epidemiology of any kind — no prevalence, no assay availability — so all three fields are analyst decisions."
+    },
+    {
+      "field": "endpoint",
+      "label": "ASSUMED",
+      "value": "ACR20 response at week 12 (binary, d=0.35)",
+      "why": "ASSUMED. The graph states no endpoint and no effect size. ACR20 at week 12 is the conventional registrational primary endpoint for RA trials, which makes it the honest choice for a forecast that will be compared against RA precedent trials."
+    },
+    {
+      "field": "disease.name",
+      "label": "ASSUMED",
+      "value": "rheumatoid arthritis",
+      "why": "ASSUMED. REQUIRED for this slate: g_1a4f contains no `disease` entity at all (its 5 things are 2 small_molecule and 3 process nodes), so every hypothesis's object_name is a process, not an indication. Without this override the bridge would put 'MyD88 dimerization inhibition' in disease.name. The disease is named in the graph's own question string, which the bridge echoes verbatim in provenance.diseaseBasis so a reader can check the substitution. Slate question, verbatim: \"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\". object_name the override replaced: \"MyD88 dimerization inhibition\" (thing kind: small_molecule)."
+    },
+    {
+      "field": "target.symbol",
+      "label": "ASSUMED",
+      "value": "IRAK4",
+      "why": "NO protein/gene node exists on this path (graph carries none), so the frame's targetSymbolOverride was used: ASSUMED-but-checkable. REQUIRED for this slate: g_1a4f carries no protein or gene entity (Rafal hit the same wall in graph-intake — COORDINATION §3), so no interior path node can supply a target symbol. IRAK4 is named inside the thing's own name ('IRAK4 inhibition', t1) and its aliases, so this is reading the graph's string rather than importing outside knowledge — but it is still the analyst asserting it, not the graph typing it."
+    },
+    {
+      "field": "target.uniprotAccession",
+      "label": "ASSUMED",
+      "value": "Q9NWZ3",
+      "why": "ASSUMED-but-checkable. Q9NWZ3 is the human IRAK4 accession in UniProt. Supplied because thesis.ts §6 item 2 makes it the tractability node's join key and the graph has no accession on any thing."
+    },
+    {
+      "field": "target.direction",
+      "label": "ASSUMED",
+      "value": "inhibit",
+      "why": "frame override (ASSUMED. The slate's path verb for this hypothesis is `suppresses`, which is NOT in the mapper's closed `how` enum (SCHEMA.md: inhibits|activates|binds|increases|decreases|drives|associated_with), so the bridge maps it to `modulate` rather than guessing. The analyst states `inhibit` because the asset IS an IRAK4 inhibitor. Delete this field to see the bridge's own conservative mapping instead.); the graph verb is \"suppresses\", which maps to \"modulate\""
+    },
+    {
+      "field": "tissue",
+      "label": "ASSUMED",
+      "value": "synovium",
+      "why": "the graph has no tissue field; this is the analyst's reading of where the findings were measured"
+    }
+  ],
+  "dropped": [],
+  "fieldBasis": {
+    "asset.modality": "graph types subject t1 as small_molecule",
+    "asset.name": "subject_name verbatim; graph aliases for this thing: IRAK4 inhibitor, KIC-0101, PF-06650833",
+    "disease.name": "ASSUMED. REQUIRED for this slate: g_1a4f contains no `disease` entity at all (its 5 things are 2 small_molecule and 3 process nodes), so every hypothesis's object_name is a process, not an indication. Without this override the bridge would put 'MyD88 dimerization inhibition' in disease.name. The disease is named in the graph's own question string, which the bridge echoes verbatim in provenance.diseaseBasis so a reader can check the substitution. Slate question, verbatim: \"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\". object_name the override replaced: \"MyD88 dimerization inhibition\" (thing kind: small_molecule).",
+    "mechanism": "rendered from the slate path (motif gap_closure)",
+    "target.direction": "frame override (ASSUMED. The slate's path verb for this hypothesis is `suppresses`, which is NOT in the mapper's closed `how` enum (SCHEMA.md: inhibits|activates|binds|increases|decreases|drives|associated_with), so the bridge maps it to `modulate` rather than guessing. The analyst states `inhibit` because the asset IS an IRAK4 inhibitor. Delete this field to see the bridge's own conservative mapping instead.); the graph verb is \"suppresses\", which maps to \"modulate\"",
+    "target.symbol": "NO protein/gene node exists on this path (graph carries none), so the frame's targetSymbolOverride was used: ASSUMED-but-checkable. REQUIRED for this slate: g_1a4f carries no protein or gene entity (Rafal hit the same wall in graph-intake — COORDINATION §3), so no interior path node can supply a target symbol. IRAK4 is named inside the thing's own name ('IRAK4 inhibition', t1) and its aliases, so this is reading the graph's string rather than importing outside knowledge — but it is still the analyst asserting it, not the graph typing it.",
+    "uncertainty": "1 − scores.support (0.423)"
+  },
+  "provenance": {
+    "frame": "managed/trial-recruitment-forecaster/fixtures/irak4-ra.frame.json",
+    "generatedAt": "2026-08-15T17:30:00Z",
+    "graphId": "g_1a4f",
+    "hypothesisId": "H-g1",
+    "motif": "gap_closure",
+    "question": "can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?",
+    "round": 2,
+    "slate": "managed/pipeline-observatory/fixtures/hypgen-irak4-ra.slate.json",
+    "slateCaveats": [
+      "The search is a sample, not the literature: 6 of 49 results were read. Absence of a link is weak evidence of absence.",
+      "This chain traverses at least one link against its stated direction. Do not assert the reverse relation as established.",
+      "Novelty here rests on a gap, but this graph is not entitled to strong absence claims. Treat 'nobody has shown X' as 'this search did not surface X'."
+    ],
+    "strengthFormula": "clamp01(STUDY_QUALITY[study_type] * (is_preprint ? 0.8 : 1)); table mirrors assemble.py:199 via evidence-bridge.ts"
+  },
+  "thesis": {
+    "asset": {
+      "modality": "small_molecule",
+      "name": "IRAK4 inhibition",
+      "sponsor": "UNSPECIFIED (no sponsor in the graph or the frame)"
+    },
+    "biomarkerPopulation": {
+      "assayAvailable": true,
+      "marker": "seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate",
+      "prevalenceInDisease": 0.6
+    },
+    "disease": {
+      "name": "rheumatoid arthritis"
+    },
+    "endpoint": {
+      "expectedEffectSize": 0.35,
+      "name": "ACR20 response at week 12",
+      "type": "binary"
+    },
+    "evidence": [
+      {
+        "claim": "IRAK4 inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"Human RA fibroblast‐like synoviocytes (FLS) were incubated with inhibitors, and stimulatory ligands added. Supernatants were analyzed with a Meso Scale Discovery assay kit.\" [g_1a4f#n_f1]",
+        "direction": "supports",
+        "source": "doi:10.1002/art.41953",
+        "sourceType": "publication",
+        "strength": 0.5
+      },
+      {
+        "claim": "IRAK4 inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"As depicted in Figure  2B , PF‐06650833 substantially reduced cytokine and matrix metalloproteinase (MMP) release in response to all ligands profiled.\" [g_1a4f#n_f2]",
+        "direction": "supports",
+        "source": "doi:10.1002/art.41953",
+        "sourceType": "publication",
+        "strength": 0.5
+      },
+      {
+        "claim": "IRAK4 inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"Intriguingly, PF‐06650833 was able to block MMP induction by IL‐1β: the first response to IL‐1β in nonhematopoietic cells we have found to be IRAK4 kinase dependent.\" [g_1a4f#n_f4]",
+        "direction": "supports",
+        "source": "doi:10.1002/art.41953",
+        "sourceType": "publication",
+        "strength": 0.5
+      },
+      {
+        "claim": "IRAK4 inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"However, it did not inhibit IL‐1–induced cytokines in RA FLS.\" [g_1a4f#n_f3]",
+        "direction": "contradicts",
+        "source": "doi:10.1002/art.41953",
+        "sourceType": "publication",
+        "strength": 0.5
+      },
+      {
+        "claim": "MyD88 dimerization inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"we elucidated the effect of disrupting MyD88 dimerization by ST2825 on the pathological properties of synovial fibroblasts from RA patients (RA SFs).\" [g_1a4f#f3]",
+        "direction": "supports",
+        "source": "doi:10.1186/s13075-023-03145-0",
+        "sourceType": "publication",
+        "strength": 0.5
+      },
+      {
+        "claim": "MyD88 dimerization inhibition -[suppresses]-> synovial fibroblast driven inflammation | \"The invasiveness of RA SFs in Matrigel matrices was measured in organoid cultures.\" [g_1a4f#f4]",
+        "direction": "supports",
+        "source": "doi:10.1186/s13075-023-03145-0",
+        "sourceType": "publication",
+        "strength": 0.5
+      }
+    ],
+    "id": "H-g1",
+    "mechanism": "gap_closure: IRAK4 inhibition -[suppresses]-> synovial fibroblast driven inflammation (L3); synovial fibroblast driven inflammation -[suppresses]-> MyD88 dimerization inhibition (L5, TRAVERSED AGAINST ITS STATED DIRECTION)",
+    "mechanismHypothesis": "orthosteric",
+    "target": {
+      "direction": "inhibit",
+      "symbol": "IRAK4",
+      "uniprotAccession": "Q9NWZ3"
+    },
+    "tissue": "synovium",
+    "uncertainty": 0.577
+  }
+}
