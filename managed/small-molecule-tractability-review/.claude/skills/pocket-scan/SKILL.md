@@ -596,9 +596,15 @@ of reporting the outlier.
 Measured on NLRP3 (`8SWF, 7ZGU, 9HG4`). 8SWF came first, so it was the reference;
 7ZGU and 9HG4 were dropped at **16.43 and 16.55 A**, 1 of 3 survived, and the
 whole stage returned `mdpocket_status: "failed"`. **7ZGU and 9HG4 superpose onto
-each other at 1.301 A**, a figure the *cryptic stage of the same payload* had
-already measured and printed. One structure cost an entire ensemble by being
-listed first.
+each other at 2.69 A** by this stage's own whole-assembly fit — and at **1.301 A**
+in the *cryptic stage of the same payload*, which had already measured and
+printed it. One structure cost an entire ensemble by being listed first.
+
+| candidate | median RMSD to the rest | would keep |
+| --- | --- | --- |
+| 8SWF | **16.49** | **0 of 2** ← was the reference |
+| 7ZGU | **9.559** | 1 of 2 ← is now |
+| 9HG4 | 9.621 | 1 of 2 |
 
 The reference is now chosen as the structure with the **lowest median core-Cα
 RMSD to the rest** — not the first, not the largest. The median is what makes it
@@ -727,6 +733,22 @@ Two details worth carrying:
   core→all gap across six real pairs is small (0.58→1.42, 0.96→1.10, 0.71→1.02,
   1.30→2.72, 1.27→2.04), which is why it had not fired and why the check costs
   the controls nothing.
+
+#### The mismatch fraction had no denominator, and could exceed 1
+
+The refusal on the S1PR1 CD69 fit read *"**15 of 5** fitted positions name a
+DIFFERENT residue"* — a ratio of **3.0**. `n_residue_name_mismatches` is counted
+over the **pre-filter overlap**, `n_equivalent_ca` counts the **survivors** of
+that filter, and dividing one by the other is not a fraction of anything. The
+denominator is now survivors + mismatches (the overlap the mismatches were
+counted over) while `match_residue_names` is on, and the survivors alone when it
+is off. The same case now reads **15 of 20 = 0.75**, and
+`superposition_gate.name_mismatch_denominator` and `name_mismatch_fraction`
+carry it.
+
+It erred toward *refusing*, so nothing was ever wrongly accepted by it — but a
+gate that prints an impossible number is a gate a reader will stop trusting, and
+the direction it errs in is luck rather than design.
 
 #### A large core RMSD is not the same finding as a wrong pair — it may be a hinge
 

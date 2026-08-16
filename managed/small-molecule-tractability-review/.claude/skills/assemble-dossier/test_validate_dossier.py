@@ -1374,6 +1374,21 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
         """
         import validate_dossier as m
 
+        # SKILL.md lists TEN constants and claims this test asserts every one of
+        # them. It asserted six. The claim is now true rather than trimmed,
+        # because the four that were missing are the ones a reader is most
+        # likely to want to argue with — they are the policy thresholds, not the
+        # measured ones.
+        self.assertEqual(m.INSUFFICIENT_ACTIVES_THRESHOLD, 50)
+        self.assertEqual(m.SINGLE_ASSAY_DOMINANCE_PCT, 30.0)
+        self.assertEqual(m.CRYPTIC_APO_ABSENCE_FRACTION, 0.8)
+        self.assertEqual(m.AXIS_CONFLICT_ACTIVES_THRESHOLD, 500)
+        # A PROPOSAL, NOT A CALIBRATED NUMBER — roughly half the one error ever
+        # measured (7.73 A) and well above the ~1 A grid spacing, on n=1. It is
+        # neither listed in SKILL.md's ten nor was it pinned, despite being the
+        # threshold both CLAUDE.md and rubric.md describe at most length.
+        self.assertEqual(m.OFF_SITE_CENTROID_DISTANCE_A, 4.0)
+
         self.assertEqual(m.DRUGGABILITY_FALSE_NEGATIVE_BAND, 0.5)
         self.assertEqual(m.DRUGGABILITY_FALSE_NEGATIVE_FLOOR, 0.1)
         self.assertEqual(m.PRIMARY_VOLUME_CLUSTERING_D, 1.6)

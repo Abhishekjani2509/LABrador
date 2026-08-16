@@ -260,16 +260,28 @@ The validator does not check these. Read them off the JSON directly.
 These are failure modes of the *grader*, and they are as costly as a bad
 dossier.
 
-- **Do not gate on a volume threshold.** Volume at D=1.6 separated all 15
-  evaluation targets perfectly (AUC 1.000, stable under all 15 leave-one-out
-  refits, hard ≤207 Å³ and druggable ≥242 Å³), but that boundary is a **17%
-  margin fitted post hoc on n=15 and is not calibrated**, on 5 hard targets that
-  are all PPI/cytokine/membrane against a druggable set enriched in kinases and
-  GPCRs — so it may partly be tracking target class. A target at 230 Å³ is
-  *unclassified* by it. The only numeric volume gates anywhere in the grader are
-  the 1000 Å³ merge-artifact ceiling (criterion 8) and the 240 Å³ trigger for
-  *requiring a caveat* (criterion 7) — neither classifies anything as druggable
-  or hard, and no criterion may be added that does.
+- **Do not gate on a volume threshold. The separation behind it is WITHDRAWN
+  (rule 4a, 2026-08-15).** This bullet used to justify the prohibition by saying
+  the boundary was merely uncalibrated — AUC 1.000 across 15 targets, hard
+  ≤207 Å³ and druggable ≥242 Å³, a 17% margin fitted post hoc. **That result is
+  now suspended outright**, because the calibration anchors did not all measure
+  the proteins they were attributed to: MYC's 188 Å³ pocket contains **zero MYC
+  atoms** (lining residues are MAX, MAX plus DNA, or engineered OmoMYC), IL-11's
+  164 Å³ came from an IL-11 **receptor** entry, and KRAS's 400 Å³ is a median
+  spanning the GDP site rather than switch-II. Correcting them crosses the
+  boundary — MYC moves 187.9 → 325.7 Å³ — so **thresholded on volume, MYC would
+  have come out druggable.** The prohibition is therefore no longer "pending
+  out-of-sample validation"; there is no validated separation to gate on at all.
+  A volume is a number about a cavity and nothing more. **Verified in the
+  validator, 2026-08-15:** nothing classifies on volume. The only numeric volume
+  uses anywhere in the grader are the 1000 Å³ merge-artifact ceiling
+  (criterion 8) and a 240 Å³ trigger that merely *requires a caveat* when a low
+  druggability sits beside a large volume (criterion 7) — neither calls anything
+  druggable or hard, and no criterion may be added that does. Note the 240 Å³
+  trigger is now a bare disclosure threshold inherited from a withdrawn
+  calibration; it should be re-derived or replaced with a rule that does not name
+  a number. `VOLUME_GUIDE_HARD_A3 = 210.0` is defined in the validator and never
+  read — dead code from the same withdrawn guide.
 
 - **Do not grade a druggability value against an expected number.** The same
   structure read 0.673 on the deployed path and 0.708 locally; fpocket estimates

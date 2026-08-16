@@ -77,7 +77,7 @@ REQUIRED_TOP_LEVEL = (
 
 # The interface-classification vocabulary, and it is the TOOL's vocabulary, not
 # a shorter one invented here. `interface_analysis.classify_pocket` and
-# `modal_app`'s aggregation step between them emit all six of these, and a
+# `modal_app`'s aggregation step between them emit all seven of these, and a
 # validator that accepts fewer than the tool emits forces the agent to launder
 # a real value through `not_found` — which is what happened before `mixed` and
 # `no_pocket_to_classify` were admitted.
@@ -1009,7 +1009,7 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
     `not_tractable` on a druggability of 0.013 measured at a pocket with
     osimertinib physically bound in it, and pass clean.
 
-    Three clauses:
+    Four clauses:
 
     1. `load_bearing` is a declaration and only one value is legal. It exists so
        the demotion is visible in every output rather than living only in prose.
@@ -1018,6 +1018,16 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
     3. A negative verdict may not rest on it. With no volume beside it there is
        nothing else the computed axis could be resting on, and 41% of pockets
        with a drug bound score below 0.1 — so the verdict is unsupported.
+    4. A low druggability sitting beside a large volume must be written down in
+       `tractability.caveat`. That is the EGFR shape — 290 A^3 at D=1.6 against
+       6LUD at 0.013 — and it is reported, not resolved. Nothing here
+       classifies on the volume guide; it only decides when the two numbers are
+       far enough apart to be worth saying.
+
+    This docstring said "Three clauses" over four for as long as the fourth has
+    existed, which is the same species of rot as the rubric's test count. It is
+    listed because a reader who counts three and finds four has to work out
+    which one is the accident.
     """
     v: list[Violation] = []
     drug = _get(d, "tractability.pocket_druggability")

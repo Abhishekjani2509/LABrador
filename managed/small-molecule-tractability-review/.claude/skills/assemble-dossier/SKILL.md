@@ -137,10 +137,23 @@ enough: a fusion chaperone can sit *inside* a chain (3V2Y's T4 lysozyme at
 1002–1161 beside the receptor at 16–330), which needs a residue range.
 
 **Read `site_pocket_selected_by` on every value before using it.** It is
-returned per structure per clustering value, and two of its five possible values
-mean the number does not describe a known site:
-`max_druggability_no_ligand_site` and `site_signature_unreliable_homooligomer`.
-Values carrying either must not be pooled into one spread.
+returned per structure per clustering value, and **four of its six possible
+values** mean the number does not describe a known site:
+`max_druggability_no_ligand_site` ("the most druggable pocket anywhere in the
+chain"), `site_signature_unreliable_homooligomer` (a residue-number match a
+homo-oligomer makes ambiguous in principle), `no_pocket_matched_site_signature`
+(matched nothing) and `no_pocket_overlapped_ligand_site` (a ligand site was
+known and no pocket reached it — the strongest case of all, because the
+measurement is anchored to nothing). Values carrying any of them must not be
+pooled into one spread.
+
+**This sentence read "two of its five" until 2026-08-15, and both numbers were
+wrong.** `no_pocket_overlapped_ligand_site` was never transcribed into
+`SELECTION_BASES` at all, so the validator rejected a basis the tool emits — and
+it is the basis for the exact false negative rule 4 exists around (TNF-alpha
+0.002 at D=1.6 on a co-crystallised 570 Da ligand, the cluster discarded below
+fpocket's `-i 15` floor). `test_four_of_the_six_bases_do_not_identify_a_site`
+now pins both counts.
 
 **Writes:** `tractability.pocket_volume_a3` — including
 `primary_d1_6_a3`, **the computed axis's primary number**, and `clustering_d`
@@ -246,12 +259,19 @@ discount.
 
 ### 8. Verdict, then validate
 
-Write `verdict`, `verdict_basis`, `axis_conflict` and `next_experiment`. Then
-run the gate:
+Write `verdict`, `verdict_basis`, `axis_conflict` and `next_experiment`. Write
+the dossier to its pinned path, then run the gate **on the file you wrote**:
 
 ```bash
-python3 validate_dossier.py dossier.json
+python3 .claude/skills/assemble-dossier/validate_dossier.py \
+        /mnt/session/outputs/druggability-dossier.json
 ```
+
+**This command used to read `python3 validate_dossier.py dossier.json`**, which
+named a file `CLAUDE.md` forbids writing (the output path is pinned and no
+other) and a script path that only resolves if the working directory happens to
+be this skill's own. Validate the artifact the grader reads, not a copy of it —
+a copy is where the two can differ and nobody finds out.
 
 Zero violations, or the dossier does not go out. Fix the dossier, not the
 validator — every rule in it exists because the corresponding mistake is easy,
@@ -393,10 +413,15 @@ with: `INSUFFICIENT_ACTIVES_THRESHOLD = 50`, `SINGLE_ASSAY_DOMINANCE_PCT = 30.0`
 `CRYPTIC_APO_ABSENCE_FRACTION = 0.8`, `AXIS_CONFLICT_ACTIVES_THRESHOLD = 500`,
 `DRUGGABILITY_FALSE_NEGATIVE_BAND = 0.5`, `DRUGGABILITY_FALSE_NEGATIVE_FLOOR = 0.1`,
 `PRIMARY_VOLUME_CLUSTERING_D = 1.6`, `MERGED_VOLUME_A3 = 1000.0`,
-`VOLUME_GUIDE_DRUGGABLE_A3 = 240.0`, `VOLUME_GUIDE_HARD_A3 = 210.0`.
-`test_the_measured_constants_are_pinned` asserts every one of them, so widening
-the false-negative band or promoting the volume guide into a classifier fails a
-test that names the number that moved.
+`VOLUME_GUIDE_DRUGGABLE_A3 = 240.0`, `VOLUME_GUIDE_HARD_A3 = 210.0`, and
+`OFF_SITE_CENTROID_DISTANCE_A = 4.0`.
+`test_the_measured_constants_are_pinned` asserts **every one of them**, so
+widening the false-negative band or promoting the volume guide into a classifier
+fails a test that names the number that moved. That claim was false until
+2026-08-15 — the test pinned six of the ten, and the four it skipped were the
+policy thresholds, which are exactly the ones a reader would want to argue with.
+`OFF_SITE_CENTROID_DISTANCE_A` was in neither the list nor the test, despite
+being the threshold `CLAUDE.md` and `rubric.md` describe at most length.
 
 **The two volume-guide constants classify nothing, deliberately.** They are used
 in exactly one place: deciding when a low druggability and a large volume
@@ -406,11 +431,19 @@ needs out-of-sample validation first.
 
 ### The gate's vocabulary is the TOOL's vocabulary, not a shorter one
 
-`pocket_vs_interface.classification` has **six** legal values, not four. Four
+`pocket_vs_interface.classification` has **seven** legal values, not four. Four
 come from `interface_analysis.classify_pocket` — `orthosteric_candidate`,
 `allosteric_candidate`, `destabiliser_candidate`, `no_partner_structure` — and
-two come from the aggregation step in `modal_app.py` that runs over them:
-`mixed` and `no_pocket_to_classify`.
+three come from the aggregation step in `modal_app.py` that runs over them:
+`mixed`, `no_pocket_to_classify` and `numbering_mismatch_not_interpretable`.
+The last two are abstentions and demand nothing.
+
+The same defect had a second instance one field over: `SELECTION_BASES` was
+transcribed with five of `site_pocket_selected_by`'s **six** values, so the
+validator rejected `no_pocket_overlapped_ligand_site` — see step 4 above. **When
+this skill and the tool disagree about a vocabulary, the tool is right**, because
+the tool is what produces the value. A gate narrower than its own input does not
+make the output stricter; it makes the agent launder.
 
 **The validator used to reject `mixed`, and `pocket-scan` mandates it.** That is
 not a difference of opinion about a label; it is a machine gate refusing a value
