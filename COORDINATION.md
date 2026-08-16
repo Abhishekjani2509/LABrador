@@ -239,6 +239,26 @@ are dead — do not create files under them.
 
 *§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
+- [ ] **BUILD.md's own blocking acceptance test has never been run.** It says
+      run `fixtures/q-disputed.txt` and check six facts independently. No run
+      has ever used a fixture question — everything was verified against ad-hoc
+      queries instead. Three of the six are unverified:
+      **(3) the disputed fixture must yield ≥1 link `state: "disagreed"`** —
+      BUILD.md is explicit that "zero is a failure, not a clean result", and
+      `explain_disagreement` is the piece the whole design points at. It has
+      never produced a disagreed link in production; the only one observed came
+      from a hand-assembled round before deployment.
+      **(4) a low-confidence finding must survive into the output** — the
+      "nothing is filtered by score" guarantee, never explicitly checked.
+      **(6) three quotes spot-checked verbatim against their DOIs** — the
+      mechanical check runs every round, but no human has confirmed a quote
+      against its source.
+      Facts 1, 2 and 5 are verified (event-level Paperclip calls, raw full-graph
+      JSON, and round 2 loading round 1 from memory with `round` incrementing —
+      g_5cb6 reached round 7).
+- [ ] **The `how` enum is deployed but unverified on a fresh graph.** Run in
+      flight. Existing graphs are not migrated: changing a verb on an existing
+      pair forks a parallel link, since links key on (from, how, to).
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
