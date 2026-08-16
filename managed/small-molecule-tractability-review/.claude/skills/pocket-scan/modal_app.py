@@ -1585,16 +1585,27 @@ def _motion_scope(r: dict, sup: dict, glob: dict) -> dict:
     """
     site = r.get("site") or {}
     site_max = site.get("max_ca_displacement")
+    site_rmsd = site.get("ca_rmsd")
     gmax = glob.get("max_ca_displacement_a")
+    # "STILL" IS TESTED ON THE SITE RMSD, NOT ON THE SITE MAXIMUM, and
+    # deliberately so: the maximum is one residue and is exactly the knife-edge
+    # quantity `mechanism_margin` exists to warn about. S1PR1 3V2Y -> 7TD4 has a
+    # site C-alpha RMSD of 1.04 A and a maximum of 2.16 A, and keying on the
+    # maximum would have declared the site NOT still by 0.16 A — hiding the very
+    # case this block was added for. 2.0 A is also CryptoBench's own
+    # pocket-residue RMSD criterion, so the same number means the same thing on
+    # both sides.
     still_site = (
-        site_max is not None
-        and float(site_max) <= CRYPTIC_BACKBONE_MOTION_THRESHOLD_A
+        site_rmsd is not None
+        and float(site_rmsd) <= CRYPTIC_BACKBONE_MOTION_THRESHOLD_A
     )
     big_global = (
         gmax is not None and float(gmax) >= CRYPTIC_GLOBAL_MOTION_NOTABLE_A
     )
     return {
         "site_max_ca_displacement_a": site_max,
+        "still_site_tested_on": "site_ca_rmsd_a",
+        "still_site_threshold_a": CRYPTIC_BACKBONE_MOTION_THRESHOLD_A,
         "site_max_ca_displacement_at": site.get("max_ca_displacement_at"),
         "site_ca_rmsd_a": site.get("ca_rmsd"),
         "global_max_ca_displacement_a": gmax,
@@ -1604,18 +1615,21 @@ def _motion_scope(r: dict, sup: dict, glob: dict) -> dict:
         "global_notable_threshold_a": CRYPTIC_GLOBAL_MOTION_NOTABLE_A,
         "global_motion_with_still_site": (
             bool(big_global and still_site)
-            if (gmax is not None and site_max is not None) else None
+            if (gmax is not None and site_rmsd is not None) else None
         ),
         "note": (
             None if not (big_global and still_site) else
-            f"THE SITE IS STILL ({site_max} A) AND THE PROTEIN IS NOT "
-            f"({gmax} A at {glob.get('max_ca_displacement_at')}). This is a "
-            "reportable state, not a defect and not crypticity: the two "
-            "conformers differ by a rearrangement that does not pass through "
-            "the site. S1PR1 inactive 3V2Y -> active 7TD4 is the case — site "
-            "C-alpha RMSD 1.04 A, is_cryptic false, and a 14.6 A TM6 swing "
-            "that had no field to appear in. Say BOTH in the dossier; 'the site "
-            "is pre-formed' alone omits the activation-state change."
+            f"THE SITE IS STILL (C-alpha RMSD {site_rmsd} A, maximum "
+            f"{site_max} A) AND THE PROTEIN IS NOT ({gmax} A at "
+            f"{glob.get('max_ca_displacement_at')}). This is a reportable "
+            "state, not a defect and not crypticity: the two conformers differ "
+            "by a rearrangement that does not pass through the site. S1PR1 "
+            "inactive 3V2Y -> active 7TD4 is the case — site C-alpha RMSD "
+            "1.04 A, is_cryptic false, and a 14.4 A TM6 swing at R:248 that had "
+            "no field to appear in: result['global'] was null and the only "
+            "protein-wide number was all_ca_rmsd_after_core_fit 2.035, which "
+            "reads as agreement. Say BOTH in the dossier; 'the site is "
+            "pre-formed' alone omits the activation-state change."
         ),
         "reconstruction": {
             k: glob.get(k) for k in (
@@ -1706,7 +1720,8 @@ def _cryptic_block(
     #
     # Same threshold as mdpocket's, for the same reason and so that the two
     # stages cannot disagree about whether a pair is superposable.
-    # THREE GATES, NOT ONE. RMSD alone would not have caught S1PR1, which is
+    # FOUR GATES, NOT ONE — and the fourth is below, at `sup_all`, because three
+    # were not enough either. RMSD alone would not have caught S1PR1, which is
     # the worst instance measured: the module mapped the S1PR1 receptor onto
     # 8G94 chain F — CD69, a 25-residue peptide — fitted it on FIVE equivalent
     # C-alpha with FIFTEEN residue-name mismatches, and reported the resulting
@@ -1729,7 +1744,7 @@ def _cryptic_block(
     #     core_ca_rmsd 1.472 over n_fitted_ca 202   ->  the old gate PASSED
     #     n_excluded_ca 274, n_equivalent_ca 476, 0 name mismatches
     #     all_ca_rmsd_after_core_fit 25.619        <- in the same block
-    #     emitted: 41.67 A, is_cryptic true, loop_or_backbone_motion, nanomolar
+    #     emitted: 41.7 A, is_cryptic true, loop_or_backbone_motion, nanomolar
     #
     # That is a WORSE confident answer than the 21.6 A this gate was built to
     # stop, produced from a fit the payload itself scores at 25.6 A. The field
@@ -1818,16 +1833,19 @@ def _cryptic_block(
                 "each domain superposes perfectly on its own. THIS GATE CANNOT "
                 "TELL THEM APART and must not be read as saying (a). Test (b) "
                 "before discarding the pair: fit each domain separately and see "
-                "whether the RMSD collapses. Measured on NLRP3 8SWF, 16.507 A "
-                "over the pair with ZERO positions trimmed and the identical "
-                "16.507 A when restricted to one chain — yet NBD 130-370 "
-                "superposes at 0.57 A over 153 C-alpha and HD2 541-680 at "
-                "0.74 A. That is a genuine NACHT hinge rotation between an open "
-                "octamer and a closed NACHT, not a broken alignment; calling it "
-                "'not superposed' misdiagnoses it exactly the way the TL1A "
-                "numbering-offset message used to. A large core RMSD WITH "
-                "well-superposing subdomains is a hinge and is reportable as "
-                "one. THERE IS NO FLAG FOR THE FIX: the domain-restricted fit "
+                "whether the RMSD collapses. Measured on NLRP3 8SWF vs 9HG4 — "
+                "16.503 A over 476 equivalent C-alpha with ZERO positions "
+                "trimmed, and 16.507 A restricted to a single apo chain, so "
+                "neither a bad chain mapping nor a trimmed outlier explains it "
+                "— yet the same pair restricted to the NBD (130-370) fits at "
+                "1.472 A over 202 C-alpha, to 220-370 at 1.377 A over 151, and "
+                "to HD1 (371-430) at 0.922 A over 58. An order of magnitude, "
+                "per domain. That is a genuine NACHT hinge rotation between an "
+                "open octamer and a closed NACHT, not a broken alignment; "
+                "calling it 'not superposed' misdiagnoses it exactly the way "
+                "the TL1A numbering-offset message used to. A large core RMSD "
+                "WITH well-superposing subdomains is a hinge and is reportable "
+                "as one. THERE IS NO FLAG FOR THE FIX: the domain-restricted fit "
                 "that would recover a hinged pair is cryptic_analysis's "
                 "fit_residue_range / exclude_residues, and pocket_scan does not "
                 "expose either — see superposition_gate._why for why exposing "
@@ -1855,7 +1873,13 @@ def _cryptic_block(
                 "small domain it would refuse a VALID comparison, and nothing "
                 "measured says where it should sit. Treat a refusal that cites "
                 "only this line, on a target that is legitimately small, as an "
-                "untested threshold rather than a finding."
+                "untested threshold rather than a finding. NOTE ALSO THAT THE "
+                "GATED COUNT IS NOW n_fitted_ca, WHICH IS SMALLER: auto_trim's "
+                "min_fit_fraction is 0.5, so a pair with 30 equivalent C-alpha "
+                "can present as few as 15 fitted and refuse where it used to "
+                "pass. On the regression that changes nothing (the smallest "
+                "fitted count measured is 135), but it moves the floor closer "
+                "to a legitimately small target, not further away."
             ),
             "n_residue_name_mismatches": n_mismatch,
             "name_mismatch_denominator": n_overlap,
@@ -1885,7 +1909,7 @@ def _cryptic_block(
                 "over 202 fitted C-alpha with 274 excluded and 0 name "
                 "mismatches — three green lights — beside "
                 "all_ca_rmsd_after_core_fit 25.619 A in the same block, and the "
-                "old gate emitted 41.67 A / is_cryptic true / "
+                "old gate emitted 41.7 A / is_cryptic true / "
                 "loop_or_backbone_motion / nanomolar prior on top of it. "
                 "all_ca_rmsd_after_core_fit is the same rotation scored over "
                 "every equivalent C-alpha, so it cannot be narrowed away and it "
@@ -2908,9 +2932,17 @@ def _select_mdpocket_reference(
 
     Measured on NLRP3 (8SWF, 7ZGU, 9HG4). 8SWF came first, so 7ZGU and 9HG4 were
     dropped at 16.43 and 16.55 A, 1 of 3 survived, and the whole mdpocket stage
-    was refused — while 7ZGU and 9HG4 superpose onto EACH OTHER at 1.301 A, a
-    figure the cryptic stage of the same payload had already measured and
-    printed. One structure cost an entire ensemble by being listed first.
+    was refused — while 7ZGU and 9HG4 superpose onto EACH OTHER at 2.69 A by
+    this stage's own whole-assembly fit, and at 1.301 A in the cryptic stage of
+    the same payload, which had already measured and printed it. One structure
+    cost an entire ensemble by being listed first.
+
+    Verified after the change, on the prepared NLRP3 trio:
+
+        candidate   median RMSD to the rest   would keep
+        8SWF        16.49                     0 of 2      <- was the reference
+        7ZGU         9.559                    1 of 2      <- is now
+        9HG4         9.621                    1 of 2
 
     Lowest MEDIAN RMSD to the rest. Not the first, not the largest, and the
     median specifically: an outlier's own median is large by construction so it
@@ -5059,8 +5091,18 @@ def pocket_scan(
                         else "numbering_mismatch_not_interpretable" if skipped
                         else "no_pocket_to_classify"
                     ),
+                    # `overlap_fraction`, NOT `pocket_interface_overlap`. These
+                    # entries are the raw classification dicts from
+                    # `_classify_site_pocket`; `pocket_interface_overlap` is the
+                    # name the field is RENAMED to when it is copied into
+                    # results[pid]["pocket_vs_interface"], and reading it here
+                    # returned None for every structure at every clustering
+                    # value in every run. Not found by the regression — found by
+                    # reading the TL1A payload it produced, where the whole map
+                    # came back {"1.6": null, "2.4": null} beside overlaps of
+                    # 0.267 and 0.133 sitting one level down in per_structure.
                     "overlap_by_clustering": {
-                        k: c.get("pocket_interface_overlap")
+                        k: c.get("overlap_fraction")
                         for k, c in byd.items()
                     },
                     # THE FLAG TRAVELS WITH THE LABEL. Both halves of the fix are

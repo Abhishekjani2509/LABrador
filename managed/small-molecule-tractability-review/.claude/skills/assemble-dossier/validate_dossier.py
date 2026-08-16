@@ -49,6 +49,14 @@ VERDICT_BASES = frozenset(
 )
 
 REQUIRED_TOP_LEVEL = (
+    # The verbatim echo of the request. Added 2026-08-15, after a downstream
+    # team was told to key a cache on (accession, mechanism_hypothesis,
+    # as_of_date) and discovered none of the three survived into the output, so
+    # the promise was unsupportable. It is an echo and nothing else: never
+    # inferred, never back-filled. `input.uniprot_accession` is what the CALLER
+    # said and `target.uniprot_accession` is the RESOLVED accession, and the
+    # top-level `as_of_date` stays authoritative.
+    "input",
     "target",
     "as_of_date",
     "verdict",
@@ -90,6 +98,12 @@ INTERFACE_CLASSES = frozenset(
         "no_partner_structure",
         "mixed",
         "no_pocket_to_classify",
+        # The seventh, and the aggregation step emits it too: every
+        # classification on the structure was excluded because the numbering
+        # could not be reconciled. An abstention, so it demands nothing — but
+        # rejecting it applies the same laundering pressure `mixed` had, on a
+        # rarer path where nobody would notice.
+        "numbering_mismatch_not_interpretable",
     }
 )
 
@@ -122,6 +136,16 @@ ENUMS: dict[str, frozenset[str]] = {
         {"nanomolar", "micromolar_at_best", "unknown"}
     ),
     "tractability.pocket_vs_interface.classification": INTERFACE_CLASSES,
+    # Rule 4b's off-site guard in `check_site_consistency` reads this with an
+    # exact `== "site_from_density"`. It was in no ENUMS entry, so any other
+    # string passed and the guard silently stopped running — with the geometry
+    # still reported. That guard exists because `site_from_density`'s centroid
+    # sat 29.57 A from the TNF-alpha ligand, which is nearly four times the
+    # 7.73 A error that forced the original retraction. Same dead-guard shape as
+    # the `isinstance(ev, dict)` checks documented in SKILL.md.
+    "tractability.mdpocket_site_definition_used": frozenset(
+        {"site_from_ligand", "site_from_density", "none"}
+    ),
 }
 
 # A key whose value is a source. Presence of any one of these, with a non-empty
@@ -155,11 +179,15 @@ PROVENANCE_KEYS = frozenset(
     }
 )
 
-# fpocket site-selection bases, from pocket-scan/modal_app.py. The two forbidden
-# ones do not identify a site: one is "the most druggable pocket anywhere in the
-# chain", the other is a residue-number match that a homo-oligomer's protomers
-# make ambiguous in principle. Pooling either across an ensemble compares
-# different pockets in different places.
+# fpocket site-selection bases, from pocket-scan/modal_app.py. SIX, and this
+# list was transcribed with five for long enough that three other artifacts
+# copied the wrong count — `no_pocket_overlapped_ligand_site` was missing, which
+# is the basis emitted when a holo ligand site EXISTS and no pocket touches it
+# at that clustering value. That is the exact false negative rule 4 was written
+# around: TNF-alpha scores 0.002 at D=1.6 at a co-crystallised 570 Da ligand,
+# because the channel fragments and the 12-sphere cluster falls below fpocket's
+# `-i 15` floor and is discarded silently. Rejecting the basis forces the case
+# to be laundered rather than reported.
 SELECTION_BASES = frozenset(
     {
         "ligand_site_jaccard",
@@ -167,13 +195,28 @@ SELECTION_BASES = frozenset(
         "site_signature_unreliable_homooligomer",
         "max_druggability_no_ligand_site",
         "no_pocket_matched_site_signature",
+        "no_pocket_overlapped_ligand_site",
     }
 )
+# FOUR of the six do not identify a site. This comment said "two" while the set
+# below held three, which is where `assemble-dossier/SKILL.md`'s "two of its five
+# possible values" came from — a miscount that propagated into three artifacts.
+#
+# Legal to report is not the same as legal to pool.
+# `max_druggability_no_ligand_site` is "the most druggable pocket anywhere in the
+# chain"; `site_signature_unreliable_homooligomer` is a residue-number match a
+# homo-oligomer's protomers make ambiguous in principle;
+# `no_pocket_matched_site_signature` matched nothing; and
+# `no_pocket_overlapped_ligand_site` is the strongest case of all — a ligand site
+# was known and no pocket reached it, so the measurement is anchored to nothing.
+# Pooling any of them across an ensemble compares different pockets in different
+# places.
 NOT_A_SAME_SITE_BASIS = frozenset(
     {
         "max_druggability_no_ligand_site",
         "site_signature_unreliable_homooligomer",
         "no_pocket_matched_site_signature",
+        "no_pocket_overlapped_ligand_site",
     }
 )
 
@@ -305,7 +348,14 @@ SUBSTANTIVE_INTERFACE_CLASSES = frozenset(
 
 # USAN stems. Cheap, and they catch the exact mistake the dossier exists to
 # prevent: an antibody sitting in the small-molecule list.
-BIOLOGIC_NAME_STEMS = ("mab", "cept", "nib-cept")
+#
+# This constant used to carry a third entry, `"nib-cept"`, which is not a USAN
+# stem and could never have matched the `endswith` test — and it did not matter,
+# because nothing read the constant: the rule hardcoded its own tuple. A named
+# constant exists so a reader can see the policy and argue with it, so one that
+# nothing reads is worse than no constant at all. It is now the tuple the rule
+# actually uses.
+BIOLOGIC_NAME_STEMS = ("mab", "cept")
 
 
 # --------------------------------------------------------------------------
@@ -737,7 +787,22 @@ def check_modality_separation(d: dict) -> list[Violation]:
                 )
             if isinstance(entry, dict):
                 mod = entry.get("modality")
-                if mod is not None and mod != "small_molecule":
+                if mod is None:
+                    # A missing modality used to pass. It is the one field where
+                    # silence is the failure: rule 1's whole content is that
+                    # `molecule_type` was READ per drug, and an absent value is
+                    # indistinguishable from never having looked.
+                    v.append(
+                        Violation(
+                            "MODALITY_LEAK",
+                            f"{path}.modality",
+                            "no modality on a small-molecule entry — rule 1 says "
+                            "it is read per drug from "
+                            "chembl.molecule_dictionary.molecule_type, and an "
+                            "absent value says only that it was never read",
+                        )
+                    )
+                elif mod != "small_molecule":
                     v.append(
                         Violation(
                             "MODALITY_LEAK",
@@ -745,7 +810,7 @@ def check_modality_separation(d: dict) -> list[Violation]:
                             f"{mod!r} in a small-molecule block",
                         )
                     )
-            if norm.endswith("mab") or norm.endswith("cept"):
+            if norm.endswith(BIOLOGIC_NAME_STEMS):
                 v.append(
                     Violation(
                         "MODALITY_LEAK",
@@ -1536,6 +1601,26 @@ def check_cryptic_definition(d: dict) -> list[Violation]:
 
 @rule
 def check_null_is_not_zero(d: dict) -> list[Violation]:
+    """A failed measurement is null with a reason; a measured zero is a result.
+
+    The general principle, which this project keeps rediscovering under new
+    names: **a thing that failed to run is not a thing that scored badly.**
+
+    It has now bitten four ways. A decoy that failed to run was read as a decoy
+    that scored badly, and because `analyze.py` filters on `"error" not in r`
+    while a repair pass flushed the artifact after each recovered ligand, five
+    different separation figures were published off one file at five different
+    moments — every one internally consistent, every one a smaller decoy set
+    rather than a worse one. A Paperclip statement timeout was read as zero
+    rows. An unclassifiable ligand was read as apo. A credential failure was
+    read as no data. Each time the absence wore the costume of a measurement,
+    and each time it flattered the instrument.
+
+    That is what this rule is: the structural form of that principle, enforced
+    on the one axis a validator can see. `null` must say why it is null, or it
+    is indistinguishable from a zero somebody forgot to write — and a zero that
+    is *also* listed in `not_found` is claiming to be both.
+    """
     v: list[Violation] = []
     texts = _not_found_texts(d)
     sentinels = {"n/a", "na", "none", "null", "unknown", "not_found", "-", "?", ""}
