@@ -132,6 +132,11 @@ are dead — do not create files under them.
   is one command instead of a hand-authored driver. Confirmed materialized in
   the sandbox and `cat`-ed by the agent. Call ratio moved from 16 MCP / 41
   local to 42 MCP / 36 local.
+- **`how` enum verified on a fresh graph** (g_8ada): 10/10 intervention→target
+  edges came back `inhibits`, against 1/8 before. No verb outside the enum. The
+  remaining `decreases` uses are correct ones — measured quantities, not
+  activity. A `quick` run also surfaced ten distinct IRAK4 inhibitors, each
+  arriving with its target edge unprompted.
 - **`how` is a closed set** — `inhibits` | `activates` | `binds` | `increases` |
   `decreases` | `drives` | `associated_with`, with the distinction the drift
   exposed: **activity is not abundance**. A kinase inhibitor `inhibits`;
@@ -281,9 +286,6 @@ are dead — do not create files under them.
       Facts 1, 2 and 5 are verified (event-level Paperclip calls, raw full-graph
       JSON, and round 2 loading round 1 from memory with `round` incrementing —
       g_5cb6 reached round 7).
-- [ ] **The `how` enum is deployed but unverified on a fresh graph.** Run in
-      flight. Existing graphs are not migrated: changing a verb on an existing
-      pair forks a parallel link, since links key on (from, how, to).
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
