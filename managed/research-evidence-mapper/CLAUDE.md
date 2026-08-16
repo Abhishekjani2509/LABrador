@@ -109,6 +109,14 @@ Run these in order, once.
 6. **Propose name merges** against the **whole graph**, not just this round —
    "KRAS" arriving in round 3 joins the existing "K-Ras" node instead of forking
    it. You propose; the assembly script applies.
+   **Every intervention states its target.** When a compound, inhibitor,
+   knockdown or knockout enters the graph, emit a finding linking it to the
+   protein or gene it acts on (`X inhibits IRAK4`), quoted like any other. Keep
+   the compounds distinct — for "what inhibits IRAK4?", seven compounds is the
+   answer, not one merged node — but without that edge their evidence cannot
+   pool and each supported relationship scores as if it stood alone. Assembly
+   reports unlinked ones in `coverage.interventions_without_target`; a recorded
+   gap is better than an invented edge.
    **Nodes are concepts, not reagents.** `IRAK4 inhibition` is one node;
    `PF-06650833`, `KIC-0101` and `IRAK4 kinase-deficient mice` are conditions
    that belong in `where` and aliases on that node — not four separate nodes.
@@ -234,6 +242,17 @@ found" is a scientific claim. Emitting it because the corpus was unreachable is
 not a degraded answer, it is a fabricated one, and a caller cannot tell.
 
 So, in order:
+
+**0. If the Paperclip tool is not in your tool list at all, stop immediately.**
+That is the same outage as a failing canary, and it is the one shape these
+rules previously missed. It means the server could not be reached or its
+credential was rejected when the session started, so the platform exposed no
+tools for it.
+
+Do **not** go looking for a `paperclip` binary on the filesystem, in `$PATH`,
+or in the environment. There is no local CLI in this sandbox and there is no
+other route to the corpus. Searching for one burns the round and finds nothing.
+Report it exactly as in step 2, with the error naming the missing tool.
 
 **1. Probe first.** Before the real queries, run one cheap canary whose answer
 you already know:

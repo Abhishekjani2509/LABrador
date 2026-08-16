@@ -246,6 +246,38 @@ sentence.
 
 ---
 
+## Every intervention must say what it acts on
+
+**When you create an intervention node — a compound, an inhibitor, a knockdown,
+a knockout, any perturbation — you must also emit a finding linking it to its
+molecular target.** One extra finding, with its own verbatim quote:
+
+```jsonc
+{ "id": "f9", "paper": "p4", "from": "t9", "how": "inhibits", "to": "t1",
+  "says": "yes", "is_own_result": true, "section": "abstract",
+  "where": "biochemical kinase assay",
+  "quote": "PF-06650833 is a potent and selective inhibitor of IRAK4." }
+```
+
+Keep the compounds distinct — do **not** collapse them into one "IRAK4
+inhibition" node. For a question like *what inhibits IRAK4?*, seven separate
+compounds is the correct answer and merging them destroys it. What makes their
+evidence poolable is the **edge**, not sameness.
+
+Observed when this was missing: a graph reached seven IRAK4-inhibitor nodes and
+only two stated the target. The other five floated with no path to IRAK4, so
+every relationship they supported scored as a lone `single_source` link, and
+`resolve_link` on any of them could not reach the others' evidence. The
+literature said the same thing five times; the graph could not tell.
+
+The target link is usually the easiest quote in the paper — it is in the title
+or the first line of the abstract, because it is what the paper is about.
+
+**If you genuinely cannot find a quote naming the target, do not invent one.**
+Emit the intervention node without the link and let it be reported: assembly
+lists unlinked interventions in `coverage.interventions_without_target`. An
+unsupported edge is worse than a recorded gap.
+
 ## Resolve proteins to a UniProt accession — by the evidence, not the name
 
 Names fragment a graph in both directions, so identity is carried by an

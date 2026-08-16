@@ -36,7 +36,10 @@ other by `id`. Nothing nested.
     "found": 412,                // results the search reported existing
     "read": 43, "used": 40,      // abstracts pulled / papers yielding a finding
     "truncated": true,           // true = a sample, not the literature
-    "no_quote_discarded": 6,     // claims with no verbatim sentence (only removal)
+    "no_quote_discarded": 6,
+    "duplicates_dropped": 0,
+    "interventions_without_target": ["t6"],
+    "interventions_without_target_count": 1,     // claims with no verbatim sentence (only removal)
     "limits": { "max_papers": 50, "max_queries": 6 },
     "stop_reason": "max_papers"  // max_papers|queries_exhausted|no_new_results|time_limit|complete|search_unavailable
   },

@@ -233,6 +233,19 @@ are dead — do not create files under them.
       only). Credential rotation is a one-call vault update, so this is not
       blocking — but the deployed agent's searches stop whenever the token
       behind the vault entry lapses.
+- [~] **Interventions must link to their target.** Accession merging fixed
+      protein nodes but structurally could not touch the fragmentation that
+      actually mattered: small molecules have no UniProt accession. A run then
+      grew the reagent nodes from four to SEVEN (KIC-0101, PF-06650833,
+      KT-474, ND2158, BI1543673, an adenoviral knockdown, a knockout mouse) of
+      which only two stated their target — the other five floated with no path
+      to IRAK4, so every relationship they supported scored as a lone
+      single_source link. Decision (Soliman's call): do NOT collapse compounds
+      into a class node — for "what inhibits IRAK4?" seven compounds IS the
+      answer. Require the EDGE instead, so evidence pools along the mechanism
+      path while the compounds stay distinct. Shipped in claim-extraction and
+      CLAUDE.md step 6; assembly reports unlinked ones in
+      `coverage.interventions_without_target`. Deployed v7, test in flight.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node —
       a contract change against a LIVE consumer (Rafal's `graph-intake` already
       reads mapper graphs), so it needs his sign-off rather than a unilateral

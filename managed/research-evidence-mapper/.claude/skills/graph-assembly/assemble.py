@@ -499,6 +499,39 @@ def _link_papers(link, findings_by_id):
     return out
 
 
+_INTERVENTION_KINDS = ("small_molecule", "method")
+_TARGET_KINDS = ("protein", "gene")
+
+
+def interventions_without_target(things, links):
+    """Intervention nodes carrying no edge to a protein or gene.
+
+    An intervention that never says what it acts on cannot pool its evidence
+    with anything. A real graph reached seven IRAK4-inhibitor nodes -- KIC-0101,
+    PF-06650833, KT-474, ND2158, BI1543673, an adenoviral knockdown and a
+    knockout mouse -- of which only two stated the target, so five sat isolated
+    and every relationship they supported was scored as if it stood alone.
+
+    Collapsing them into one node would be the wrong repair: for "what inhibits
+    IRAK4?" seven distinct compounds IS the answer, and merging destroys it.
+    The fix is the edge, not the merge -- with `X inhibits IRAK4` present,
+    evidence pools along the mechanism path while the compounds stay distinct.
+
+    Reported, never dropped. This is a coverage fact, like a gap.
+    """
+    kind = {t.get("id"): t.get("kind") for t in things}
+    linked = set()
+    for l in links:
+        a, b = l.get("from"), l.get("to")
+        if kind.get(a) in _INTERVENTION_KINDS and kind.get(b) in _TARGET_KINDS:
+            linked.add(a)
+        if kind.get(b) in _INTERVENTION_KINDS and kind.get(a) in _TARGET_KINDS:
+            linked.add(b)
+    return sorted(t.get("id") for t in things
+                  if t.get("kind") in _INTERVENTION_KINDS
+                  and t.get("id") not in linked)
+
+
 def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None,
               round_n=None, findings=None):
     """Open triangles: A-B and B-C exist, A-C does not.
@@ -830,6 +863,9 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
 
     cov = dict(coverage or {})
     cov["no_quote_discarded"] = cov.get("no_quote_discarded", 0) + discarded
+    orphans = interventions_without_target(things, links)
+    cov["interventions_without_target"] = orphans
+    cov["interventions_without_target_count"] = len(orphans)
     if duplicates:
         cov["duplicates_dropped"] = cov.get("duplicates_dropped", 0) + duplicates
 
