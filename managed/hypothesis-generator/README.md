@@ -270,6 +270,30 @@ under the table, because a flag in a cell is easy to skim past.
 `test_every_mode_keeps_the_signals_a_reader_must_not_miss` is what stops a
 fifth mode from quietly becoming a softer one.
 
+**The trace diagram** is a static SVG of the walks the deterministic half
+found, written by `--emit-diagram FILE.svg`:
+
+```bash
+hypgen --report-from runs/my-run/slate.json --emit-diagram runs/my-run/traces.svg
+```
+
+Edges are coloured by what the evidence says. There is no "contradicted" flag
+on a link — a link carries `yes`, `no` and `no_effect` lists of finding ids, so
+**red** means at least one finding argues against the edge (or reports no
+effect), **blue** means every finding supports it, and **grey** means no
+verbatim finding at all. Dashes are a separate axis: dashed is `single_source`,
+solid means more than one research group. The `✓ ✗ ∅` counts on each label say
+how many findings sit on each side. Nodes are deduplicated across traces, so
+two hypotheses crossing the same node visibly converge, and rows are ordered by
+a barycentre pass so the edges do not knot.
+
+The finely dotted grey edge is the hypothesis itself — the edge the graph does
+*not* have. It matters most on an `analogical_transfer`, where the solid edge
+belongs to the analogue: on the demo graph the drawn `L8` runs
+nintedanib → SSc-ILD, and pirfenidone reaches SSc-ILD only by the dotted
+proposal. SVG rather than PNG because it needs no plotting dependency, it
+diffs, and it embeds in a page unchanged.
+
 **The web UI payload** is the second adapter, next to `valuation.py`:
 `webui.emit(slate)` returns one JSON card per hypothesis, written by
 `--emit-webui FILE` on a run or recovered from a saved slate:
