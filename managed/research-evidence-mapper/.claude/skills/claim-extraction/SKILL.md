@@ -246,6 +246,54 @@ sentence.
 
 ---
 
+## Resolve proteins to a UniProt accession — by the evidence, not the name
+
+Names fragment a graph in both directions, so identity is carried by an
+accession wherever one exists. Paperclip serves the protein corpus:
+
+```
+search -s proteins "IRAK4 interleukin-1 receptor-associated kinase 4 human"
+  -> IRAK4  Q9NWZ3  Homo sapiens · 460 aa
+     IRAK1  P51617  Homo sapiens          <- near-miss, different gene
+     IRAK4  Q1RMT8  Bos taurus            <- same name, different species
+     Irak4  Q8R4K2  (mouse)
+cat /proteins/Q9NWZ3/meta.json
+```
+
+Put it on the thing:
+
+```jsonc
+{ "id": "t5", "name": "IL-6", "kind": "protein",
+  "uniprot_accession": "P08887", "gene_symbol": "IL6R",
+  "resolved_by": "f7 quote says 'IL-6 receptor blockade'",
+  "ambiguity": ["P05231 IL6 — name matches, evidence does not"] }
+```
+
+**Resolve from the quote, not the label.** The string "IL-6" resolves to
+P05231, the ligand. If the finding behind that node is receptor-blockade data,
+the protein is P08887 — a different molecule. The name is evidence about what
+the author typed; the quote is evidence about what was measured, and only the
+second one identifies the protein.
+
+**`ambiguity` is the field that earns its keep.** When name and evidence
+disagree, or two accessions remain plausible, list the rejected candidates with
+the reason. A node carrying a non-empty `ambiguity` is **never used as a merge
+key** — an unresolved identity must not silently propagate through every link
+that touches it. Leaving `uniprot_accession` off entirely is better than
+guessing: no accession falls back to name matching, a wrong accession merges
+two different proteins.
+
+**Species is part of identity.** "IRAK4" alone matches human, mouse and bovine
+entries. Take the organism from the paper's methods — the same `where` you
+already record — and pick the matching accession. Accessions make this safe
+mechanically, since Q9NWZ3 and Q8R4K2 are simply different keys, but only if
+you look.
+
+**Not everything gets one.** Diseases, processes, methods and small molecules
+have no UniProt entry; leave the field off. For an intervention node, the
+accession of its *target* belongs in the finding's `where` or on the target
+node, not on the intervention.
+
 ## Node granularity — the intervention class is the node, the reagent is a condition
 
 This is the single most consequential modelling decision you make, and getting
