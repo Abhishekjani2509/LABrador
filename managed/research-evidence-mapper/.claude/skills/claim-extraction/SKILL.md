@@ -246,6 +246,57 @@ sentence.
 
 ---
 
+## Node granularity — the intervention class is the node, the reagent is a condition
+
+This is the single most consequential modelling decision you make, and getting
+it wrong is invisible until scores are already wrong.
+
+A node is a **concept**, not a reagent. `IRAK4 inhibition` is a node.
+`PF-06650833`, `KIC-0101`, `adenovirus-mediated IRAK4 knockdown` and
+`IRAK4 kinase-deficient mice` are **not four nodes** — they are four ways of
+doing the same thing, and they belong in `where`, with the compound name also
+added to the node's `aliases`.
+
+Observed on a real graph when this went wrong:
+
+```
+L3  adenovirus-mediated IRAK4 knockdown --decreases--> synovitis
+L4  KIC-0101                            --decreases--> synovitis
+L6  PF-06650833                         --decreases--> RA fibroblast-like synoviocytes
+L5  IRAK4 kinase-deficient mice         --decreases--> arthritis
+```
+
+Four `single_source` links where the literature actually supports one link with
+four independent papers behind it. Two things break at once:
+
+- **Evidence cannot pool.** `agreement`, `evidence_quality` and `independence`
+  are computed per link. Splitting one relationship across four nodes gives
+  four lonely links instead of one well-supported one, and every confidence in
+  that neighbourhood is understated.
+- **`resolve_link` cannot do its job.** Asked for more evidence on one link, it
+  searches the relationship, finds a paper using a different reagent, and is
+  forced to create a *new* node and a *new* link. The target never moves. That
+  is not the ask misbehaving; it is this modelling error surfacing downstream.
+
+**The rule.** If the claim is about the mechanism or class, the node is the
+class and the reagent goes in `where`:
+
+```jsonc
+{ "from": "t1", "how": "suppresses", "to": "t3", "says": "yes",
+  "where": "PF-06650833 100 nM, RA FLS, TLR ligands",   // the reagent lives here
+  "quote": "…" }
+```
+
+**The exception.** When the claim is *about the compound specifically* — a
+head-to-head comparison, a selectivity or off-target result, a
+pharmacokinetics finding — then the compound is genuinely the subject and gets
+its own node. "Drug A outperformed drug B" is a claim about A and B. "IRAK4
+inhibition reduced cytokines" is a claim about the class, whichever molecule
+was used.
+
+When in doubt, ask what the paper is *arguing*. If swapping the reagent for
+another of the same class would leave the claim intact, the class is the node.
+
 ## Failure modes
 
 This is the long section because this is the part that actually goes wrong.

@@ -208,10 +208,25 @@ are dead — do not create files under them.
       The fix was framing: "read figures on X only, and only for a paper
       that…" reads as a reason not to; "reading figures is expected, with a
       budget of 6 per round" reads as an instruction.
-- [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64` at
-      `changed_in_round: 1`; the round added a neighbouring link instead. For
-      an ask whose whole purpose is "more evidence on this exact relationship",
-      leaving the target untouched is a miss.
+- [~] **`resolve_link` did not move its target — root cause found: node
+      granularity, not the ask.** The graph had built FOUR nodes for one
+      concept: `adenovirus-mediated IRAK4 knockdown`, `KIC-0101`,
+      `PF-06650833`, `IRAK4 kinase-deficient mice`. Every new paper uses a
+      different reagent, so new evidence necessarily lands on a different
+      `from` node and creates a NEW link — the target can never move, by
+      construction. It also understates confidence everywhere: `agreement`,
+      `evidence_quality` and `independence` are per link, so one relationship
+      split four ways gives four `single_source` links instead of one `agreed`
+      link with four independent papers.
+      Fixed in claim-extraction and CLAUDE.md step 6: **the node is the
+      intervention class, the reagent is a condition in `where`** (plus an
+      alias), with an explicit exception for claims about a compound itself
+      (head-to-head, selectivity, PK). Deployed v5; re-test in flight.
+      NOTE: my first hypothesis was verb fragmentation via an uncontrolled
+      `how` vocabulary — that was WRONG, the graph uses 3 verbs with no
+      duplicate pairs. Recording it because §6 item 6 (the `how` enum) is on
+      the ratification agenda and this is evidence it is not the pressing
+      problem; node granularity is.
 - [x] **Ratio re-measured — and the prediction was wrong.** v4 round: 16 MCP
       vs 41 local calls, i.e. local went UP. The CLI *is* used (confirmed in
       the session trace, not the console stream — the console does not render

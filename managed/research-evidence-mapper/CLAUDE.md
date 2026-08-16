@@ -109,6 +109,15 @@ Run these in order, once.
 6. **Propose name merges** against the **whole graph**, not just this round —
    "KRAS" arriving in round 3 joins the existing "K-Ras" node instead of forking
    it. You propose; the assembly script applies.
+   **Nodes are concepts, not reagents.** `IRAK4 inhibition` is one node;
+   `PF-06650833`, `KIC-0101` and `IRAK4 kinase-deficient mice` are conditions
+   that belong in `where` and aliases on that node — not four separate nodes.
+   Splitting one relationship across four reagents yields four `single_source`
+   links where the literature supports one `agreed` link, understates every
+   confidence in that neighbourhood, and makes `resolve_link` unable to deepen
+   its target, because new evidence always arrives under a different node. The
+   exception is a claim about the compound *itself* — a head-to-head, a
+   selectivity or PK result — where the compound is genuinely the subject.
 7. **Assemble.** Write this round's `round.json` and run the graph-assembly
    script **once** — `assemble.py --input round.json --memory-dir
    /mnt/memory/research-evidence-mapper --save`. Dedup, scoring, link
