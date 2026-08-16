@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import labrador_roi.replay as replay_module
 from labrador_roi.comparables import ComparableSet
 from labrador_roi.engine import analyze_program
 from labrador_roi.models import ProgramInput
@@ -54,4 +55,19 @@ def test_replay_rejects_an_engine_version_mismatch() -> None:
     payload["engine_version"] = "obsolete-engine"
 
     with pytest.raises(ReplayVerificationError, match="engine version mismatch"):
+        replay_analysis(payload)
+
+
+def test_replay_rejects_a_schema_version_mismatch_before_recomputation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _analysis_payload()
+    payload["schema_version"] = "obsolete-schema"
+
+    def fail_if_recomputed(*args: object, **kwargs: object) -> None:
+        pytest.fail("schema compatibility must be checked before recomputation")
+
+    monkeypatch.setattr(replay_module, "analyze_program", fail_if_recomputed)
+
+    with pytest.raises(ReplayVerificationError, match="schema version mismatch"):
         replay_analysis(payload)

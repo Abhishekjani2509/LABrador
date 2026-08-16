@@ -25,6 +25,7 @@ from labrador_roi.models import (
     CalculationStep,
     DecisionGrade,
     EvidenceMetadata,
+    Modality,
     PriceBasis,
     ProgramInput,
     WarningRecord,
@@ -41,8 +42,8 @@ from labrador_roi.pricing import (
 from labrador_roi.provenance import redact, sha256_digest, utc_now
 from labrador_roi.simulation import SimulationAssumptions, SimulationResult, simulate_program
 
-SCHEMA_VERSION = "1.2.0"
-ENGINE_VERSION = "0.3.0"
+SCHEMA_VERSION = "1.3.0"
+ENGINE_VERSION = "0.4.0"
 
 
 class _FrozenModel(BaseModel):
@@ -485,6 +486,7 @@ def _supported(metadata: EvidenceMetadata | None) -> bool:
 def _cashflow_evidence_status(
     program: ProgramInput,
     indication_ids: list[str],
+    available_comparable_ids: set[str] | None = None,
 ) -> dict[str, bool]:
     patent_fields = ["filing_year"]
     if program.patent.extension_years > 0:
@@ -500,7 +502,39 @@ def _cashflow_evidence_status(
         ),
         "cashflow.development_path": bool(program.development.stage_costs)
         or program.development.program_probability_of_approval is not None,
+        "cashflow.development_cost_path": bool(program.development.stage_costs)
+        or program.development.is_post_approval,
     }
+    if program.modality == Modality.ANTIBODY:
+        loe_fields = ("loe_price_retention", "loe_volume_retention")
+        loe_group = program.evidence.get("loe_retention")
+        effective_exclusivity_end = program.patent.effective_exclusivity_end_year
+        latest_launch = max(program.indication(item).launch_year for item in indication_ids)
+        default_horizon = int(max(effective_exclusivity_end + 5, latest_launch + 10))
+        forecast_end_year = int(program.assumptions.get("forecast_end_year", default_horizon))
+        required_loe_periods = max(
+            0,
+            math.ceil(forecast_end_year + 1 - effective_exclusivity_end),
+        )
+        loe_paths = tuple(program.assumptions.get(field_name) for field_name in loe_fields)
+        status["cashflow.antibody_loe_retention"] = all(
+            field_name in program.assumptions for field_name in loe_fields
+        ) and (
+            _supported(loe_group)
+            or all(_supported(program.evidence.get(field_name)) for field_name in loe_fields)
+        )
+        status["cashflow.antibody_loe_horizon"] = all(
+            isinstance(path, (list, tuple)) and len(path) >= required_loe_periods
+            for path in loe_paths
+        )
+        status["cashflow.antibody_comparator_selection"] = all(
+            bool(program.indication(indication_id).comparator_ids)
+            and len(program.indication(indication_id).comparator_ids)
+            == len(set(program.indication(indication_id).comparator_ids))
+            and available_comparable_ids is not None
+            and set(program.indication(indication_id).comparator_ids) <= available_comparable_ids
+            for indication_id in indication_ids
+        )
     reported_probability = program.development.program_probability_of_approval
     if reported_probability is not None:
         stage_probabilities = program.development.stage_success_probabilities.values()
@@ -663,7 +697,11 @@ def _cashflow_from_program(
     effective_exclusivity_end = program.patent.effective_exclusivity_end_year
     latest_launch = max(program.indication(item).launch_year for item in indication_ids)
     default_horizon = int(max(effective_exclusivity_end + 5, latest_launch + 10))
-    cashflow_evidence_status = _cashflow_evidence_status(program, indication_ids)
+    cashflow_evidence_status = _cashflow_evidence_status(
+        program,
+        indication_ids,
+        {item.comparable_id for item in comparables.comparables},
+    )
     reconciliation_key = "cashflow.development_probability_reconciliation"
     if cashflow_evidence_status.get(reconciliation_key) is False:
         stage_product = math.prod(program.development.stage_success_probabilities.values())
@@ -898,15 +936,36 @@ def analyze_program(
     pricing_results: tuple[PricingResult, ...] = ()
     adapter_warnings: list[WarningRecord] = []
     if isinstance(program, ProgramCashFlowInputs):
+        program = ProgramCashFlowInputs.model_validate(
+            program.model_dump(mode="python", warnings=False)
+        )
         cashflow_inputs = program
         raw_comparables = ComparableSet(comparables=[])
         source_object: Any = {"cashflow_inputs": program}
-        critical_evidence_status = {"cashflow_inputs": program.critical_inputs_supported}
+        low_level_supported = bool(
+            program.critical_inputs_supported and program.evidence_references
+        )
+        critical_evidence_status = {"cashflow_inputs": low_level_supported}
+        if program.critical_inputs_supported and not program.evidence_references:
+            adapter_warnings.append(
+                WarningRecord(
+                    code="MISSING_LOW_LEVEL_EVIDENCE",
+                    field="cashflow_inputs.evidence_references",
+                    severity=WarningSeverity.ERROR,
+                    message=(
+                        "Low-level cash-flow inputs cannot qualify for decision grade without "
+                        "evidence references."
+                    ),
+                )
+            )
     else:
+        program = ProgramInput.model_validate(program.model_dump(mode="python", warnings=False))
         if comparables is None:
             raw_comparables = ComparableSet(comparables=[])
         elif isinstance(comparables, ComparableSet):
-            raw_comparables = comparables
+            raw_comparables = ComparableSet.model_validate(
+                comparables.model_dump(mode="python", warnings=False)
+            )
         else:
             raw_comparables = ComparableSet.model_validate({"comparables": comparables})
         cashflow_inputs, pricing_results, adapter_warnings = _cashflow_from_program(
@@ -916,7 +975,11 @@ def analyze_program(
         modeled_indications = [program.initial_indication.indication_id]
         if program.expansion_indications:
             modeled_indications.append(program.expansion_indications[0].indication_id)
-        critical_evidence_status = _cashflow_evidence_status(program, modeled_indications)
+        critical_evidence_status = _cashflow_evidence_status(
+            program,
+            modeled_indications,
+            {item.comparable_id for item in raw_comparables.comparables},
+        )
         for result in pricing_results:
             critical_evidence_status.update(
                 {

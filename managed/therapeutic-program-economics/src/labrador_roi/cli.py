@@ -36,6 +36,33 @@ DEMO_COMPARABLES_JSON = FIXTURE_DIR / "demo_comparables.json"
 DEMO_COMPARABLES_CSV = FIXTURE_DIR / "demo_comparables.csv"
 
 
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    package = importlib.import_module("labrador_roi")
+    engine = importlib.import_module("labrador_roi.engine")
+    typer.echo(
+        f"labrador {package.__version__} "
+        f"(engine {engine.ENGINE_VERSION}, schema {engine.SCHEMA_VERSION})"
+    )
+    raise typer.Exit()
+
+
+@app.callback()
+def main(
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show package, engine, and schema versions, then exit.",
+        ),
+    ] = False,
+) -> None:
+    """Run LABrador's interpretable therapeutic program economics commands."""
+
+
 @dataclass(frozen=True)
 class DomainAPI:
     """Resolved engine symbols, loaded lazily to keep CLI errors actionable."""

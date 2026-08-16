@@ -7,9 +7,11 @@ with a population, income, price, or probability default.
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date
 from enum import StrEnum
+from itertools import pairwise
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -126,8 +128,11 @@ class PayerType(StrEnum):
 
 
 class Modality(StrEnum):
+    """Supported therapeutic modalities without implicit economic assumptions."""
+
     SMALL_MOLECULE = "SMALL_MOLECULE"
     PEPTIDE = "PEPTIDE"
+    ANTIBODY = "ANTIBODY"
 
 
 class WarningSeverity(StrEnum):
@@ -336,18 +341,37 @@ class DevelopmentAssumptions(BaseModel):
     evidence: dict[str, EvidenceMetadata] = Field(default_factory=dict)
     assumptions: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator(
+        "stage_costs",
+        "stage_durations_years",
+        "stage_success_probabilities",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_mapping_values(cls, value: Any) -> Any:
+        if isinstance(value, dict) and any(isinstance(item, bool) for item in value.values()):
+            raise ValueError("development mapping values cannot be boolean")
+        return value
+
+    @field_validator("program_probability_of_approval", mode="before")
+    @classmethod
+    def reject_boolean_aggregate_probability(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("program approval probability cannot be boolean")
+        return value
+
     @field_validator("stage_costs", "stage_durations_years")
     @classmethod
     def validate_nonnegative_mapping(cls, value: dict[str, float]) -> dict[str, float]:
-        if any(item < 0 for item in value.values()):
-            raise ValueError("costs and durations must be non-negative")
+        if any(not math.isfinite(item) or item < 0 for item in value.values()):
+            raise ValueError("costs and durations must be finite and non-negative")
         return value
 
     @field_validator("stage_success_probabilities")
     @classmethod
     def validate_probability_mapping(cls, value: dict[str, float]) -> dict[str, float]:
-        if any(item < 0 or item > 1 for item in value.values()):
-            raise ValueError("stage success probabilities must be between 0 and 1")
+        if any(not math.isfinite(item) or item < 0 or item > 1 for item in value.values()):
+            raise ValueError("stage success probabilities must be finite and between 0 and 1")
         return value
 
     @model_validator(mode="after")
@@ -364,6 +388,23 @@ class DevelopmentAssumptions(BaseModel):
                 raise ValueError("stage_order cannot contain duplicate stage names")
             if set(self.stage_order) != cost_names:
                 raise ValueError("stage_order must contain every costed stage exactly once")
+        ordered_names = (
+            tuple(self.stage_order)
+            if self.stage_order
+            else tuple(sorted(self.stage_costs, key=development_stage_sort_key))
+        )
+        if ordered_names:
+            if _normalized_stage_name(self.current_stage) != _normalized_stage_name(
+                ordered_names[0]
+            ):
+                raise ValueError("current_stage must match the first modeled stage")
+            known_ranks = [
+                _STAGE_RANKS[normalized]
+                for name in ordered_names
+                if (normalized := _normalized_stage_name(name)) in _STAGE_RANKS
+            ]
+            if any(left > right for left, right in pairwise(known_ranks)):
+                raise ValueError("known lifecycle stages must be chronological")
         return self
 
     def ordered_stage_names(self) -> tuple[str, ...]:
@@ -372,6 +413,17 @@ class DevelopmentAssumptions(BaseModel):
         if self.stage_order:
             return tuple(self.stage_order)
         return tuple(sorted(self.stage_costs, key=development_stage_sort_key))
+
+    @property
+    def is_post_approval(self) -> bool:
+        """Whether no remaining development cost path is expected for the declared stage."""
+
+        return _normalized_stage_name(self.current_stage) in {
+            "approval",
+            "approved",
+            "launched",
+            "marketed",
+        }
 
 
 class IndicationInput(BaseModel):
@@ -432,6 +484,15 @@ class ProgramInput(BaseModel):
     development: DevelopmentAssumptions
     evidence: dict[str, EvidenceMetadata] = Field(default_factory=dict)
     assumptions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("modality", mode="before")
+    @classmethod
+    def normalize_modality(cls, value: Any) -> Any:
+        """Accept case-insensitive serialized values while retaining one canonical enum."""
+
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
 
     @field_validator("currency")
     @classmethod

@@ -88,7 +88,8 @@ The dashboard provides five coordinated views:
 The Pydantic contracts in `src/labrador_roi/models.py` are authoritative. A `ProgramInput`
 contains:
 
-- asset identity, modality, route, valuation/base years, and currency;
+- asset identity, modality (`SMALL_MOLECULE`, `PEPTIDE`, or `ANTIBODY`), route,
+  valuation/base years, and currency;
 - an initial indication and optional expansion indications;
 - population stock/flow, health-system access gates, and separately labeled income bands;
 - patent filing term and any explicitly assumed extension;
@@ -240,8 +241,14 @@ must remain visible in the output and may keep the result `NOT_DECISION_GRADE`.
 
 - COGS is an evidenced program input. LABrador does not infer manufacturing cost from SMILES,
   peptide sequence, synthetic-accessibility scores, or an SPPS yield model.
-- Development probabilities are program inputs; no hidden small-molecule/peptide modality
-  multiplier or therapeutic-area prior is applied.
+- Development probabilities are program inputs; no hidden modality multiplier or therapeutic-area
+  prior is applied. Antibody programs must supply the same explicit development, COGS, route, and
+  commercial assumptions as every other modality.
+- Antibody programs must also supply explicit LOE price/volume retention paths with supported
+  evidence to qualify as `DECISION_GRADE`; LABrador does not infer a biologic erosion curve, BLA
+  pathway, exclusivity period, or IRA clock from modality alone.
+- Comparable records do not yet carry modality. Antibody analyses must use deliberate
+  `comparator_ids` selection and inspect the exposed clinical-placement and route matches.
 - The cash-flow MVP values one initial indication and one expansion. Additional expansions are
   rejected from decision-grade use instead of being silently ignored.
 - IRA/MFP timing, tax-loss carryforwards, a configurable cross-driver correlation matrix, and
