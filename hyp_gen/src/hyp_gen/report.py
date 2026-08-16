@@ -4,6 +4,19 @@ The order of each section is chosen so a skeptical reader hits the weakest part
 first: statement, then what would kill it, then the criticism, then the
 evidence, then the caveats. A report that leads with the evidence reads as
 advocacy.
+
+Two detail levels, because those are two different readers. ``brief`` -- the
+default, and what ``report.md`` holds -- answers the four questions someone has
+in front of a slate: what is the idea, is it any good, what would kill it, what
+do I do next. ``full`` adds the claims table, the per-claim citations, the
+gate table and the verbatim source sentences: the audit trail, for someone
+checking the work rather than reading it.
+
+Brief is a shorter *view*, never a softer one. Every signal that a reader must
+not miss -- a failure badge, a halted verification, the absence-of-evidence
+warning, an error-level validation issue -- renders at both levels. What brief
+drops is corroboration and detail, all of which survives in ``slate.json``, so a
+brief report can always be re-rendered into a full one.
 """
 
 from __future__ import annotations
@@ -51,6 +64,148 @@ def _failure_badges(hypothesis: Hypothesis) -> list[str]:
     if errors and not badges:
         badges.append("**INVALID — see validation**")
     return badges
+
+
+_SCORE_LABELS = [
+    ("support", "support"),
+    ("novelty", "novelty"),
+    ("testability", "testability"),
+    ("contradiction_risk", "risk"),
+]
+
+
+def _scores_inline(hypothesis: Hypothesis) -> str:
+    """The same numbers as ``_scores_block`` on one line, without the meters."""
+    parts = [
+        f"{label} {hypothesis.scores[key]:.2f}"
+        for key, label in _SCORE_LABELS
+        if key in hypothesis.scores
+    ]
+    if hypothesis.rank_score is not None:
+        parts.append(f"**rank {hypothesis.rank_score:.2f}**")
+    return " · ".join(parts)
+
+
+def _chain(hypothesis: Hypothesis) -> str:
+    """The path as one arrow chain.
+
+    The full renderer gives each hop its own line with link id, state and
+    support, which is what an auditor needs. A reader trying to understand the
+    idea needs the shape, and the shape fits on one line.
+    """
+    if not hypothesis.path:
+        return ""
+    parts = [hypothesis.subject_name]
+    for step in hypothesis.path:
+        arrow = f"←{step['how']}—" if step["reversed"] else f"—{step['how']}→"
+        parts.append(f"{arrow} {step['to_name']}")
+    return " ".join(parts)
+
+
+def _dropped_detail(hypothesis: Hypothesis) -> str:
+    """Name what brief mode is not showing.
+
+    A reader who cannot tell that detail was withheld will read a brief report
+    as the whole record — the same mistake as reading a truncated search as an
+    exhaustive one. So the count is stated even though the content is not.
+    """
+    art = hypothesis.articulation
+    counts: list[str] = []
+    if art:
+        if art.claims:
+            counts.append(f"{len(art.claims)} claims")
+        if art.assumptions:
+            counts.append(f"{len(art.assumptions)} assumptions")
+        if art.predictions:
+            counts.append(f"{len(art.predictions)} predictions")
+    findings = hypothesis.evidence.get("findings") or {}
+    if findings:
+        counts.append(f"{len(findings)} source sentences")
+    if len(hypothesis.critiques) > 1:
+        counts.append(f"{len(hypothesis.critiques) - 1} more critique(s)")
+    if not counts:
+        return ""
+    return (
+        f"<sub>Not shown: {', '.join(counts)}, the mechanism write-up and the "
+        "gate table — all of it in `slate.json`. Recover with "
+        "`hypgen --report-from slate.json --full-report --out .`</sub>"
+    )
+
+
+def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
+    art = hypothesis.articulation
+    out: list[str] = []
+    title = art.statement if art else (
+        f"{hypothesis.subject_name} → {hypothesis.object_name} "
+        f"({hypothesis.motif.replace('_', ' ')})"
+    )
+    out.append(f"## {position}. {title}")
+    out.append("")
+
+    badges = [f"`{hypothesis.motif}`", f"{hypothesis.hops} hop(s)"]
+    if hypothesis.verification:
+        badges.append(f"**{hypothesis.verification.verdict.upper()}**")
+    if hypothesis.verdict:
+        badges.append(hypothesis.verdict.replace("_", " "))
+    badges.extend(_failure_badges(hypothesis))
+    out.append(" · ".join(badges))
+    out.append("")
+    out.append(_scores_inline(hypothesis))
+    out.append("")
+
+    chain = _chain(hypothesis)
+    if chain:
+        out.append(f"**Chain.** {chain}")
+        out.append("")
+
+    if art:
+        out.append(f"**Killed by.** {art.falsifier}")
+        out.append("")
+        out.append(f"**Next experiment.** {art.decisive_experiment}")
+        out.append("")
+
+    # One objection, not all of them: the critics are ordered so the first lens
+    # is the one that most nearly sank it. The rest are corroboration, and
+    # corroboration is what brief mode is allowed to drop.
+    if hypothesis.critiques:
+        critique = hypothesis.critiques[0]
+        out.append(
+            f"**Biggest objection — {critique.lens or 'general'} "
+            f"({critique.verdict}).**"
+        )
+        out.append("")
+        out.append(f"> {critique.strongest_objection}")
+        out.append("")
+
+    # A halt means the gates below it never ran. Dropping that from the short
+    # view would turn a partial verification into a clean-looking one.
+    if hypothesis.verification and hypothesis.verification.halted_at:
+        halted = hypothesis.verification.halted_at
+        gate = hypothesis.verification.gate(halted)
+        out.append(
+            f"> Verification stopped at **{halted}**: {gate.summary if gate else ''} "
+            "Every gate below it was not run, and none of them should be read as passed."
+        )
+        out.append("")
+
+    if hypothesis.caveats:
+        out.append("**Caveats**")
+        out.extend(f"- {c}" for c in hypothesis.caveats)
+        out.append("")
+
+    # Warnings are detail; errors mean the hypothesis is invalid, and that
+    # travels at every detail level.
+    errors = [i for i in hypothesis.issues if i.severity == "error"]
+    if errors:
+        out.append("**Validation**")
+        out.extend(f"- ❌ `{i.code}` {i.detail}" for i in errors)
+        out.append("")
+
+    dropped = _dropped_detail(hypothesis)
+    if dropped:
+        out.append(dropped)
+        out.append("")
+    return "\n".join(out)
 
 
 def _hypothesis_md(hypothesis: Hypothesis, position: int) -> str:
@@ -192,9 +347,33 @@ def _hypothesis_md(hypothesis: Hypothesis, position: int) -> str:
     return "\n".join(out)
 
 
-def to_markdown(slate: Slate) -> str:
+def _header(slate: Slate, detail: str) -> list[str]:
     cov = slate.coverage
-    out = [
+    verification = " · ".join(
+        f"{slate.counts.get(f'verification_{v}', 0)} {v}"
+        for v in ("verified", "qualified", "unverified", "rejected")
+    )
+    if detail == "brief":
+        # Four lines instead of ten. The truncation flag stays inline rather
+        # than moving to a footnote: it is the number that decides how much any
+        # novelty score below is worth.
+        return [
+            f"# Hypotheses — {slate.graph_id} (round {slate.round})",
+            "",
+            f"**{slate.question}**" if slate.question else "",
+            "",
+            f"{len(slate.hypotheses)} hypotheses · {verification} · "
+            f"{slate.counts.get('model_calls', 0)} model calls",
+            "",
+            f"Graph: {slate.counts.get('things', 0)} things, "
+            f"{slate.counts.get('links', 0)} links, "
+            f"{slate.counts.get('findings', 0)} findings. "
+            f"Read {cov.get('read')} of {cov.get('found')} results"
+            + (" (**truncated**)" if cov.get("truncated") else "")
+            + ".",
+            "",
+        ]
+    return [
         f"# Hypotheses — {slate.graph_id} (round {slate.round})",
         "",
         f"**Question.** {slate.question}" if slate.question else "",
@@ -213,14 +392,21 @@ def to_markdown(slate: Slate) -> str:
         f"blocked {slate.counts.get('blocked', 0)}, "
         f"model calls {slate.counts.get('model_calls', 0)}.",
         "",
-        "Verification: "
-        + " · ".join(
-            f"{slate.counts.get(f'verification_{v}', 0)} {v}"
-            for v in ("verified", "qualified", "unverified", "rejected")
-        )
-        + ".",
+        f"Verification: {verification}.",
         "",
     ]
+
+
+def to_markdown(slate: Slate, detail: str = "brief") -> str:
+    """Render a slate. ``detail`` is ``"brief"`` (default) or ``"full"``.
+
+    Brief is the default because the report exists to be read, and a reader who
+    gives up three screens in has got nothing from the audit trail either.
+    """
+    if detail not in ("brief", "full"):
+        raise ValueError(f"detail must be 'brief' or 'full', got {detail!r}")
+    cov = slate.coverage
+    out = _header(slate, detail)
     if cov.get("truncated") or cov.get("depth") == "quick":
         out += [
             "> Absence of a link in this graph is **not** evidence of absence in "
@@ -229,8 +415,9 @@ def to_markdown(slate: Slate) -> str:
             "",
         ]
 
+    render = _hypothesis_md if detail == "full" else _hypothesis_brief_md
     for i, hypothesis in enumerate(slate.hypotheses, start=1):
-        out.append(_hypothesis_md(hypothesis, i))
+        out.append(render(hypothesis, i))
 
     if slate.asks:
         out += ["---", "", "## Next round", "", "One ask per request:", ""]

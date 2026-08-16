@@ -247,6 +247,92 @@ shape and keyed by id:
 Asks are deduped across the slate: the same weak link mattering to three
 hypotheses is one piece of work, not three.
 
+## One dial for ambition
+
+How adventurous a slate should be is the choice callers actually want to make,
+and it was previously spread across five knobs and three profile names.
+`--craziness` is that choice as a single float, and three things about it are
+design decisions rather than convenience.
+
+**It derives params; it is not a runtime mode.** A hypothesis is a function of
+`(graph, params)` and nothing else, and craziness does not get an exemption. It
+materialises a complete `Params` up front, so two runs at 0.63 are identical, a
+reviewer can diff the resulting parameters against a different setting, and a
+disagreement about a slate stays a disagreement about parameters.
+
+**The scale was already there.** `conservative`, `default` and `speculative`
+were three points on exactly this axis, so the dial interpolates between them
+rather than inventing a scale. The profiles survive as names for the places
+people stop. One knob is deliberately non-monotonic: hub damping dips in the
+middle and rises again at the top, because extra hops are only worth having if
+they are not all routed through one promiscuous node — reaching further and
+reaching through a hub are different things, and only the first is ambition.
+
+**Ambition widens the aperture and never lowers the bar.** The same chain of
+links scores the same support at 0.1 and 0.9; absence is still discounted by
+coverage; citations are still checked against the pack; `structure` and
+`citations` still halt verification. What craziness buys is permission to
+*propose* something further away, and it pays for it with more scrutiny, not
+less — the top of the dial adds a critic and a revision round, because its
+failure mode is fluent nonsense. The enforced list is `CRAZINESS_NEVER_TOUCHES`.
+
+Building it surfaced one trap worth naming, because the wrong version looks
+obviously right. The natural way to encode ambition is to raise
+`selection.min_novelty` — demand newer hypotheses as the dial goes up. But
+novelty here is *distance from what is already stated*, and an analogical
+transfer is a single bridge edge, so it scores low on novelty however audacious
+the leap is. On the demo graph a `min_novelty` of 0.4 removed all ninety
+enumerated analogical transfers at craziness 1.0 and returned a slate of twelve
+long chains: the setting meant to be the most adventurous had filtered out the
+only motif that reasons by leap, and it did it silently, because a slate of long
+chains looks adventurous. A novelty floor is a path-length filter wearing a
+novelty label. Ambition lives in the aperture — hops, confidence floors, the
+Jaccard floor, cross-kind analogy, motif weights — not in a filter only long
+paths can clear. `speculative` still carries that floor and therefore still
+cannot produce its own most ambitious motif; the profile is left alone and the
+dial does not copy it.
+
+## Handing off to valuation
+
+The sibling stage now exists: `managed/program-strategy-valuation/` (LABrador)
+takes a program brief and returns rNPV, protected years, payer access, patient
+affordability and a decision grade. `valuation.py` is the adapter, and
+[`VALUATION_HANDOFF.md`](VALUATION_HANDOFF.md) is its contract. Three things
+about the join are design decisions rather than plumbing.
+
+**The two halves fail the same way, so they compose.** LABrador's rule is that an
+unsupported critical input forces `NOT_DECISION_GRADE` rather than invented
+precision; ours is that absence in the graph is not absence in the literature.
+Both refuse to convert a hole into a number, which is why a slate can be handed
+over without a translation layer that quietly fills gaps. The emitted program is
+`NOT_DECISION_GRADE` by construction and its 44-item gap list is the deliverable —
+a work order for an analyst, not a failure.
+
+**Provenance crosses the boundary; authority does not.** Every paper behind a
+hypothesis reaches LABrador's audit trail with its study type translated onto
+LABrador's evidence ladder, so a reviewer can still land on the verbatim
+sentence. But every record is namespaced (`finding:f9`, `mechanism:L4`) precisely
+so it *cannot* be looked up as one of the field names LABrador's gates consult. A
+paper about pirfenidone and TGF-β1 is real evidence about a mechanism and no
+evidence at all about an eligible-patient count, and the type system now says so.
+Without that, mechanism literature would clear a payer gate and a program that
+should read `NOT_DECISION_GRADE` would come back graded, with a genuine citation
+attached — the worst available failure, because it survives review.
+
+**The downstream number must not reach back up.** Nothing in the `valuation`
+profile ranks a hypothesis by how valuable its program would be. Market size is
+not evidence, and a generator tuned toward lucrative hypotheses would be
+optimising the one axis its own evidence cannot check. Screening order comes from
+LABrador, scientific merit from the slate, and where they disagree that
+disagreement is the interesting part.
+
+What the shape of the downstream model *is* allowed to constrain is what counts
+as a well-formed question, and that is what the `valuation` profile encodes:
+intervention in and disease out, because LABrador values an asset against an
+indication; a protein or gene in the middle, because that is where `target` is
+read from; at most two labels per molecule, because one asset has one patent
+clock and LABrador models an initial indication plus one expansion.
+
 ## What this does not do
 
 - **No retrospective validation yet.** The number worth demoing is: hold out
@@ -254,9 +340,12 @@ hypotheses is one piece of work, not three.
   round 2 found. The machinery is in place (`asks` are the query, `Slate` is
   comparable across runs) but the harness is not written.
 - **No multi-round driving.** The asks are emitted, not executed.
-- **No dataset or ROI scoring.** Those are sibling stages; this one hands them
-  a slate with per-claim citations so they can attach at claim granularity
-  rather than per hypothesis.
+- **No dataset scoring.** A sibling stage; this one hands it a slate with
+  per-claim citations so it can attach at claim granularity rather than per
+  hypothesis.
+- **No valuation of its own.** The ROI stage exists now and is a separate
+  program (above). This one emits its input and reads none of its output — no
+  score here moves because a program would be lucrative.
 - **Nothing outside the graph.** By design, and worth restating: a hypothesis
   this system cannot see is a Stage 1 coverage problem, and the asks are the
   channel for fixing it.

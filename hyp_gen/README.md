@@ -66,7 +66,8 @@ graph.json
    ├─ validate.py    structure against the graph, citations against the pack
    ├─ verify.py      six gates in cost order; a halt skips the rest, loudly
    ├─ asks.py        weakest point → one Stage 1 request, by id
-   └─ report.py      reviewable markdown + slate.json
+   ├─ report.py      short report.md by default, full audit trail on request
+   └─ valuation.py   slate → LABrador ProgramInput, for the valuation stage
 ```
 
 Everything above `reason.py` is deterministic and runs without an API key.
@@ -133,11 +134,76 @@ any field on top.
 | `speculative` | longer paths, weaker links, more critics |
 | `repurposing` | compound → gene/protein → process → disease |
 | `mechanism` | closed discovery: both ends given, find the B terms |
+| `valuation` | shaped for the ROI stage: intervention in, disease out, ≤2 labels per molecule |
 
 ```bash
 # Why might metformin act on IPF?  (closed discovery)
 --profile mechanism --set framing.anchors='["metformin"]' --set framing.targets='["IPF"]'
 ```
+
+## How crazy do you want it?
+
+`--craziness` is one float from 0 to 1. A profile picks *what question* to ask
+the graph; craziness picks *how far out* to reach for an answer.
+
+```bash
+hypgen --graph data/example_graph.json --craziness 0.1    # defensible today
+hypgen --graph data/example_graph.json --craziness 0.9    # a real leap
+hypgen --graph data/example_graph.json --profile repurposing --craziness 0.8
+```
+
+At 0.0 you get two-hop chains between strongly-supported links, corroborated by
+two independent groups — nearly boring, which is the point when the next step
+costs money:
+
+```
+H-chain-t12-t4-2   transitive_chain   sup 0.55  nov 0.07  test 0.70
+    senescent alveolar epithelium → TGF-beta1 → myofibroblast differentiation
+```
+
+At 1.0 the similarity motif leads, cross-kind analogy is allowed, and the top of
+the slate is the "I read this one thing in a slightly different field" kind of
+idea — with the independence warning attached rather than hidden:
+
+```
+H-analog-t8-t5-via-t7   analogical_transfer   sup 0.62  nov 0.16  test 0.70
+    metformin → idiopathic pulmonary fibrosis
+    ! independence: all primary evidence here is from Jenkins; nothing replicates it
+```
+
+The dial widens the aperture. It never lowers the audit standard: the same chain
+of links scores the same support at either end, absence still is not evidence of
+absence, a hypothesis still may not cite what it was not shown, and the
+`structure` and `citations` gates still halt. Scrutiny goes *up* with ambition —
+1.0 buys a third critic and a revision round, because that end's failure mode is
+fluent nonsense. The full schedule and the things it is forbidden to move are in
+[`docs/PARAMETERS.md`](docs/PARAMETERS.md).
+
+## Handing off to valuation
+
+`managed/program-strategy-valuation/` (LABrador) is the ROI stage: a program
+brief in, rNPV and a decision grade out. `valuation.py` emits its input.
+
+```bash
+hypgen --graph data/example_graph.json --emit-frame-template frame.json
+hypgen --graph data/example_graph.json --profile valuation --dry-run \
+       --emit-programs out/ --frame frame.json
+labrador analyze out/*.program.json --comparables out/comparables.json --seed 42
+```
+
+The frame is mandatory and its four year fields start `null`: currency,
+geography, route, launch year and above all the patent filing year are analyst
+decisions, not graph findings, and a guess is indistinguishable from a sourced
+value once it is in the JSON.
+
+Expect `NOT_DECISION_GRADE`. A literature graph has no epidemiology, no payer
+behaviour and no price, so the emitted program is honestly full of holes and
+LABrador's job is to name them — 44 of them on the demo graph, against one number
+that really is supported (`effective_protected_years`). That gap list is the
+deliverable. The contract and its failure modes are in
+[`docs/VALUATION_HANDOFF.md`](docs/VALUATION_HANDOFF.md); the one to read first is
+that every rNPV in an unedited emission is `0.0` because nobody has supplied a
+price, which is not the same thing as a worthless program.
 
 ## Status
 
@@ -147,9 +213,23 @@ evidence packs, staged six-gate verification with halting, articulation,
 multi-lens critique, Elo tournament, evolution rounds, Stage 1 asks, markdown
 and JSON output, CLI, 148 offline tests.
 
-Verification is the newest part. Each hypothesis carries a gate table and one of
-four verdicts (`verified` / `qualified` / `unverified` / `rejected`), in
-`slate.json` and in the report:
+**Two report lengths.** `report.md` is the short read — statement, chain,
+scores, what would kill it, the decisive experiment, the strongest objection,
+and every warning. The claims tables, gate tables and verbatim source sentences
+live in `report-full.md`, written by `--full-report`. Rendering is a pure
+function of the slate, so either can be recovered later without re-running the
+model stages:
+
+```bash
+hypgen --report-from runs/my-run/slate.json --full-report --out runs/my-run
+```
+
+Brief drops corroboration, never a warning: failure badges, halted
+verifications, error-level validation issues and the absence-of-evidence notice
+render at both lengths.
+
+Verification carries a gate table and one of four verdicts (`verified` /
+`qualified` / `unverified` / `rejected`) in `slate.json` and in the full report:
 
 ```
 gate 1 structure       PASS   3 hop(s), path intact, not already stated

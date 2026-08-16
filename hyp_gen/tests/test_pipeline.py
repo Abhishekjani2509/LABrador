@@ -289,12 +289,54 @@ def test_slate_serialises_and_round_trips(graph: KnowledgeGraph) -> None:
 
 def test_report_renders_the_audit_trail(graph: KnowledgeGraph) -> None:
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
-    markdown = to_markdown(slate)
+    markdown = to_markdown(slate, detail="full")
     assert "# Hypotheses" in markdown
     assert "Killed by" in markdown
     assert "Source sentences" in markdown
     # The coverage warning is not optional on a truncated graph.
     assert "not** evidence of absence" in markdown
+
+
+def test_the_brief_report_is_the_default_and_is_much_shorter(
+    graph: KnowledgeGraph,
+) -> None:
+    """report.md is read by humans; the audit trail is read by auditors.
+
+    Brief being the *default* is the point -- a reader who has to know about a
+    flag to get a readable report does not get one.
+    """
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    brief = to_markdown(slate)
+    assert brief == to_markdown(slate, detail="brief")
+    assert len(brief) < len(to_markdown(slate, detail="full")) / 2
+    # The corroboration is what got dropped, not the idea or its refutation.
+    assert "Killed by" in brief
+    assert "Next experiment" in brief
+    assert "Source sentences" not in brief
+    # ...and a reader is told detail was withheld, rather than left to assume
+    # the short report is the whole record.
+    assert "slate.json" in brief
+
+
+def test_the_brief_report_keeps_every_warning_the_full_one_has(
+    graph: KnowledgeGraph,
+) -> None:
+    """Brief is a shorter view, not a softer one."""
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    brief = to_markdown(slate)
+    # Truncated coverage: the absence-of-evidence warning is not optional.
+    assert "not** evidence of absence" in brief
+    # Per-hypothesis caveats survive too -- they carry the same warning down to
+    # the individual claim.
+    assert "**Caveats**" in brief
+
+
+def test_an_unknown_detail_level_is_an_error(graph: KnowledgeGraph) -> None:
+    """Silently falling back to brief would hand an auditor a partial record
+    that looks complete."""
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    with pytest.raises(ValueError, match="detail must be"):
+        to_markdown(slate, detail="verbose")
 
 
 def test_run_is_reproducible(graph: KnowledgeGraph, params: Params) -> None:
@@ -434,7 +476,7 @@ def test_halting_stops_the_model_gate_from_spending_calls(
 
 def test_the_report_shows_the_gate_table(graph: KnowledgeGraph) -> None:
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
-    markdown = to_markdown(slate)
+    markdown = to_markdown(slate, detail="full")
     assert "**Verification**" in markdown
     assert "gate 1 structure" in markdown
     assert "VERDICT" in markdown

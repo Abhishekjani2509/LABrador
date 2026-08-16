@@ -542,9 +542,26 @@ class BudgetParams(BaseModel):
     max_output_hypotheses: int = 12
 
 
+class StanceParams(BaseModel):
+    """How this Params was derived. A record, not a knob.
+
+    Nothing in the pipeline reads these to make a decision -- they exist so a
+    slate can say where its numbers came from, and so ``at_craziness`` is
+    idempotent. That distinction matters: params.py's objection to a dial like
+    ``temperature`` is that it would be a field that quietly does nothing, and
+    the answer to that is not to hide provenance but to label it as provenance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = "default"
+    craziness: float | None = None
+
+
 class Params(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    stance: StanceParams = Field(default_factory=StanceParams)
     framing: FramingParams = Field(default_factory=FramingParams)
     traversal: TraversalParams = Field(default_factory=TraversalParams)
     motifs: MotifParams = Field(default_factory=MotifParams)
@@ -568,9 +585,243 @@ class Params(BaseModel):
         a CLI can pass ``{"traversal": {"max_hops": 4}}`` without restating the
         rest of the profile."""
         base = PROFILES[name].model_dump()
+        base["stance"] = {"profile": name, "craziness": base["stance"]["craziness"]}
         for group, values in (overrides or {}).items():
             base.setdefault(group, {}).update(values)
         return cls.model_validate(base)
+
+    @classmethod
+    def at_craziness(
+        cls,
+        craziness: float,
+        base: str = "default",
+        overrides: dict | None = None,
+    ) -> "Params":
+        """One dial from super-safe (0.0) to very ambitious (1.0).
+
+        A profile says *what question* to ask the graph; craziness says *how far
+        out* to reach for an answer. They compose: ``repurposing`` at 0.2 and
+        ``repurposing`` at 0.9 ask the same question of the same shape and come
+        back with very different slates.
+
+        The scale is not invented. ``conservative``, ``default`` and
+        ``speculative`` were already three points on exactly this axis, so
+        craziness makes them continuous rather than replacing them: 0.0 and 0.5
+        reproduce the first two, everything between is piecewise-linear, and the
+        three profiles remain as names for the places people actually stop.
+
+        1.0 deliberately differs from ``speculative`` in two ways. It reaches one
+        hop further, and it does **not** inherit that profile's
+        ``min_novelty=0.4`` -- a floor which, because novelty is measured as
+        distance, silently excludes every analogical transfer and hands back a
+        slate of long chains. See ``CRAZINESS_NEVER_TOUCHES``. The profile is
+        left as it is; the dial does not copy the bug.
+
+        Precedence is profile → craziness → ``overrides``, last wins, so
+        ``--set traversal.max_hops=2`` still pins a knob at any craziness.
+        """
+
+        if not 0.0 <= craziness <= 1.0:
+            raise ValueError(f"craziness must be between 0 and 1, got {craziness}")
+
+        values = PROFILES[base].model_dump()
+        for path, anchors in _CRAZINESS_SCHEDULE.items():
+            _write(values, path, _interpolate(anchors, craziness))
+        _apply_craziness_cliffs(values, craziness)
+        values["stance"] = {"profile": base, "craziness": craziness}
+
+        for group, patch in (overrides or {}).items():
+            values.setdefault(group, {}).update(patch)
+        return cls.model_validate(values)
+
+
+# -- the craziness dial ----------------------------------------------------
+#
+# Each row is (at 0.0, at 0.5, at 1.0), piecewise-linear between them, cast back
+# to the field's type. Three anchors rather than two because one knob is
+# genuinely not monotonic -- see hub_damping.
+
+_CRAZINESS_SCHEDULE: dict[str, tuple[float, float, float]] = {
+    # The speculation dial, and the first thing to reach for. Every extra hop
+    # multiplies the ways the story can be wrong, which is the whole trade.
+    "traversal.max_hops": (2, 3, 5),
+    # How weak a link may be before traversal refuses to walk it. A crazy run is
+    # willing to build on a shakier stated relationship; it does not get to
+    # pretend the relationship is stronger than it is (see `scoring`, below).
+    "traversal.min_link_confidence": (0.45, 0.20, 0.05),
+    # NOT monotonic, and this is the point. Damping *rises* again at high
+    # craziness because the extra hops are only worth having if they are not all
+    # routed through one promiscuous node -- reaching further and reaching
+    # through a hub are different things, and only the first is ambition.
+    "traversal.hub_damping": (0.60, 0.40, 0.55),
+    "traversal.max_paths_per_pair": (1, 2, 3),
+    "traversal.max_branch_per_node": (8, 12, 20),
+    # Crossing a link against its stated direction is a weaker claim, not an
+    # invalid one, so it is an ambition knob -- with the penalty softening as
+    # craziness rises rather than vanishing.
+    "traversal.reversal_penalty": (0.70, 0.70, 0.85),
+    # The "I read this in a slightly different field" knobs. Lower floors mean a
+    # thinner resemblance is enough to propose a transfer.
+    "motifs.analogy_min_shared": (3, 2, 1),
+    "motifs.analogy_min_jaccard": (0.30, 0.15, 0.05),
+    # Analogical transfer is the motif that reasons from similarity rather than
+    # from a path: the most likely to be fluent and wrong, and the one that
+    # carries the ambition. It leads the slate only at the top of the dial.
+    "motifs.weights.analogical_transfer": (0.35, 0.70, 1.00),
+    "motifs.weights.transitive_chain": (0.85, 0.90, 0.95),
+    "motifs.weights.gap_closure": (1.00, 1.00, 0.90),
+    "motifs.weights.condition_split": (0.90, 0.85, 0.80),
+    # Novelty that rests on distance, and the correction for the fact that a
+    # novelty judge over-rewards famous, densely-connected pairings. A safe run
+    # barely penalises popularity because it *wants* the well-trodden answer.
+    "novelty.hop_novelty": (0.15, 0.22, 0.30),
+    "novelty.popularity_penalty": (0.05, 0.15, 0.35),
+    # A safe run demands support; an ambitious one stops demanding it. Note what
+    # is *not* here: `min_novelty`. See CRAZINESS_NEVER_TOUCHES -- raising it is
+    # the one obvious-looking move on this dial that is actively wrong.
+    "selection.min_support": (0.40, 0.00, 0.00),
+    "selection.top_k": (5, 8, 12),
+    "selection.diversity_lambda": (0.85, 0.70, 0.50),
+    # Scrutiny rises with craziness, it does not fall. A speculative slate's
+    # failure mode is fluent nonsense, so the ambitious end of the dial buys
+    # more critics and a revision round -- the opposite of relaxing.
+    "ranking.critics_per_hypothesis": (2, 2, 3),
+    "ranking.evolution_rounds": (0, 0, 1),
+}
+
+_INTEGER_FIELDS = frozenset(
+    {
+        "traversal.max_hops",
+        "traversal.max_paths_per_pair",
+        "traversal.max_branch_per_node",
+        "motifs.analogy_min_shared",
+        "selection.top_k",
+        "ranking.critics_per_hypothesis",
+        "ranking.evolution_rounds",
+    }
+)
+
+
+def _interpolate(anchors: tuple[float, float, float], craziness: float) -> float:
+    low, middle, high = anchors
+    if craziness <= 0.5:
+        return low + (middle - low) * (craziness / 0.5)
+    return middle + (high - middle) * ((craziness - 0.5) / 0.5)
+
+
+def _write(values: dict, path: str, value: float) -> None:
+    *parents, leaf = path.split(".")
+    scope = values
+    for name in parents:
+        scope = scope[name]
+    scope[leaf] = round(value) if path in _INTEGER_FIELDS else round(value, 4)
+
+
+def _apply_craziness_cliffs(values: dict, craziness: float) -> None:
+    """The knobs that step rather than slide.
+
+    A boolean cannot be 0.4 true, and pretending otherwise by thresholding a
+    lerp would hide where the step actually is. These are written out so the
+    three places the dial changes character are visible and testable.
+    """
+
+    # Below this, a chain may not be read backwards at all -- CONSERVATIVE's
+    # stance, for strictly causal reading.
+    values["traversal"]["allow_edge_reversal"] = craziness >= 0.25
+
+    # One lab reporting a result five times is one result. A safe run refuses to
+    # rest on that; past the bottom of the dial it becomes a warning instead.
+    values["evidence"]["min_independent_groups"] = 2 if craziness < 0.25 else 1
+    halting = list(values["verification"]["halt_on"])
+    if craziness >= 0.25 and "independence" in halting:
+        halting.remove("independence")
+    values["verification"]["halt_on"] = tuple(halting)
+
+    # Analogy across kinds is usually a category error -- a small molecule is
+    # not like a disease. At the very top of the dial that guard comes off,
+    # which is the most literal reading of "it worked in a different field".
+    values["motifs"]["analogy_same_kind_only"] = craziness < 0.75
+
+    # At the bottom, the similarity motif does not run at all rather than
+    # running at a low weight. Craziness may only ever *narrow* what the base
+    # profile enabled, never add a motif the profile deliberately excluded.
+    if craziness < 0.20:
+        values["motifs"]["enabled"] = tuple(
+            m for m in values["motifs"]["enabled"] if m != "analogical_transfer"
+        )
+
+
+CRAZINESS_NEVER_TOUCHES: frozenset[str] = frozenset(
+    {
+        # -- the evidence arithmetic ------------------------------------
+        # Craziness changes what you are willing to *propose*. It must never
+        # change what the evidence *says*. The same chain of links scores the
+        # same support at 0.1 and at 0.9; if it did not, the dial would be a
+        # licence to launder a weak chain into a strong one.
+        #
+        # `min_independent_groups` is the deliberate exception and is not listed
+        # here. It is a *standard* rather than a weight -- how many labs this run
+        # requires before a link may exceed `single_group_cap` -- and requiring
+        # less corroboration is precisely what a more ambitious run is doing. It
+        # says so out loud when it bites ("support capped: a link rests on a
+        # single research group"), which is the condition for letting it move.
+        "evidence.study_weights",
+        "evidence.hedged_penalty",
+        "evidence.secondhand_penalty",
+        "evidence.preprint_penalty",
+        "evidence.basis_penalty",
+        "evidence.single_group_cap",
+        "evidence.support_weights",
+        "evidence.chain_aggregation",
+        # -- novelty is a length measure, not an ambition measure -------
+        # The tempting move is to raise `min_novelty` with craziness. It is
+        # wrong, and measurably so. Novelty here is *distance from what is
+        # already stated* -- hops beyond the first, plus gap bonuses -- so an
+        # analogical transfer, which is a single bridge edge, scores low on it
+        # by construction no matter how audacious the leap. A novelty floor is
+        # therefore a path-length filter wearing a novelty label: on the demo
+        # graph, `min_novelty=0.4` removes every one of the 90 enumerated
+        # analogical transfers and returns a slate of twelve long chains.
+        #
+        # That is exactly backwards. "I read this in a slightly different field,
+        # maybe it works here" is the most ambitious thing this generator can
+        # say, and it is short. Ambition belongs in the aperture -- hops,
+        # confidence floors, the Jaccard floor, cross-kind analogy, motif
+        # weights -- not in a filter that only long paths can clear.
+        "selection.min_novelty",
+        # -- absence is still not evidence of absence -------------------
+        # A shallow graph may not mint novelty at any ambition level. Turning
+        # this off would let craziness manufacture the very thing it is most
+        # tempted to claim: that nobody has looked.
+        "novelty.respect_absence_reliability",
+        "novelty.gap_confidence_cap",
+        # -- the audit standard -----------------------------------------
+        # An ambitious hypothesis is still not allowed to cite what it was not
+        # shown, restate a fact the graph already contains, or come back from a
+        # broken path. Craziness widens the aperture; it never lowers the bar
+        # for what counts as a checkable claim.
+        "motifs.require_unstated",
+        "verification.enabled",
+        "verification.require_primary_evidence",
+        "verification.max_claim_overlap",
+        # -- inference forms that are wrong, not bold -------------------
+        # Two correlations in a row imply nothing, and "A does not do B, B does
+        # C" composes to nothing. Chaining them is not ambition, it is a broken
+        # inference wearing ambition's coat. Flip them by hand with --set if you
+        # want them; the dial will not do it for you.
+        "traversal.predicates_deny",
+        "traversal.allow_no_effect_edges",
+        "traversal.allow_negative_edges",
+    }
+)
+"""Fields the dial is forbidden to move, and why.
+
+`structure` and `citations` also stay in ``verification.halt_on`` at every
+level: they mean the output is untrustworthy, which is orthogonal to how
+ambitious it was trying to be. Only `independence` moves, because "one lab" is
+a statement about how much corroboration you require -- which is exactly what
+this dial is for.
+"""
 
 
 CONSERVATIVE = Params(
@@ -630,10 +881,73 @@ MECHANISM = Params(
 explain them. Run this when the clinical prompt already names a drug and a
 disease and the question is *why*."""
 
+VALUATION = Params(
+    traversal=TraversalParams(
+        max_hops=3,
+        seed_kinds=("small_molecule",),
+        target_kinds=("disease",),
+        intermediate_kinds=("protein", "gene", "process"),
+        hub_damping=0.4,
+    ),
+    motifs=MotifParams(
+        enabled=("transitive_chain", "gap_closure", "analogical_transfer"),
+        weights={
+            "gap_closure": 1.00,
+            "transitive_chain": 1.00,
+            "analogical_transfer": 0.50,
+            "condition_split": 0.85,
+        },
+    ),
+    evidence=EvidenceParams(min_independent_groups=2),
+    selection=SelectionParams(
+        top_k=6,
+        min_support=0.35,
+        max_per_subject=2,
+        max_per_object=2,
+        diversity_lambda=0.75,
+    ),
+)
+"""Shaped by what the valuation stage can actually evaluate.
+
+`repurposing` asks the graph a scientific question; this profile asks it a
+question LABrador can price, and every difference between the two is a downstream
+constraint rather than a taste:
+
+- **Intervention in, disease out.** LABrador values an asset against an
+  indication, so `seed_kinds`/`target_kinds` are not optional here the way they
+  are in an exploratory run. A hypothesis ending on a process is a fine
+  hypothesis and not a program; `valuation.py` skips it by name.
+- **A protein or gene in the middle.** `ProgramInput.target` is read off the
+  first mechanism node the path crosses. Chains are therefore weighted level with
+  gaps -- they are the motif that reliably supplies one -- and
+  `intermediate_kinds` keeps the middle of the path somewhere a target can be
+  found.
+- **Two labels per molecule, no more.** `max_per_subject=2` is LABrador's
+  two-indication cash-flow model showing through: one asset, one patent clock,
+  an initial indication and at most one expansion. A third label on the same
+  molecule cannot be valued and is reported as dropped rather than emitted.
+- **Three hops, not four.** Every hop is another claim an analyst has to defend
+  in a brief that ends in a number, and testability already penalises length.
+- **Two independent groups.** LABrador clears a critical input only on
+  HIGH/MODERATE non-synthetic evidence. A slate resting on one lab produces
+  programs that cannot clear anything, so the honest place to spend that
+  constraint is here, before the model calls -- not downstream as a surprise.
+- **`analogical_transfer` halved rather than banned.** It is genuinely useful and
+  structurally weak for this purpose: its path is the *donor's* bridge edge, so
+  it yields no mechanism node and its program is emitted with an `UNSPECIFIED`
+  target and the donor caveat attached. Worth seeing, worth ranking below a chain.
+
+What this profile deliberately does not do is let the downstream number touch the
+science. Nothing here scores a hypothesis by how valuable the program would be:
+market size is not evidence, and a generator that preferred lucrative hypotheses
+would be optimising the one axis its own evidence cannot check.
+"""
+
 PROFILES: dict[str, Params] = {
     "default": Params(),
     "conservative": CONSERVATIVE,
     "speculative": SPECULATIVE,
     "repurposing": REPURPOSING,
     "mechanism": MECHANISM,
+    "valuation": VALUATION,
 }

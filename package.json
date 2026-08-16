@@ -14,12 +14,16 @@
   },
   "name": "mvp",
   "scripts": {
-    "deploy": "bun scripts/deploy.ts",
-    "console": "bun scripts/console.ts",
-    "dev": "eve dev",
-    "typecheck": "tsc --noEmit",
     "check": "ultracite check",
-    "fix": "ultracite fix"
+    "console": "bun scripts/console.ts",
+    "deploy": "bun scripts/deploy.ts",
+    "dev": "eve dev",
+    "fix": "ultracite fix",
+    "hyp-gen:programs": "cd hyp_gen && .venv/bin/python -m hyp_gen.cli --graph data/example_graph.json --profile valuation --dry-run --emit-programs runs/programs --frame data/example_frame.json",
+    "hyp-gen:setup": "cd hyp_gen && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
+    "hyp-gen:smoke": "bun managed/hypothesis-generator/fixtures/smoke.ts",
+    "hyp-gen:test": "cd hyp_gen && .venv/bin/python -m pytest -q",
+    "typecheck": "tsc --noEmit"
   },
   "type": "module",
   "version": "0.1.0",

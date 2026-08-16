@@ -287,11 +287,85 @@ executed, so nothing drives a second round to stop. See `docs/DESIGN.md`.
 | `speculative` | 4 hops, conf ≥ 0.10, w=0.5, 3 critics, 1 evolve round | exploratory; its failure mode is fluent nonsense, hence the extra critics |
 | `repurposing` | small_molecule → protein/gene/process → disease | the Rephetio shape |
 | `mechanism` | closed discovery, endpoint similarity | both ends given, output is the bridging B terms |
+| `valuation` | intervention → protein/gene → disease, ≤2 labels per molecule | shaped for the downstream ROI stage |
 
 ```python
 from hyp_gen.params import Params
 p = Params.profile("repurposing", {"traversal": {"max_hops": 3}})
 ```
+
+## `craziness` — one dial from super-safe to very ambitious
+
+A profile says *what question* to ask the graph. Craziness says *how far out* to
+reach for an answer, as a single float from 0 to 1. They compose.
+
+```bash
+hypgen --graph g.json --craziness 0.15    # a hypothesis you could defend today
+hypgen --graph g.json --craziness 0.9     # "I read this in a different field…"
+hypgen --graph g.json --profile repurposing --craziness 0.8
+```
+
+```python
+Params.at_craziness(0.8, "repurposing", {"traversal": {"max_hops": 3}})
+```
+
+The scale is not invented. `conservative`, `default` and `speculative` were
+already three points on this axis, so craziness makes them continuous: 0.0 and
+0.5 reproduce the first two, and the profiles remain as names for the places
+people actually stop. Precedence is **profile → craziness → `--set`**, last wins,
+so an explicit knob is never overwritten by the dial.
+
+What moves, at 0.0 → 0.5 → 1.0:
+
+| Knob | 0.0 | 0.5 | 1.0 | Why |
+|---|---|---|---|---|
+| `traversal.max_hops` | 2 | 3 | 5 | the speculation dial |
+| `traversal.min_link_confidence` | 0.45 | 0.20 | 0.05 | how shaky a stated link may be |
+| `traversal.hub_damping` | 0.60 | 0.40 | 0.55 | **not monotonic** — see below |
+| `traversal.allow_edge_reversal` | off | on | on | a reversed hop is weaker, not invalid |
+| `motifs.analogy_min_jaccard` | 0.30 | 0.15 | 0.05 | how thin a resemblance will do |
+| `motifs.analogy_same_kind_only` | on | on | **off** | the literal "different field" guard |
+| `motifs.weights.analogical_transfer` | 0.35 | 0.70 | 1.00 | the leap leads only at the top |
+| `evidence.min_independent_groups` | 2 | 1 | 1 | how much corroboration you require |
+| `novelty.popularity_penalty` | 0.05 | 0.15 | 0.35 | a safe run *wants* the famous pairing |
+| `selection.min_support` | 0.40 | 0.00 | 0.00 | |
+| `selection.top_k` | 5 | 8 | 12 | |
+| `ranking.critics_per_hypothesis` | 2 | 2 | 3 | scrutiny **rises** with ambition |
+
+`hub_damping` dips and comes back up because extra hops are only worth having if
+they are not all routed through one promiscuous node. Reaching further and
+reaching through a hub are different things, and only the first is ambition.
+
+Below 0.20 the similarity motif does not run at all; below 0.25 chains may not be
+read backwards and `independence` halts verification rather than warning. Those
+are steps, not slopes, and they are written out as such.
+
+### What craziness must never touch
+
+`CRAZINESS_NEVER_TOUCHES` is the enforced list. In short: the evidence weights
+(study type, hedging, secondhand, preprint, basis, aggregation), the
+absence-reliability scaling, `motifs.require_unstated`, citation legality, and
+the `structure`/`citations` verification halts. **The same chain of links scores
+the same support at 0.1 and at 0.9.** Craziness widens the aperture; it never
+lowers the audit standard.
+
+Two inference forms stay off at every level, because they are wrong rather than
+bold: chaining `correlates_with` (two correlations in a row imply nothing) and
+walking through measured non-relationships. Flip them by hand if you want them.
+
+### The one that looks right and is not
+
+Do not raise `selection.min_novelty` with craziness. Novelty here is *distance
+from what is already stated* — hops beyond the first, plus gap bonuses — so an
+analogical transfer, which is a single bridge edge, scores low on it however
+audacious the leap. On the demo graph a `min_novelty` of 0.4 removes **all 90**
+enumerated analogical transfers at craziness 1.0 and hands back twelve long
+chains. A novelty floor is a path-length filter wearing a novelty label, and
+using it as the ambition knob selects for exactly the wrong shape.
+
+This is also why `--craziness 1.0` is not identical to `--profile speculative`:
+that profile sets `min_novelty=0.4` and therefore cannot produce the most
+ambitious motif it has. The profile is left as it is; the dial does not copy it.
 
 ## Tuning, in order of effect
 
@@ -309,12 +383,18 @@ p = Params.profile("repurposing", {"traversal": {"max_hops": 3}})
 Honest status, because a parameter that nothing reads is a lie in a config
 file.
 
-**Consumed today** — `framing.*` (anchors/targets/exclude, closed-mode
-targets), all of `traversal` (walk, DWPC, metapath prefix pruning, predicate
-gates, beam), all of `motifs`, and all of `selection` via `select.py`.
+**Consumed today — all of it.** `framing.*` and `traversal.*` by
+`candidates.py`/`graph.py`; `motifs.*` by the enumerators; `evidence.*` and
+`novelty.*` by `scoring.py`; `selection.*` by `select.py`; `ranking.*` by
+`reason.py` and the adversarial gate; `verification.*` by `verify.py`; `loop.*`
+by `asks.py`; `budget.*` by `pipeline.py` and `llm.py`.
 
-**Declared, awaiting their stage** — `evidence.*` and `novelty.*` are read by
-scoring, which is being rewritten against this graph schema;
-`ranking.*` by articulation/critique; `loop.*` by the Stage 1 request builder;
-`budget.*` by the pipeline. They are specified here so the shape is agreed
-before the code lands, not because they are running.
+`stance.*` is the one group nothing reads to make a decision: it records which
+profile and craziness a Params was derived from, so a slate can say where its
+numbers came from. That is provenance, and it is labelled as provenance rather
+than filed with the knobs.
+
+This section previously said `evidence`, `novelty`, `ranking` and `loop` were
+declared but not yet wired. That stopped being true and the note did not keep up
+— which is the same lie as a parameter nothing reads, told in the other
+direction.
