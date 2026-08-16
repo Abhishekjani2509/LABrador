@@ -2,9 +2,9 @@ import { defineState } from "eve/context";
 import { defineDynamic, defineTool } from "eve/tools";
 import { allowed } from "@/lib/access.ts";
 import { loadManagedAgent, runTask } from "@/lib/claude-managed-agent.ts";
-import { acl } from "@/managed/druggability-dossier/acl.ts";
+import { acl } from "@/managed/small-molecule-tractability-review/acl.ts";
 // Static import so eve's bundler sees the custom-tool handlers.
-import { preflight, tools } from "@/managed/druggability-dossier/tools.ts";
+import { preflight, tools } from "@/managed/small-molecule-tractability-review/tools.ts";
 
 const sessionIdState = defineState<string | undefined>(
   "druggability-dossier-session",
@@ -31,7 +31,7 @@ export default defineDynamic({
               // skipToolImport: tools come from the static import above;
               // dynamic import() inside eve's bundled runtime is not reliable.
               const { manifest, rubric } = await loadManagedAgent(
-                "druggability-dossier",
+                "small-molecule-tractability-review",
                 { skipToolImport: true }
               );
               const previous =
