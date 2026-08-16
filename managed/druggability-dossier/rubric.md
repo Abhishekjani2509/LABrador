@@ -14,7 +14,7 @@ turns on prose quality, effort, or thoroughness. A criterion that cannot be
 falsified from the file is not a criterion, and a rubric full of them produces
 nothing but `max_iterations_reached`.
 
-## Step 1 — run the validator. It settles criteria 1–17.
+## Step 1 — run the validator. It settles criteria 1–18.
 
 The skill bundle ships a machine validator. It is pure-stdlib Python, so it runs
 in the sandbox with nothing installed:
@@ -25,36 +25,39 @@ python3 .claude/skills/assemble-dossier/validate_dossier.py \
 ```
 
 It carries **17 rule functions emitting 18 violation codes**, and it is covered
-by the unit-test suite in `test_validate_dossier.py` beside it — run
-`python3 -m unittest test_validate_dossier` for the current count rather than
-trusting a number written here, which has now gone stale twice. It exits **0** with no
+by two stdlib `unittest` suites sitting beside it,
+`test_validate_dossier.py` and `test_template_drift.py`. **Do not quote a test
+count from this document.** Run them and read the count off the run:
+
+```
+python3 -m unittest test_validate_dossier
+python3 -m unittest test_template_drift
+```
+
+(both from `.claude/skills/assemble-dossier/`). A number written here has gone
+stale twice in one day — it moved by thirteen inside eight minutes — and a stale
+count in a grading document reads as a checkable fact when it is not one. The
+command is the fact. It exits **0** with no
 violations, **1** with them, and **2** if invoked with no argument; on violations
 it prints one `  [CODE] path: message` line per finding, sorted.
 
-**A clean exit satisfies criteria 1–17 at once.** Each violation it prints names
+**A clean exit satisfies criteria 1–18 at once.** Each violation it prints names
 the criterion that failed and the JSON path that failed it, so grade from its
-output rather than re-deriving the same checks by eye. Criteria 18–21 are the
+output rather than re-deriving the same checks by eye. Criteria 19–22 are the
 ones the validator does not cover; they are still decided from the file.
 
 Where this rubric and the validator could ever disagree, **the validator wins**
 and this document is the stale one. It is the machine grader; this is its index.
 
-**Known gap in this index, measured 2026-08-15.** The validator emits **18**
-codes; the list below enumerates **17**. The one with no entry here is
-**`INTERFACE_MIXED_UNRESOLVED`** (rule function
-`check_mixed_interface_is_resolvable`, registry position 12 — it sorts between
-criteria 12 and 13 below). It fires when
-`tractability.pocket_vs_interface.classification` is `mixed` without the four
-things that make `mixed` actionable: at least two distinct values in
-`classifications_seen`, per-copy values in `pocket_interface_overlap` rather
-than one scalar, a `partner_pdb_id`, and `matches_mechanism_hypothesis` not set
-to `true` — plus the converse, `classifications_seen` naming two labels while
-`classification` reports just one of them. It is **enforced** by the validator
-and merely unnumbered here, so a clean exit still covers it; grade it from the
-validator's output. Renumbering the list is left to whoever owns the criteria
-sequence, since it shifts criteria 13–17 and the 18–21 block below.
+**The index is complete as of 2026-08-15.** All **18** emitted codes have a
+numbered criterion below. `INTERFACE_MIXED_UNRESOLVED` — enforced by the
+validator since it shipped and unnumbered here until now — is **criterion 13**,
+placed at its registry position; the criteria that followed it and the
+file-verifiable block were renumbered to make room. An enforced code with no
+criterion attributing it is the one gap that costs an agent something real: it
+can fail a run with nothing to fix against.
 
-## Criteria 1–17 — exactly the validator's rules
+## Criteria 1–18 — exactly the validator's rules
 
 Listed in the validator's own registry order, with the trigger that fails them.
 
@@ -125,12 +128,26 @@ Listed in the validator's own registry order, with the trigger that fails them.
    `insufficient_evidence` verdict on `computed_tractability` or `both` with
    `pocket_druggability.max < 0.5` and **no** volume number anywhere in
    `pocket_volume_a3` (`primary_d1_6_a3`, `min`, `max`) fails outright — decline
-   on an **unmeasured volume**, never on a poor score; and a low druggability
-   sitting beside a volume of 240 Å³ or more requires a non-empty
-   `tractability.caveat` stating the disagreement. **That 240 Å³ is a disclosure
-   trigger only** — it fires a *write it down*, never a classification, and the
-   calibration it came from is withdrawn (rule 4a; see the grader failure modes
-   below).
+   on an **unmeasured volume**, never on a poor score; and **a low druggability
+   reported beside a volume large enough to contradict it requires a non-empty
+   `tractability.caveat` stating the disagreement.** What is graded is the
+   presence of that sentence. Never grade the volume.
+
+   **The trigger no longer names a number here, and that is deliberate.** It
+   used to read "240 Å³ or more", which was the last surviving digit of the
+   retracted 210/240 guide — doubly orphaned, because the guide it came from is
+   withdrawn (rule 4a) *and* the 35 Å³ margin it rested on is **14× smaller**
+   than the 492 Å³ that the clustering knob alone moves volume by. A boundary
+   narrower than its own parameter's noise cannot be re-derived at a different
+   value either; there is nothing to re-derive it from. The validator still
+   implements the trigger with one inherited constant,
+   `VOLUME_GUIDE_DRUGGABLE_A3`. Grade what the validator emits, and read that
+   constant as **a threshold on a disclosure, never on a cavity**: it decides
+   whether the dossier owes the reader a sentence, and it decides nothing about
+   the target. It is the last number in the grader traceable to the withdrawn
+   guide and should be replaced in `validate_dossier.py` with a rule keyed on
+   the run's own measured spread; until it is, do not quote its value anywhere,
+   and do not let a dossier quote it as a boundary.
 
 8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the number the computed axis
    must report.** "Primary" here means *reported first and never omitted*, **not
@@ -171,7 +188,23 @@ Listed in the validator's own registry order, with the trigger that fails them.
     classification is measured against a partner structure or it is an
     assumption.
 
-13. **`CRYPTIC_MISCLAIM` — a cryptic claim carries its apo census.**
+13. **`INTERFACE_MIXED_UNRESOLVED` — `mixed` is a finding only if it is
+    resolvable.** Rule function `check_mixed_interface_is_resolvable`, registry
+    position 12. A `tractability.pocket_vs_interface.classification` of `mixed`
+    must carry the four things that make `mixed` actionable rather than a
+    shrug: at least two distinct values in `classifications_seen`, and every
+    value one of the legal classes; **per-copy** values in
+    `pocket_interface_overlap` rather than one scalar (8DYG's U5Q read 0.22 in
+    one copy and 0.36 in another against a 0.25 boundary — the scalar is what
+    hid that); a `partner_pdb_id`, because rule 2b's classification is measured
+    against a partner structure or it is an assumption; and
+    `matches_mechanism_hypothesis` not set to `true`, since a mixed
+    classification cannot confirm a single-mechanism hypothesis. The converse
+    fires too: `classifications_seen` naming two labels while `classification`
+    reports just one of them is a disagreement collapsed to a label — never
+    reach into `per_structure` and take the first entry.
+
+14. **`CRYPTIC_MISCLAIM` — a cryptic claim carries its apo census.**
     `cryptic_evidence.is_cryptic` is a real boolean after a run, with a
     non-empty `basis`. When true: `n_apo_examined` ≥ 1 and
     `n_apo_site_absent / n_apo_examined ≥ 0.8` (Vajda 2018's "all or nearly
@@ -182,14 +215,14 @@ Listed in the validator's own registry order, with the trigger that fails them.
     occlusion may not claim a nanomolar ceiling, and loop motion may not claim
     micromolar-at-best.
 
-14. **`NULL_IS_NOT_ZERO` — null says why, and null is not zero.** Across the 15
+15. **`NULL_IS_NOT_ZERO` — null says why, and null is not zero.** Across the 15
     measured fields, a null needs a matching `not_found` entry naming it; a
     field named in `not_found` may not then be reported as `0`; and no
     measured field is a string. Placeholder strings (`"n/a"`, `"unknown"`,
     `"none"`, `"-"`) under any `_count`/`_nm`/`_pct`/`_a3`/`_fraction`/`_a` key
     fail.
 
-15. **`AS_OF_LEAKAGE` — the cutoff is binding.** With `as_of_date` set it must
+16. **`AS_OF_LEAKAGE` — the cutoff is binding.** With `as_of_date` set it must
     be ISO `YYYY-MM-DD`; `distinct_actives`, `best_potency_nm` and `patents`
     need a leakage entry whenever they carry a value;
     `clinical_stage_small_molecules` needs one **unconditionally, including when
@@ -197,23 +230,23 @@ Listed in the validator's own registry order, with the trigger that fails them.
     `release_date` may sort after it. With no `as_of_date`, `as_of_leakage` is
     `[]`.
 
-16. **`AXIS_CONFLICT_UNDECLARED` — disagreement is declared, not resolved.**
+17. **`AXIS_CONFLICT_UNDECLARED` — disagreement is declared, not resolved.**
     `axis_conflict` must be non-empty when: there are approved biologics and no
     approved small molecules alongside a tractable verdict or ≥500 actives; or
     ≥500 actives with zero holo structures; or a single assay at ≥30% share that
     measures a different target; or a best potency reported as uncharacterised.
 
-17. **`ASSAY_PROVENANCE_MISSING` — an actives count is a claim about assays.**
+18. **`ASSAY_PROVENANCE_MISSING` — an actives count is a claim about assays.**
     A non-zero `distinct_actives` requires `top_assay_description` and
     `top_assay_share_pct`; a share ≥30% requires
     `measures_a_different_target` answered; and a reported `best_potency_nm`
     requires `best_potency_characterised` answered.
 
-## Criteria 18–21 — file-verifiable, not validator-enforced
+## Criteria 19–22 — file-verifiable, not validator-enforced
 
 The validator does not check these. Read them off the JSON directly.
 
-18. **Chain selection was asserted, and recorded.**
+19. **Chain selection was asserted, and recorded.**
     `tractability.method.chains_used` is populated with the chains actually
     scored — `pocket_scan` now takes `chains` and `site_residues`, so rule 2b is
     executable and "chain selection could not be asserted" is no longer a legal
@@ -224,14 +257,14 @@ The validator does not check these. Read them off the JSON directly.
     answer (KRAS 4OBE: 0.442 at rank 1 on chain A, 0.257 at rank 6 on A+B) and a
     silent whole-assembly default is an unstated assertion.
 
-19. **The method block reconstructs the run.** `tractability.method` carries
+20. **The method block reconstructs the run.** `tractability.method` carries
     `tool`, `clustering_d_swept` with at least two values, and
     `ensemble_pdb_ids` matching `structure.ensemble_used`. The sweep is what
     measures the parameter's own effect — within-structure |D=2.4 − D=1.6| on
     the same site has a median of 0.229 — so a single clustering value is not a
     measurement.
 
-20. **Site rank reports both rankers or neither.** When
+21. **Site rank reports both rankers or neither.** When
     `tractability.site_pocket_rank` carries a number, `fpocket` and `prank` are
     both present (`prank` may be null with a `not_found` entry if PRANK did not
     run), alongside `n_pockets`. PRANK is a site-*finding* aid — it promotes the
@@ -239,7 +272,7 @@ The validator does not check these. Read them off the JSON directly.
     and as a druggability classifier its rank is inverted at AUC 0.25, so a rank
     reported alone reads as a quality value and must not.
 
-21. **Unavailable axes are null with a reason, never fabricated.** Two parts,
+22. **Unavailable axes are null with a reason, never fabricated.** Two parts,
     and only the first is absolute.
 
     *Hard:* `affinity.*` (including rule 12's positive control),
@@ -282,21 +315,61 @@ dossier.
   A volume is a number about a cavity and nothing more. **Verified in the
   validator, 2026-08-15:** nothing classifies on volume. The only numeric volume
   uses anywhere in the grader are the 1000 Å³ merge-artifact ceiling
-  (criterion 8) and a 240 Å³ trigger that merely *requires a caveat* when a low
-  druggability sits beside a large volume (criterion 7) — neither calls anything
-  druggable or hard, and no criterion may be added that does. Note the 240 Å³
-  trigger is now a bare disclosure threshold inherited from a withdrawn
-  calibration; it should be re-derived or replaced with a rule that does not name
-  a number. `VOLUME_GUIDE_HARD_A3 = 210.0` is defined in the validator and never
-  read — dead code from the same withdrawn guide.
+  (criterion 8), which is a merge-detector and not a boundary, and the validator
+  constant `VOLUME_GUIDE_DRUGGABLE_A3`, which merely *requires a caveat* when a
+  low druggability sits beside a large volume (criterion 7) — neither calls
+  anything druggable or hard, and no criterion may be added that does.
+  **Criterion 7 no longer states that constant's value**, because a disclosure
+  threshold inherited from a withdrawn calibration reads as a boundary the
+  moment it is written as a number; the criterion now grades the caveat and
+  points at the constant by name. The constant itself still wants replacing in
+  `validate_dossier.py` with a rule keyed on the run's own measured spread.
+  `VOLUME_GUIDE_HARD_A3 = 210.0` is defined in the validator and never read —
+  dead code from the same withdrawn guide.
 
 - **Do not grade a druggability value against an expected number.** The same
   structure read 0.673 on the deployed path and 0.708 locally; fpocket estimates
   volume by Monte Carlo and the score inherits that noise, and roughly one
   percentage point of any reported CV is the method's own. Never fail a run on
   the third significant figure, and never treat a low druggability as a wrong
-  answer — 41% of pockets with a drug physically bound score below 0.1
-  (n=37 ligand-anchored holo structures; EGFR with osimertinib scores 0.013).
+  answer: a drug is physically bound in JAK1's nine approved-drug holo
+  structures at a **median 0.009**, in TYK2 6NZP with deucravacitinib at
+  **0.169**, in BCL-2 6QGK at **0.025**, and across seven NLRP3 holo crystals
+  at **0.001–0.018**. Those are the named cases; state the direction and the
+  cases, not a percentage.
+
+  **Two figures that used to sit in this bullet are struck.** *"41% of pockets
+  with a drug physically bound score below 0.1"* rests on a denominator under
+  audit **and** on a cross-structure pooling the axis below forbids — `CLAUDE.md`'s
+  `_false_negative_rate` already says to give the direction and the named cases
+  instead. And *"EGFR with osimertinib scores 0.013"* is **off-site**: that pocket
+  has Jaccard **0.077** to the osimertinib site with a **10.49 Å** centroid
+  spread, while the pocket that genuinely overlaps the site scores **0.174**. It
+  was a rule-4b failure quoted as a false negative. Do not reinstate either.
+
+- **No criterion may compare a druggability value across structures, or to a
+  threshold that decides anything about the target.** Not to a boundary, not to
+  another structure, not to another target, not pooled into a min/max that spans
+  structures, not sorted, not colour-scaled. This is not a tolerance for a weak
+  measurement — it is a **type error**. fpocket min-max normalises the dominant
+  term of the score over *the current structure's own pocket list*
+  (`pocket.c:736-756`; the hardcoded PDB-wide branch at `pocket.c:780` is the
+  single-pocket case and never fires at 4–324 pockets per structure), so the
+  quantity means "how does this pocket rank against the others in this file" and
+  nothing else. RORgt's orthosteric site reads **0.827** in 4NB6 and **0.009**
+  in 6C1P at comparable absolute hydrophobic density; the 90-fold gap is
+  entirely which other pockets happened to co-exist in each file. A criterion
+  built on a cross-structure druggability comparison is not a lenient criterion,
+  it is one measuring the pocket census. The reportable form is
+  `tractability.site_pocket_rank` — a rank, a count, and the structure it came
+  from (criteria 6, 7 and 21).
+
+  **The one reading that is allowed**, and the reason criterion 7 is not a
+  violation of this: its band on `pocket_druggability.max` classifies **the
+  run**, not the pocket. It identifies a dossier that declined on a score, so
+  that the decline can be redirected onto an unmeasured volume. It never says
+  the site is good or bad. A criterion that crosses from "this run leaned on
+  the number" to "this number means the target is hard" has crossed the axis.
 
 - **Do not accept persistence as a substitute.** The site pocket was detected in
   100% of structures for all 15 targets, so persistence is constant and its AUC

@@ -1395,7 +1395,7 @@ carries its own `sources` list — `target` (for `sequence_length`),
 `structure`, and `affinity` (for the rule 12 control pair). An empty `sources`
 list attributes nothing; it is the same as having none.
 
-### 10b. Cross-check modality only where the local field abstains
+### 10b. Cross-check modality where the local field abstains **or over-claims**
 
 Our test is `chembl.molecule_dictionary.molecule_type` **for drugs only**
 (rule 1a), and **structure** for bioactivity compounds (rule 1b). The field is
@@ -1405,20 +1405,46 @@ ORITAVANCIN and DAPTOMYCIN are all peptides typed `Small molecule` — and it is
 not authoritative for compounds at all, where it abstains on 59.2% of rows and
 does so preferentially on the potent ones.
 
+**This heading previously read "only where the local field abstains". That word
+is void since rule 1 was rewritten.** Abstention is not the only state the field
+cannot settle. `Small molecule` is the one value rule 1a refuses to take on its
+own, so the field needs corroboration precisely where it sounds most confident —
+ChEMBL types icotrokinra, an **oral IL-23R peptide**, `Small molecule`.
+
 **Superseded:** this rule previously prescribed an Open Targets lookup as the
 primary cross-check on a `canonical_smiles IS NULL` test. Both the test and the
 mandatory cross-check are void — the SMILES test could not discriminate (rule 1),
 and the cross-check made an external API call for every drug in the common case,
 which the local field now answers.
 
-The lookup remains useful as **optional corroboration for `molecule_type =
-'Unknown'` only**. Open Targets'
-`drugAndClinicalCandidates.drug.drugType` returns `Antibody`, `Protein`,
-`Small molecule` or `Unknown` directly. If it resolves an `Unknown`, report the
-resolution with both sources named; if it also says `Unknown`, the drug stays
-modality-unknown. Where the two disagree, report the disagreement rather than
-picking; a drug that one source calls a small molecule and another calls a
-protein is a finding about the drug, not a tie to break.
+The lookup remains useful as **optional corroboration in the two cases the local
+evidence cannot resolve** — not for `Unknown` alone:
+
+1. **`molecule_type = 'Unknown'`** — the field abstained, and nothing local
+   replaces it.
+2. **`molecule_type = 'Small molecule'` with `structure_type = NONE` and no
+   SMILES retrieved** — the field over-claims and *both* of rule 1a's
+   corroboration routes are unavailable at once, so there is nothing local left
+   to decide with. This is the ICOTROKINRA signature and **5,191** ChEMBL
+   molecules carry it. Scoping the cross-check to `Unknown` excludes every one
+   of them, which is backwards: it is the case where the local field is not
+   merely silent but wrong.
+
+Rule 1a is not waived by the cross-check, in either direction. An uncorroborated
+`Small molecule` is **not counted** whether or not the lookup ran, and a lookup
+that comes back `Unknown` leaves it uncounted rather than restoring it.
+
+Open Targets' `drugAndClinicalCandidates.drug.drugType` returns `Antibody`,
+`Protein`, `Small molecule` or `Unknown` directly. If it resolves either case,
+report the resolution with both sources named; if it also says `Unknown`, the
+drug stays modality-unknown. Where the two disagree, report the disagreement
+rather than picking; a drug that one source calls a small molecule and another
+calls a protein is a finding about the drug, not a tie to break.
+
+**Moot today, wrong the moment it is not.** Rule 13 nulls the Open Targets
+client, so neither case is reachable in this deployment. The scoping is still
+part of the rule, and a deployment that gains a client must not inherit a
+cross-check that excludes 5,191 molecules by construction.
 
 ### 11. Insufficient evidence is a correct answer
 
@@ -1478,7 +1504,7 @@ and it is the only kind of error this dossier cannot survive.
 | `structure.cofold_control` | no cofolding model | all `null` |
 | `pocket_neighbour_precedent.*.cofold_transfer` | no cofolding model | all `null` |
 | `structure.tier` values `cofolded`, `predicted`, `sampled_ensemble` | no predictor | unreachable; use only experimental tiers or `none` |
-| the `Unknown` modality cross-check in rule 10b | no Open Targets client | the drug stays modality-unknown |
+| the modality cross-check in rule 10b — **both** its cases, `Unknown` and the uncorroborated `Small molecule` | no Open Targets client | the drug stays modality-unknown, and an uncorroborated `Small molecule` stays uncounted (rule 1a) |
 | `target_precedent.patents` | Paperclip returns "Patents sources are not available." | `count: null` |
 
 Each one gets an entry in `not_found` naming the field and the reason. Rule 12

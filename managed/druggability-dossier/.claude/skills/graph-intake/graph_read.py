@@ -797,6 +797,14 @@ SOURCE_TOKEN = re.compile(r"(PMC\d{5,}|NCT\d{8}|10\.\d{4,}/\S+|CHEMBL\d+|\b[0-9]
 
 MIN_SOURCE_TOKENS = 2
 
+# An ask that carries OUR answer and contradicts a row the graph asserts. It is
+# a correction, not a request for work, and the judgment gates were written for
+# requests -- see SKILL.md "The one ask that skips gates 2 and 3". Detected from
+# the `question` text because SKILL.md already requires such an ask to say so in
+# prose ("Mark it plainly as post-resolution"), and because adding a field to the
+# ask object would be a schema change upstream never agreed to.
+POST_RESOLUTION = re.compile(r"post[\s_-]?resolution", re.I)
+
 
 def is_secondary(finding, papers):
     """A finding that restates someone else's work rather than reporting one.
@@ -815,26 +823,79 @@ def is_secondary(finding, papers):
     return study in {"review", "meta_analysis"}
 
 
-def already_asked(graph, ask_type, target):
-    """Rounds already issued against this graph, matched on (verb, target).
+def question_identity(question):
+    """What makes two TARGETLESS asks the same ask.
+
+    The identity is the SET OF SOURCE IDENTIFIERS the question names, not the
+    question text and not a hash of it. Two reasons, and the second is the one
+    that decides:
+
+    - Text is not stable across the round trip. The upstream team rewords a
+      question when it services it, and `rounds` is the only record of what was
+      asked, so a hash of the wording calls a rephrasing a different ask and lets
+      the same question through twice.
+    - The identifiers are what make an ask routable at all -- QUESTION_IS_ACTIONABLE
+      already refuses a question that names fewer than two of them -- and they
+      survive rewording, translation and reordering.
+
+    Falls back to normalised text only when a question names no identifier, which
+    is a question that cannot pass QUESTION_IS_ACTIONABLE anyway.
+
+    Inherits SOURCE_TOKEN's looseness deliberately, so that "source identifier"
+    means one thing in this file. That regex's PDB-code branch also matches any
+    bare four-digit number, so a quoted measurement or a year joins the identity.
+    The error runs toward calling two asks DIFFERENT, i.e. toward letting an ask
+    through -- the opposite direction from the bug this replaced, and the safer
+    one, since a duplicate ask costs a round and a false match costs the verb.
+    """
+    tokens = tuple(sorted(set(SOURCE_TOKEN.findall(question or ""))))
+    if tokens:
+        return ("sources", tokens)
+    return ("text", NS_WORD.sub(" ", (question or "").lower()).strip())
+
+
+def already_asked(graph, ask_type, target, question=None):
+    """Rounds already issued against this graph. Returns (hits, unmatchable).
 
     Re-asking is not harmless. It costs a round, returns the same evidence, and
     -- because `rounds` is the only record of what was tried -- makes the graph
     look like it was interrogated twice as hard as it was.
+
+    Matched on (verb, target) for the three verbs that HAVE a target.
+    `new_question` does not: SCHEMA.md gives it `target: null` by design, so
+    (verb, target) is `("new_question", None)` for every new_question ever
+    issued and the first one asked retires the verb for the life of the graph.
+    Failure mode 18. A targetless ask is matched on `question_identity` instead.
+
+    `unmatchable` carries the targetless rounds that record no `question` text,
+    because those cannot be compared to anything: they are prior asks this gate
+    is structurally unable to see, and reporting them as "no match" would be a
+    false all-clear. The caller says so rather than deciding it.
     """
-    hits = []
+    hits, unmatchable = [], []
+    targetless = target is None and ASK_TARGET_INDEX.get(ask_type, False) is None
     for r in read_list(graph, "rounds", require_id=False):
-        if r.get("ask") == ask_type and r.get("target") == target:
+        if r.get("ask") != ask_type:
+            continue
+        if not targetless:
+            if r.get("target") == target:
+                hits.append(r)
+            continue
+        prior_question = r.get("question")
+        if not prior_question:
+            unmatchable.append(r)
+        elif question_identity(prior_question) == question_identity(question):
             hits.append(r)
-    return hits
+    return hits, unmatchable
 
 
 def check_ask(graph, ask):
-    """Mechanical gates on one proposed ask. Returns (gates, unchecked).
+    """Mechanical gates on one proposed ask. Returns (gates, unchecked, exempt).
 
     `gates` is a list of {gate, ok, detail}. `unchecked` names the judgment
     gates this function deliberately does not evaluate, so a caller cannot read
-    an all-green result as approval.
+    an all-green result as approval. `exempt` names the judgment gates that do
+    not apply to THIS ask and says why -- empty for every ordinary ask.
     """
     idx = index(graph)
     gates = []
@@ -882,12 +943,22 @@ def check_ask(graph, ask):
         "sides and what would settle it, or the answering team reruns our search.",
     )
 
-    prior = already_asked(graph, ask_type, target)
+    prior, unmatchable = already_asked(graph, ask_type, target, question)
+    matched_on = "target" if target is not None else "the source ids in `question`"
     gate(
         "NOT_ALREADY_ASKED",
         not prior,
-        f"rounds already carries {len(prior)} ask(s) of {ask_type} at {target!r}"
-        + (f" (round {prior[0].get('n')}, outcome {prior[0].get('outcome')!r})" if prior else ""),
+        f"rounds already carries {len(prior)} ask(s) of {ask_type} at {target!r}, "
+        f"matched on {matched_on}"
+        + (f" (round {prior[0].get('n')}, outcome {prior[0].get('outcome')!r})" if prior else "")
+        + (
+            f". NOTE: {len(unmatchable)} prior {ask_type} round(s) "
+            f"{[r.get('n') for r in unmatchable]} record no `question` text, so this "
+            "gate cannot compare against them -- a targetless ask has no target to "
+            "match on and upstream does not have to write the question into `rounds`. "
+            "Read those rounds before issuing this."
+            if unmatchable else ""
+        ),
     )
 
     coverage = graph.get("coverage", {}) or {}
@@ -900,16 +971,49 @@ def check_ask(graph, ask):
         "evidence, so the ask is noise.",
     )
 
-    return gates, [
+    # Gates 2 and 3 are judgment and are not evaluated here. But both are written
+    # for an ask that REQUESTS work, and one ask type does not: the post-resolution
+    # contradiction ask, which carries our own settled answer against a row the
+    # graph asserts. Naming it as unchecked-and-therefore-required routed the one
+    # ask type that has proven valuable nowhere -- gate 2's own rationale ("either
+    # usable or contradicted by something we can measure") names the contradiction
+    # case and then had no branch for it.
+    post_resolution = bool(POST_RESOLUTION.search(question))
+    unchecked = [
         "AFFECTS_THE_DOSSIER -- does this claim change a value in the template? "
         "An efficacy or clinical-outcome argument does not touch a tractability "
-        "number (dossier rule 7) and fails this gate.",
-        "SUPPORT_IS_SECONDARY_ONLY -- is every source a review, class table or "
-        "citing paraphrase? A primary or mixed basis is never an ask.",
-        "WE_TRIED_AND_FAILED -- were ChEMBL, the registry, the structure and a "
-        "corpus grep on the exact identifiers all run and all silent, and is "
-        "each null recorded in not_found BEFORE the ask was written?",
+        "number (dossier rule 7) and fails this gate."
     ]
+    exempt = []
+    if post_resolution:
+        exempt += [
+            "SUPPORT_IS_SECONDARY_ONLY (gate 2) -- EXEMPT. `question` declares this "
+            "ask post-resolution, so it carries our answer rather than a request for "
+            "one. Gate 2 exists because a primary-supported claim is 'either usable "
+            "or contradicted by something we can measure' -- this IS the second "
+            "branch, and a wrong `primary` row is more damaging than a wrong "
+            "`background_only` one, not less. The basis of the target link is "
+            "irrelevant to an ask that is a correction.",
+            "WE_TRIED_AND_FAILED (gate 3) -- EXEMPT, and for the same reason it "
+            "always was: gate 3 stops us outsourcing work we did not do, and here "
+            "the work is done. What replaces both gates is stricter, not looser -- "
+            "the ask MUST state our answer, its source and its date, and must not "
+            "block any dossier field. An ask claiming post-resolution and carrying "
+            "only a doubt is the abuse this exemption creates; see failure mode 19.",
+        ]
+    else:
+        unchecked.append(
+            "SUPPORT_IS_SECONDARY_ONLY -- is every source a review, class table or "
+            "citing paraphrase? A primary or mixed basis is not an ask, UNLESS the "
+            "ask is a post-resolution contradiction carrying our own answer, which "
+            "is exempt and must say so in `question`."
+        )
+        unchecked.append(
+            "WE_TRIED_AND_FAILED -- were ChEMBL, the registry, the structure and a "
+            "corpus grep on the exact identifiers all run and all silent, and is "
+            "each null recorded in not_found BEFORE the ask was written?"
+        )
+    return gates, unchecked, exempt
 
 
 def ask_context(graph):
@@ -930,7 +1034,14 @@ def ask_context(graph):
         fids = link_findings(link)
         findings = [idx["findings"][f] for f in fids if f in idx["findings"]]
         secondary = [f["id"] for f in findings if is_secondary(f, idx["papers"])]
-        prior = already_asked(graph, "resolve_link", link["id"])
+        prior, _ = already_asked(graph, "resolve_link", link["id"])
+        secondary_only = bool(findings) and len(secondary) == len(findings)
+        # Everything except gate 2. Split out because gate 2 is the one gate a
+        # post-resolution contradiction ask is exempt from, and folding it into a
+        # single boolean made L4 (basis primary, the ask that WORKED) and L2
+        # (basis primary, the ask that must never fire) indistinguishable in this
+        # output -- both just `mechanical_gates_clear: false`.
+        clear_except_gate2 = bool(findings) and not prior and stop != "complete"
         rows.append({
             "link": link["id"],
             "relation": (
@@ -941,7 +1052,7 @@ def ask_context(graph):
             "basis": link.get("basis"),
             "n_findings": len(findings),
             "secondary_findings": secondary,
-            "support_is_secondary_only": bool(findings) and len(secondary) == len(findings),
+            "support_is_secondary_only": secondary_only,
             "distinct_papers": sorted({f.get("paper") for f in findings if f.get("paper")}),
             "already_asked_rounds": [r.get("n") for r in prior],
             # The basis test comes FIRST and is the one that decides, exactly as
@@ -953,10 +1064,19 @@ def ask_context(graph):
             # is worth reading rather than smoothing over.
             "mechanical_gates_clear": (
                 link.get("basis") in NON_ACTIONABLE_BASIS
-                and bool(findings)
-                and len(secondary) == len(findings)
-                and not prior
-                and stop != "complete"
+                and secondary_only
+                and clear_except_gate2
+            ),
+            # The post-resolution branch. True where every mechanical gate EXCEPT
+            # gate 2 is clear -- i.e. this link is only blocked by carrying primary
+            # or mixed support. That blocks a request for work, and it must not
+            # block a correction: if we have settled this row ourselves and our
+            # answer contradicts it, the ask is legitimate here and a `primary`
+            # basis makes the wrong row MORE worth correcting, not less.
+            # Still not permission: it requires that we actually did the work and
+            # that the ask carries our answer and its source.
+            "clear_if_post_resolution_contradiction": (
+                clear_except_gate2 and link.get("basis") not in NON_ACTIONABLE_BASIS
             ),
         })
 
@@ -978,6 +1098,17 @@ def ask_context(graph):
             "and did WE try ChEMBL / the registry / the structure first, and is "
             "each failed attempt recorded -- are not evaluated here and cannot "
             "be. See SKILL.md 'What must never become an ask'."
+        ),
+        "_post_resolution_note": (
+            "clear_if_post_resolution_contradiction is the OTHER direction, and it "
+            "is the one that has fired in practice: we settled a claim ourselves "
+            "and our answer contradicts this row. Such an ask is a CORRECTION, not "
+            "a request, so gates 2 and 3 do not apply -- it must instead state our "
+            "answer, its source and its date, say 'post-resolution' in `question`, "
+            "and block no dossier field. Everything else still applies: an id to "
+            "point at, no prior round, a non-exhausted graph, and two source "
+            "identifiers. A true value here on a link we have NOT actually measured "
+            "against is the abuse this field creates."
         ),
     }
 
@@ -1022,8 +1153,9 @@ def main():
 
     try:
         if args.check_ask:
-            gates, unchecked = check_ask(graph, json.loads(args.check_ask))
-            json.dump({"gates": gates, "not_checked_here": unchecked},
+            gates, unchecked, exempt = check_ask(graph, json.loads(args.check_ask))
+            json.dump({"gates": gates, "not_checked_here": unchecked,
+                       "exempt_for_this_ask": exempt},
                       sys.stdout, indent=2)
             sys.stdout.write("\n")
             sys.exit(0 if all(g["ok"] for g in gates) else 1)
