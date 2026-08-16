@@ -26,6 +26,7 @@ from hyp_gen.params import (
     SelectionParams,
 )
 from hyp_gen.pipeline import Generator
+from hyp_gen import report
 from hyp_gen.report import to_markdown
 from hyp_gen.schema import Articulation, Claim, Comparison, Critique, Slate
 from hyp_gen.scoring import score_candidate
@@ -289,7 +290,7 @@ def test_slate_serialises_and_round_trips(graph: KnowledgeGraph) -> None:
 
 def test_report_renders_the_audit_trail(graph: KnowledgeGraph) -> None:
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
-    markdown = to_markdown(slate, detail="full")
+    markdown = to_markdown(slate, mode="full")
     assert "# Hypotheses" in markdown
     assert "Killed by" in markdown
     assert "Source sentences" in markdown
@@ -307,8 +308,8 @@ def test_the_brief_report_is_the_default_and_is_much_shorter(
     """
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
     brief = to_markdown(slate)
-    assert brief == to_markdown(slate, detail="brief")
-    assert len(brief) < len(to_markdown(slate, detail="full")) / 2
+    assert brief == to_markdown(slate, mode="prose")
+    assert len(brief) < len(to_markdown(slate, mode="full")) / 2
     # The corroboration is what got dropped, not the idea or its refutation.
     assert "What would kill it" in brief
     assert "The experiment that would settle it" in brief
@@ -331,12 +332,65 @@ def test_the_brief_report_keeps_every_warning_the_full_one_has(
     assert "caveat" in brief.lower()
 
 
-def test_an_unknown_detail_level_is_an_error(graph: KnowledgeGraph) -> None:
-    """Silently falling back to brief would hand an auditor a partial record
+def test_every_mode_keeps_the_signals_a_reader_must_not_miss(
+    graph: KnowledgeGraph,
+) -> None:
+    """A mode changes the form, never the safety.
+
+    This is the test that stops a new view from quietly becoming a softer one:
+    whatever shape it renders in, it carries the absence-of-evidence warning
+    and it names a rejected hypothesis as rejected.
+    """
+    judge = FakeJudge(cite="L-does-not-exist")  # every hypothesis fails citations
+    slate = Generator(graph=graph, params=_params(), judge=judge).run()
+    assert any(
+        i.code == "illegal_citation" for h in slate.hypotheses for i in h.issues
+    ), "fixture must actually produce a rejected hypothesis"
+
+    for mode in report.MODE_NAMES:
+        rendered = to_markdown(slate, mode=mode)
+        assert "not** evidence of absence" in rendered, mode
+        assert "CITATION REJECTED" in rendered, mode
+
+
+def test_every_mode_renders_every_hypothesis(graph: KnowledgeGraph) -> None:
+    """A view that silently drops rows is worse than no view."""
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    assert len(slate.hypotheses) > 1
+    for mode in report.MODE_NAMES:
+        rendered = to_markdown(slate, mode=mode)
+        for hypothesis in slate.hypotheses:
+            assert hypothesis.subject_name in rendered, (mode, hypothesis.id)
+
+
+def test_trace_mode_names_every_link_and_its_evidence(graph: KnowledgeGraph) -> None:
+    """Trace answers 'where did this come from', so the ids have to be in it."""
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    trace = to_markdown(slate, mode="trace")
+    for hypothesis in slate.hypotheses:
+        for step in hypothesis.path:
+            assert step["link"] in trace
+        for finding_id, finding in hypothesis.evidence["findings"].items():
+            assert finding_id in trace
+            # The verbatim sentence, not a paraphrase of it.
+            assert finding["quote"] in trace
+
+
+def test_table_mode_is_one_row_per_hypothesis(graph: KnowledgeGraph) -> None:
+    slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
+    table = to_markdown(slate, mode="table")
+    # The `|---|` separator does not match this filter, so it is the header row
+    # plus exactly one row per hypothesis.
+    rows = [line for line in table.splitlines() if line.startswith("| ")]
+    assert len(rows) == len(slate.hypotheses) + 1
+
+
+def test_an_unknown_mode_is_an_error(graph: KnowledgeGraph) -> None:
+    """Silently falling back to prose would hand an auditor a partial record
     that looks complete."""
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
-    with pytest.raises(ValueError, match="detail must be"):
-        to_markdown(slate, detail="verbose")
+    with pytest.raises(ValueError, match="mode must be"):
+        to_markdown(slate, mode="verbose")
 
 
 def test_run_is_reproducible(graph: KnowledgeGraph, params: Params) -> None:
@@ -476,7 +530,7 @@ def test_halting_stops_the_model_gate_from_spending_calls(
 
 def test_the_report_shows_the_gate_table(graph: KnowledgeGraph) -> None:
     slate = Generator(graph=graph, params=_params(), judge=FakeJudge()).run()
-    markdown = to_markdown(slate, detail="full")
+    markdown = to_markdown(slate, mode="full")
     assert "**Verification**" in markdown
     assert "gate 1 structure" in markdown
     assert "VERDICT" in markdown

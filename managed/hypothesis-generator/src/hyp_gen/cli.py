@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from hyp_gen import valuation, verify
+from hyp_gen import report, valuation, verify
 from hyp_gen.evidence import build_pack
 from hyp_gen.graph import GraphIndex, KnowledgeGraph
 from hyp_gen.llm import Judge
@@ -187,11 +187,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, help="directory for report.md and slate.json")
     parser.add_argument(
-        "--full-report",
-        action="store_true",
+        "--report-mode",
+        action="append",
+        choices=report.MODE_NAMES,
+        metavar="MODE",
         help=(
-            "also write report-full.md with the claims tables, gate tables and "
-            "verbatim source sentences; report.md stays the short read"
+            "which view(s) to write, repeatable: prose (report.md, the default) "
+            "| table (report-table.md, one row per hypothesis) | trace "
+            "(report-trace.md, the graph walk with each edge's evidence) | full "
+            "(report-full.md, claims, gate tables and verbatim sources)"
         ),
     )
     parser.add_argument("--dry-run", action="store_true", help="no model calls")
@@ -223,27 +227,27 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         metavar="SLATE",
         help=(
-            "re-render report.md from an existing slate.json and exit; with "
-            "--full-report, writes report-full.md instead. Rendering is a pure "
-            "function of the slate, so this costs no model calls"
+            "re-render from an existing slate.json and exit, in whichever "
+            "--report-mode(s) you ask for. Rendering is a pure function of the "
+            "slate, so this costs no model calls"
         ),
     )
     args = parser.parse_args(argv)
 
     if args.report_from:
-        # The full report is recoverable from the slate at any time, which is
-        # what makes a short report.md safe to make the default: nothing is
-        # lost by not printing it, only by not keeping slate.json.
+        # Every view is recoverable from the slate at any time, which is what
+        # makes a short report.md safe as the default: nothing is lost by not
+        # printing a view, only by not keeping slate.json.
         slate = Slate.model_validate(json.loads(args.report_from.read_text()))
-        detail = "full" if args.full_report else "brief"
-        name = "report-full.md" if args.full_report else "report.md"
-        rendered = to_markdown(slate, detail=detail)
+        modes = args.report_mode or ["prose"]
         if args.out:
             args.out.mkdir(parents=True, exist_ok=True)
-            (args.out / name).write_text(rendered)
-            print(f"wrote {args.out / name} ({detail})")
+            for mode in modes:
+                path = args.out / report.FILENAMES[mode]
+                path.write_text(to_markdown(slate, mode=mode))
+                print(f"wrote {path} ({mode})")
         else:
-            print(rendered)
+            print("\n\n".join(to_markdown(slate, mode=m) for m in modes))
         return 0
 
     if args.emit_programs_from:
@@ -313,13 +317,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.out:
         args.out.mkdir(parents=True, exist_ok=True)
-        (args.out / "report.md").write_text(to_markdown(slate))
+        # The slate is the record; the reports are views of it. Write the slate
+        # whatever was asked for, so any view missed here is recoverable later
+        # with --report-from.
         (args.out / "slate.json").write_text(slate.model_dump_json(indent=2))
-        print(f"\nwrote {args.out / 'report.md'} and {args.out / 'slate.json'}")
-        if args.full_report:
-            full = args.out / "report-full.md"
-            full.write_text(to_markdown(slate, detail="full"))
-            print(f"wrote {full}")
+        for mode in args.report_mode or ["prose"]:
+            path = args.out / report.FILENAMES[mode]
+            path.write_text(to_markdown(slate, mode=mode))
+            print(f"\nwrote {path} ({mode})")
+        print(f"wrote {args.out / 'slate.json'}")
     elif not args.dry_run:
         print(to_markdown(slate))
 

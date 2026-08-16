@@ -1,25 +1,38 @@
 """Markdown rendering. Inspectability is a deliverable, not a debug aid.
 
-The order of each section is chosen so a skeptical reader hits the weakest part
+Every renderer here is a pure function of one ``Slate`` -- the same object that
+``slate.json`` holds -- so any view can be produced, or reproduced, from a saved
+run without re-running the pipeline. That is the property the modes below rest
+on: a report is a *view*, and the record is the slate.
+
+Four modes, because four different questions get asked of one slate:
+
+``prose``  (default, ``report.md``)  What is this idea, is it any good, what
+           would kill it, what do I do next. Paragraphs, for reading.
+``table``  (``report-table.md``)     Which of these should I look at first.
+           One row per hypothesis, for scanning and comparing.
+``trace``  (``report-trace.md``)     Where did this come from. The graph walk
+           node by node, each edge carrying its link id, recomputed support,
+           conditions and the findings that back it.
+``full``   (``report-full.md``)      Is the work correct. Claims, per-claim
+           citations, gate tables and verbatim source sentences.
+
+Order within a hypothesis is chosen so a skeptical reader hits the weakest part
 first: statement, then what would kill it, then the criticism, then the
 evidence, then the caveats. A report that leads with the evidence reads as
 advocacy.
 
-Two detail levels, because those are two different readers. ``brief`` -- the
-default, and what ``report.md`` holds -- answers the four questions someone has
-in front of a slate: what is the idea, is it any good, what would kill it, what
-do I do next. ``full`` adds the claims table, the per-claim citations, the
-gate table and the verbatim source sentences: the audit trail, for someone
-checking the work rather than reading it.
-
-Brief is a shorter *view*, never a softer one. Every signal that a reader must
-not miss -- a failure badge, a halted verification, the absence-of-evidence
-warning, an error-level validation issue -- renders at both levels. What brief
-drops is corroboration and detail, all of which survives in ``slate.json``, so a
-brief report can always be re-rendered into a full one.
+**A mode changes the form, never the safety.** Every signal a reader must not
+miss renders in all four: the failure badges, a halted verification, an
+error-level validation issue, and the absence-of-evidence warning on a
+truncated graph. What a mode may drop is corroboration and detail, all of which
+survives in the slate. ``test_every_mode_keeps_the_signals_a_reader_must_not_miss``
+is what stops a new mode from quietly becoming a softer one.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 from hyp_gen.schema import Hypothesis, Slate
 
@@ -64,6 +77,33 @@ def _failure_badges(hypothesis: Hypothesis) -> list[str]:
     if errors and not badges:
         badges.append("**INVALID — see validation**")
     return badges
+
+
+def _halt_note(hypothesis: Hypothesis) -> str:
+    """The one sentence a halted verification must never be read without.
+
+    Gates below a halt did not run. A view that shows the passes and omits the
+    halt turns a partial verification into a clean-looking one, so every mode
+    calls this rather than formatting its own.
+    """
+    verification = hypothesis.verification
+    if not (verification and verification.halted_at):
+        return ""
+    halted = verification.halted_at
+    gate = verification.gate(halted)
+    return (
+        f"Verification stopped at **{halted}**: {gate.summary if gate else ''} "
+        "Every gate below it was not run, and none of them should be read as passed."
+    )
+
+
+def _flags(hypothesis: Hypothesis) -> list[str]:
+    """Compact flags for views with no room for a badge line, e.g. a table row."""
+    flags = [b.replace("*", "").split(" — ")[0] for b in _failure_badges(hypothesis)]
+    verification = hypothesis.verification
+    if verification and verification.halted_at:
+        flags.append(f"HALTED at {verification.halted_at}")
+    return flags
 
 
 _SCORE_LABELS = [
@@ -143,7 +183,7 @@ def _dropped_detail(hypothesis: Hypothesis) -> str:
     return (
         f"<sub>Not shown: {', '.join(counts)}, the mechanism write-up and the "
         "gate table — all of it in `slate.json`. Recover with "
-        "`hypgen --report-from slate.json --full-report --out .`</sub>"
+        "`hypgen --report-from slate.json --report-mode full --out .`</sub>"
     )
 
 
@@ -208,15 +248,9 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
         out.append(f"> {critique.strongest_objection}")
         out.append("")
 
-    # A halt means the gates below it never ran. Dropping that from the short
-    # view would turn a partial verification into a clean-looking one.
-    if hypothesis.verification and hypothesis.verification.halted_at:
-        halted = hypothesis.verification.halted_at
-        gate = hypothesis.verification.gate(halted)
-        out.append(
-            f"> Verification stopped at **{halted}**: {gate.summary if gate else ''} "
-            "Every gate below it was not run, and none of them should be read as passed."
-        )
+    halt = _halt_note(hypothesis)
+    if halt:
+        out.append(f"> {halt}")
         out.append("")
 
     # Caveats are already full sentences written to be read; run them together
@@ -242,6 +276,170 @@ def _hypothesis_brief_md(hypothesis: Hypothesis, position: int) -> str:
     dropped = _dropped_detail(hypothesis)
     if dropped:
         out.append(dropped)
+        out.append("")
+    return "\n".join(out)
+
+
+# -- table mode ------------------------------------------------------------
+
+
+def _cell(value: float | None) -> str:
+    return "—" if value is None else f"{value:.2f}"
+
+
+def _table_md(slate: Slate) -> str:
+    """One row per hypothesis: the view for deciding what to read first.
+
+    Endpoints, not statements, fill the subject column. A statement is a
+    paragraph-long sentence and truncating it in a cell would misrepresent a
+    hedged claim as a flat one -- the reader is pointed at prose mode instead.
+    """
+    out = [
+        "| # | hypothesis | motif | hops | verification | critics "
+        "| support | novelty | testability | rank | flags |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for i, h in enumerate(slate.hypotheses, start=1):
+        verification = h.verification.verdict if h.verification else "—"
+        flags = _flags(h)
+        out.append(
+            f"| {i} | {h.subject_name} → {h.object_name} "
+            f"| `{h.motif}` | {h.hops} | {verification} "
+            f"| {h.verdict.replace('_', ' ') if h.verdict else '—'} "
+            f"| {_cell(h.scores.get('support'))} "
+            f"| {_cell(h.scores.get('novelty'))} "
+            f"| {_cell(h.scores.get('testability'))} "
+            f"| {_cell(h.rank_score)} "
+            f"| {'; '.join(flags) if flags else ''} |"
+        )
+    out.append("")
+    out.append(
+        "Ranking orders the page; it does not grade the science. Columns are "
+        "separate axes on purpose — a hypothesis with high support and low "
+        "novelty is a known fact, and averaging them would rank it first."
+    )
+    out.append("")
+
+    # A flag in a cell is easy to skim past, so anything flagged gets restated
+    # underneath at full width. A table must not be the view where a rejected
+    # hypothesis looks like a slightly worse row.
+    flagged = [(i, h) for i, h in enumerate(slate.hypotheses, start=1) if _flags(h)]
+    if flagged:
+        out.append("**Flagged rows**")
+        out.append("")
+        for i, h in flagged:
+            for badge in _failure_badges(h):
+                out.append(f"- {i}. {badge}")
+            for issue in (x for x in h.issues if x.severity == "error"):
+                out.append(f"  - ❌ `{issue.code}` {issue.detail}")
+            halt = _halt_note(h)
+            if halt:
+                out.append(f"- {i}. {halt}")
+        out.append("")
+    return "\n".join(out)
+
+
+# -- trace mode ------------------------------------------------------------
+
+
+def _trace_md(hypothesis: Hypothesis, position: int) -> str:
+    """The graph walk, node by node, with each edge's evidence hanging off it.
+
+    This is the provenance view: it answers "where did this come from" without
+    the reader having to trust any prose. Every hop names its link id, the
+    support recomputed from findings (not the graph's stated confidence), the
+    conditions the result was measured under, and the finding ids on each side
+    of the question -- including `no` and `no_effect`, because an edge that
+    something argues against is exactly what a trace exists to surface.
+    """
+    out = [f"## {position}. {hypothesis.subject_name} → {hypothesis.object_name}"]
+    out.append("")
+    badges = _failure_badges(hypothesis)
+    if badges:
+        out.append(" · ".join(badges))
+        out.append("")
+    out.append(
+        f"`{hypothesis.motif}` · {hypothesis.hops} hop(s) · {hypothesis.provenance}"
+    )
+    out.append("")
+
+    links = hypothesis.evidence.get("links") or {}
+    findings = hypothesis.evidence.get("findings") or {}
+    out.append("```")
+    out.append(f"{hypothesis.subject_name}  ({hypothesis.subject})")
+    for step in hypothesis.path:
+        link = links.get(step["link"], {})
+        support = step.get("support")
+        support_txt = "n/a" if support is None else f"{support:.2f}"
+        direction = "reversed" if step["reversed"] else "forward"
+        out.append(
+            f"  │  {step['link']}  {step['how']}  "
+            f"[{step['state']}, {direction}, support {support_txt}]"
+        )
+        conditions = link.get("conditions") or []
+        if conditions:
+            out.append(f"  │    conditions: {', '.join(conditions)}")
+        stated = link.get("stated_confidence")
+        if stated is not None and support is not None:
+            drift = support - stated
+            if abs(drift) >= 0.005:
+                direction_word = "below" if drift < 0 else "above"
+                out.append(
+                    f"  │    recomputed {abs(drift):.2f} {direction_word} the "
+                    f"graph's stated confidence of {stated:.2f}"
+                )
+        for verdict_key, label in (
+            ("yes", "supports"),
+            ("no", "contradicts"),
+            ("no_effect", "no effect"),
+        ):
+            for finding_id in link.get(verdict_key) or []:
+                finding = findings.get(finding_id, {})
+                marks = []
+                if finding.get("hedged"):
+                    marks.append("hedged")
+                if finding.get("is_own_result") is False:
+                    marks.append("citing others")
+                suffix = f" [{', '.join(marks)}]" if marks else ""
+                paper = finding.get("paper", "?")
+                where = finding.get("where") or "conditions unstated"
+                out.append(
+                    f"  │    {label}: {finding_id} ({paper}, {where}){suffix}"
+                )
+                quote = finding.get("quote")
+                if quote:
+                    out.append(f'  │      "{quote}"')
+        arrow = "▲" if step["reversed"] else "▼"
+        out.append(f"  {arrow}")
+        out.append(f"{step['to_name']}  ({step['to']})")
+    out.append("```")
+    out.append("")
+
+    gap = hypothesis.evidence.get("gap")
+    if gap:
+        out.append(f"Closes gap `{gap.get('id', '?')}`: {gap.get('why') or gap}")
+        out.append("")
+
+    notes = hypothesis.evidence.get("scoring_notes") or []
+    if notes:
+        out.append("**How the scores got their values**")
+        out.extend(f"- {n}" for n in notes)
+        out.append("")
+
+    halt = _halt_note(hypothesis)
+    if halt:
+        out.append(f"> {halt}")
+        out.append("")
+
+    errors = [i for i in hypothesis.issues if i.severity == "error"]
+    if errors:
+        out.append("Validation rejected it:")
+        out.extend(f"- ❌ `{i.code}` {i.detail}" for i in errors)
+        out.append("")
+
+    if hypothesis.caveats:
+        out.append("**Caveats**")
+        out.extend(f"- {c}" for c in hypothesis.caveats)
         out.append("")
     return "\n".join(out)
 
@@ -385,13 +583,13 @@ def _hypothesis_md(hypothesis: Hypothesis, position: int) -> str:
     return "\n".join(out)
 
 
-def _header(slate: Slate, detail: str) -> list[str]:
+def _header(slate: Slate, mode: str) -> list[str]:
     cov = slate.coverage
     verification = " · ".join(
         f"{slate.counts.get(f'verification_{v}', 0)} {v}"
         for v in ("verified", "qualified", "unverified", "rejected")
     )
-    if detail == "brief":
+    if mode == "prose":
         # A short narrative instead of stat lines. The truncation flag stays in
         # the same sentence as the read counts: it is the fact that decides how
         # much any novelty score below is worth.
@@ -455,16 +653,42 @@ def _header(slate: Slate, detail: str) -> list[str]:
     ]
 
 
-def to_markdown(slate: Slate, detail: str = "brief") -> str:
-    """Render a slate. ``detail`` is ``"brief"`` (default) or ``"full"``.
+# Every mode is a function of the slate and nothing else. Adding one means
+# adding a renderer here; the CLI, the filenames and the mode validation all
+# read from this map rather than repeating the list.
+MODES: dict[str, Callable[[Hypothesis, int], str]] = {
+    "prose": _hypothesis_brief_md,
+    "trace": _trace_md,
+    "full": _hypothesis_md,
+}
+# table renders the whole slate at once rather than per hypothesis.
+MODE_NAMES: tuple[str, ...] = ("prose", "table", "trace", "full")
 
-    Brief is the default because the report exists to be read, and a reader who
-    gives up three screens in has got nothing from the audit trail either.
+FILENAMES: dict[str, str] = {
+    "prose": "report.md",
+    "table": "report-table.md",
+    "trace": "report-trace.md",
+    "full": "report-full.md",
+}
+
+
+def to_markdown(slate: Slate, mode: str = "prose") -> str:
+    """Render a slate in one of ``MODE_NAMES``.
+
+    ``prose`` is the default because the report exists to be read, and a reader
+    who gives up three screens in has got nothing from the audit trail either.
+    Every mode is a pure function of the slate, so any view can be produced
+    from a saved ``slate.json`` without re-running the pipeline.
     """
-    if detail not in ("brief", "full"):
-        raise ValueError(f"detail must be 'brief' or 'full', got {detail!r}")
+    if mode not in MODE_NAMES:
+        raise ValueError(
+            f"mode must be one of {', '.join(MODE_NAMES)}, got {mode!r}"
+        )
     cov = slate.coverage
-    out = _header(slate, detail)
+    out = _header(slate, mode)
+    # This warning is the reason a novelty score means anything, so it is not a
+    # mode's to drop -- including the table, where scores are most inviting to
+    # read straight off the page.
     if cov.get("truncated") or cov.get("depth") == "quick":
         out += [
             "> Absence of a link in this graph is **not** evidence of absence in "
@@ -473,9 +697,12 @@ def to_markdown(slate: Slate, detail: str = "brief") -> str:
             "",
         ]
 
-    render = _hypothesis_md if detail == "full" else _hypothesis_brief_md
-    for i, hypothesis in enumerate(slate.hypotheses, start=1):
-        out.append(render(hypothesis, i))
+    if mode == "table":
+        out.append(_table_md(slate))
+    else:
+        render = MODES[mode]
+        for i, hypothesis in enumerate(slate.hypotheses, start=1):
+            out.append(render(hypothesis, i))
 
     if slate.asks:
         out += ["---", "", "## Next round", "", "One ask per request:", ""]
