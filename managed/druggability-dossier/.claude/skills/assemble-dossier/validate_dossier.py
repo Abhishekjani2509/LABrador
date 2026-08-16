@@ -324,16 +324,40 @@ DRUGGABILITY_FALSE_NEGATIVE_FLOOR = 0.1
 PRIMARY_VOLUME_CLUSTERING_D = 1.6
 MERGED_VOLUME_A3 = 1000.0
 
-# A PROPOSAL, NOT A CALIBRATED THRESHOLD — marked the same way as the 4 A
-# off-site distance above, and for the same reason. Volume at D=1.6 gave AUC
-# 1.000 stable under all 15 leave-one-target-out refits, with >=242 A^3 entirely
-# druggable and <=207 A^3 entirely hard. That is a 17% margin fitted post hoc on
-# n=15 and it needs out-of-sample validation before it gates anything, so
-# NOTHING in this file classifies on it. It is used only to decide when a low
-# druggability and a large volume disagree loudly enough that the disagreement
-# must be written down. Stated limitation: n=5 hard targets, all
-# PPI/cytokine/membrane, against a druggable set enriched in kinases, nuclear
-# receptors and GPCRs — volume may partly track target class.
+# A DISCLOSURE TRIGGER. NOT A THRESHOLD, NOT A PROPOSAL, NOT A CLASSIFIER.
+#
+# These two numbers used to be documented here as an uncalibrated proposal
+# resting on a measured separation: volume at D=1.6 giving AUC 1.000 stable under
+# all 15 leave-one-target-out refits, with >=242 A^3 entirely druggable and
+# <=207 A^3 entirely hard. THAT SEPARATION IS RETRACTED (2026-08-15; CLAUDE.md
+# rule 4a, rubric.md, OUTPUT_NOTES.md). It is not merely uncalibrated — it is
+# withdrawn, and it may not be revived from this file.
+#
+# What the audit found, in one line each:
+#   - four of the five hard anchors do not measure their target. MYC's pocket is
+#     100% MAX (P61244), zero MYC lining residues; IL-11's is 100% IL-11 receptor
+#     alpha (Q14626); CD20's anchor ligand is cholesterol hemisuccinate, a
+#     detergent; TL1A had no site anchor at all. TNF's pocket is on TNF but has
+#     zero residue overlap with its only drug-anchored site;
+#   - RORgt's 6C1P contains no RORgt (sole entity A8EVM5, an ion transport
+#     protein) and was selected by ligand_site_jaccard, the trusted path, on a
+#     CHAPSO detergent anchor — so restricting to the target's chains is
+#     necessary and not sufficient;
+#   - chain_accessions was {} on EVERY entry, so every chain of every assembly
+#     was scored as target, and max_druggability_no_ligand_site (which identifies
+#     no site) set the headline median for MYC, IL-11, TL1A and TNF;
+#   - the bootstrap CI of [1.000, 1.000] was degenerate by construction, since
+#     resampling a perfectly separated set cannot create an inversion;
+#   - and the confound is fatal: the binary flag "a drug-like ligand was
+#     co-crystallised" separates the groups at AUC 0.900 with no structural
+#     measurement at all. The label and the measurability are the same variable.
+#
+# THE CONSTANTS BELOW ARE UNCHANGED AND DELIBERATELY SO. Nothing in this file
+# classifies on them and nothing ever did; they are read by exactly one rule, to
+# decide when a low druggability sitting beside a large volume disagree loudly
+# enough that the disagreement must be written into tractability.caveat. That is
+# a disclosure trigger, and it survives the retraction because it asserts nothing
+# about which side of it a target falls on. Do not add a rule that gates on them.
 VOLUME_GUIDE_DRUGGABLE_A3 = 240.0
 VOLUME_GUIDE_HARD_A3 = 210.0
 
@@ -1105,7 +1129,10 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
                     f"{max(volumes)!r} A^3 — the demoted number and the primary "
                     "number disagree. Report the disagreement in "
                     "tractability.caveat; do not resolve it in either direction "
-                    "(the volume guide is an uncalibrated proposal, n=15)",
+                    "(the volume guide is RETRACTED as of rule 4a, and is no "
+                    "longer even the uncalibrated proposal it was previously "
+                    "described as. It triggers this disclosure and classifies "
+                    "nothing)",
                 )
             )
     return v
@@ -1141,9 +1168,13 @@ def check_volume_is_primary(d: dict) -> list[Violation]:
                     "VOLUME_NOT_PRIMARY",
                     "tractability.pocket_volume_a3.primary_d1_6_a3",
                     "computed-axis geometry reported without the D=1.6 site "
-                    "volume, which is the primary number (AUC 1.000 over 15 "
-                    "targets against 0.720 for druggability) — measure it or "
-                    "record the gap in not_found",
+                    "volume, which is the primary number reported on the "
+                    "computed axis — it is a cavity measurement and carries no "
+                    "verdict: its AUC 1.000 separation over 15 targets is "
+                    "RETRACTED (rule 4a, 2026-08-15 — the calibration anchors "
+                    "did not measure the proteins they were attributed to), so "
+                    "do not compare it to 210 or 240 A^3 — measure it or record "
+                    "the gap in not_found",
                 )
             )
 

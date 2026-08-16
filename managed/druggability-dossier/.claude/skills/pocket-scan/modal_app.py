@@ -210,6 +210,12 @@ MAX_POCKETS_CLASSIFIED = 10
 # out when an mmCIF chain name will not fit column 22.
 _PDB_CHAIN_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
+# Polymer-chain count above which whole-assembly scoring stops being a
+# measurement of a binding site. PROPOSED, NOT CALIBRATED: set above every
+# assembly in the calibration set (NLRP3's octamer is the largest at 8) and far
+# below the 60-mers that produced the failure. It FLAGS and never filters.
+LARGE_ASSEMBLY_CHAINS = 12
+
 
 def _fetch(pdb_id: str, dest: Path) -> Path:
     """Fetch the mmCIF. Always the mmCIF, never the legacy PDB.
@@ -343,8 +349,15 @@ def _load(cif: Path) -> tuple[object, list[str], dict[str, str]]:
             continue
         if not pool:
             raise RuntimeError(
-                f"{cif.stem}: more chains than PDB chain IDs; cannot write "
-                "an fpocket input without losing chain identity"
+                f"{cif.stem}: more chains than PDB chain IDs "
+                f"({len(_PDB_CHAIN_POOL)}); cannot write an fpocket input "
+                "without losing chain identity. NOTE THIS IS AN IMPLEMENTATION "
+                "LIMIT, NOT A JUDGEMENT ABOUT THE STRUCTURE: an assembly just "
+                "under it is not thereby suitable for whole-assembly scoring. "
+                "1JH5, a 60-mer, fits and returned 378 pockets with the "
+                "selected one 60.28 A from the protein centre. See "
+                "LARGE_ASSEMBLY_CHAINS, which flags both sides of this "
+                "boundary the same way."
             )
         renamed[chain.name] = pool.pop(0)
     for old, new in renamed.items():
@@ -1104,6 +1117,104 @@ def _unit_interval(value, field: str, context: str = ""):
 # ===========================================================================
 
 
+# {accession -> (aliases, resolved_ok)} for the life of one container.
+_ACC_ALIAS_CACHE: dict[str, dict] = {}
+
+
+def _accession_aliases(acc: str) -> dict:
+    """Every accession UniProt considers the same entry as `acc`.
+
+    THIS IS WHAT MAKES FAILING CLOSED SAFE. A PDB entry declares the accession
+    that was current when it was deposited, and UniProt merges accessions
+    afterwards — so an older entry for the same protein legitimately names a
+    different string. Caught before shipping, on the TL1A ensemble: 2O0O, 2QE3
+    and 2RE9 declare **Q8NFE9**, whose UniProt record is
+    `inactiveReason: {inactiveReasonType: "MERGED", mergeDemergeTo: ["O95150"]}`
+    — it IS O95150 — while 3K51 and the newer entries declare O95150 directly.
+    Refusing on a literal string comparison would have thrown away three of six
+    entries of the target's own ensemble and called them "not this protein".
+
+    Returns `{aliases, genes, taxid, ok}`. `ok` is False when the lookup could
+    not be made, and a caller must NOT refuse an entry on an unresolved record —
+    an unanswered question is not a negative answer.
+    """
+    acc = (acc or "").strip()
+    if not acc:
+        return {"aliases": set(), "genes": set(), "taxid": None, "ok": False}
+    if acc in _ACC_ALIAS_CACHE:
+        return _ACC_ALIAS_CACHE[acc]
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    rec = {
+        "aliases": {acc, acc.split("-")[0]},
+        "genes": set(),
+        "taxid": None,
+        "ok": False,
+    }
+    try:
+        req = urllib.request.Request(  # noqa: S310
+            f"https://rest.uniprot.org/uniprotkb/{acc}.json"
+            "?fields=accession,gene_names,organism_id",
+            headers={"User-Agent": "pocket-scan"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as fh:  # noqa: S310
+            d = _json.loads(fh.read().decode())
+        rec["ok"] = True
+        if d.get("primaryAccession"):
+            rec["aliases"].add(d["primaryAccession"])
+        for s in d.get("secondaryAccessions") or ():
+            rec["aliases"].add(s)
+        # An accession that has been merged away answers with entryType
+        # "Inactive" and names its successor here.
+        for s in (d.get("inactiveReason") or {}).get("mergeDemergeTo") or ():
+            rec["aliases"].add(s)
+        for g in d.get("genes") or ():
+            name = (g.get("geneName") or {}).get("value")
+            if name:
+                rec["genes"].add(name.strip().upper())
+        rec["taxid"] = (d.get("organism") or {}).get("taxonId")
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        rec["ok"] = False
+    _ACC_ALIAS_CACHE[acc] = rec
+    return rec
+
+
+def _accession_matches(declared: str, target: str) -> tuple[bool, bool]:
+    """Is `declared` the same protein as `target`? Returns (matches, checkable).
+
+    THREE TESTS, AND THE THIRD IS THE ONE THAT KEEPS FAILING CLOSED HONEST.
+    String equality alone is far too brittle to refuse an entry on:
+
+      1. the accession, or its isoform base, is literally the same;
+      2. UniProt has MERGED one into the other — TL1A's 2O0O/2QE3/2RE9 declare
+         Q8NFE9, whose record says `mergeDemergeTo: ["O95150"]`;
+      3. they are the SAME GENE in the SAME ORGANISM under two different
+         UniProt entries. IL-13's 3BPO declares **Q4VB50**, which is not merged
+         into P35225 and never will be — it is an unreviewed TrEMBL entry whose
+         recommended name is "Interleukin-13" and whose gene is IL13, human.
+         Refusing 3BPO on the string would have been wrong in the damaging
+         direction: the entry DOES contain IL-13, and what it actually needs is
+         for chain A to be recognised as the target so that chains B and C —
+         IL-4R-alpha and IL-13R-alpha-1 — are recognised as partners.
+
+    `checkable` is False when neither side could be resolved against UniProt.
+    An unanswered question is not a negative answer and must not refuse.
+    """
+    if declared == target or declared.split("-")[0] == target.split("-")[0]:
+        return True, True
+    d, t = _accession_aliases(declared), _accession_aliases(target)
+    if d["aliases"] & t["aliases"]:
+        return True, True
+    if (
+        d["genes"] and t["genes"] and d["genes"] & t["genes"]
+        and d["taxid"] is not None and d["taxid"] == t["taxid"]
+    ):
+        return True, True
+    return False, (d["ok"] and t["ok"])
+
+
 def _assembly_base_chain(name: str) -> str:
     """`"A-3"` -> `"A"`. The source chain an assembly-expansion copy came from.
 
@@ -1267,7 +1378,38 @@ def _target_chains(
             ),
             "declared_accessions": declared,
         }
-    hits = [c for c in fallback if accession in chain_acc.get(c, [])]
+    # Matched through UniProt's own merge history, not by string equality — see
+    # `_accession_aliases`. `checkable` False anywhere means we could not
+    # establish that a declared accession is NOT the target, and an unanswered
+    # question must not refuse an entry.
+    hits, checkable = [], True
+    for c in fallback:
+        for a in chain_acc.get(c, ()):
+            m, ck = _accession_matches(a, accession)
+            checkable = checkable and ck
+            if m:
+                hits.append(c)
+                break
+    if not hits and not checkable:
+        return {
+            "chains": list(fallback),
+            "basis": (
+                f"no chain of this entry maps to {accession} by string, and "
+                "UniProt could not be reached to check whether any of "
+                f"{declared} is a merged form of it; every scored chain is "
+                "treated as target and the chain set is UNVERIFIED"
+            ),
+            "verified": False,
+            "refuse": False,
+            "reason": (
+                "the entry declares accessions this run could not resolve. "
+                "Older depositions legitimately name accessions UniProt has "
+                "since merged — TL1A's 2O0O, 2QE3 and 2RE9 declare Q8NFE9, "
+                "which IS O95150 — so refusing on the string alone would "
+                "discard half an ensemble. Not refused, not verified."
+            ),
+            "declared_accessions": declared,
+        }
     if not hits:
         return {
             "chains": [],
@@ -1276,7 +1418,8 @@ def _target_chains(
             "refuse": True,
             "reason": (
                 f"this entry declares UniProt accessions {declared or '[]'} in "
-                f"_struct_ref and {accession} is not among them, so it does not "
+                f"_struct_ref, and none of them is {accession} or a UniProt "
+                "merge of it, so it does not "
                 "contain the target. REFUSED rather than scored: the previous "
                 "behaviour was to use every chain 'which may include partners', "
                 "and what that produced was pocket volumes measured inside "
@@ -4580,6 +4723,29 @@ def pocket_scan(
                 if any(r.het_flag == "A" and len(r) for r in c)
             )
             homo["n_polymer_chains_scored"] = len(used_chains)
+            # A LARGE ASSEMBLY IS FLAGGED WHETHER OR NOT IT HAPPENED TO FIT.
+            # The only thing that used to notice one was `_load` running out of
+            # single-character chain IDs, which is an implementation limit at 62
+            # and not a scientific boundary — so 1OQE, 1OQD and 4V46 refused
+            # while 1JH5, ALSO a 60-mer, sailed through and produced 378 pockets
+            # and a selected pocket 60.28 A from the protein centre. Same shape
+            # of file, opposite handling, and the one that did not refuse gave
+            # plausible numbers with no error anywhere.
+            homo["large_assembly_warning"] = (
+                None if homo["n_polymer_chains_in_file"] < LARGE_ASSEMBLY_CHAINS
+                else (
+                    f"this file contains {homo['n_polymer_chains_in_file']} "
+                    f"polymer chains ({len(used_chains)} scored). Whole-assembly "
+                    "pocket detection on an assembly this size returns hundreds "
+                    "of pockets, most of them shallow surface features and "
+                    "inter-protomer crevices far from anything a dossier is "
+                    "asking about — 1JH5, a 60-mer, returned 378 pockets and a "
+                    "selected pocket 60.28 A from the protein centre. Restrict "
+                    "with `chains` or `site_residues`; a number off this "
+                    "structure without that restriction is not a measurement of "
+                    "a binding site."
+                )
+            )
         except LigandSourceError:
             # DELIBERATELY NOT RECORDED AS A PER-STRUCTURE ERROR. Every
             # structure would carry the same message and the run would return a
@@ -4924,6 +5090,18 @@ def pocket_scan(
                     ),
                     "n_pockets_on_target": len(candidates),
                     "n_pockets_off_target": len(off_target),
+                    # The stricter count, reported so a consumer can apply a
+                    # stricter policy than this module's without re-running it.
+                    # BAFF 5Y9J has ZERO of 22 fully on-target and exactly one
+                    # above the 0.5 floor (at 0.667, druggability 0.000): under
+                    # `>= 0.5` that entry contributes 118.8 A^3, under `== 1.0`
+                    # it contributes nothing. Both are defensible and this
+                    # module does not have the evidence to pick, so it reports
+                    # both counts and applies the looser one.
+                    "n_pockets_fully_on_target": sum(
+                        1 for p in pockets
+                        if (p.get("on_target_residue_fraction") or 0.0) >= 1.0
+                    ),
                     "off_target_ranks": [p["rank"] for p in off_target][:40],
                     "off_target_max_volume_a3": (
                         round(max((p.get("volume") or 0.0) for p in off_target), 2)

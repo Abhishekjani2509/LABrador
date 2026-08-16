@@ -129,8 +129,8 @@ A structure is not evidence just because something is bound. Check the ligand:
   is **withdrawn as support**. Both numbers are real and the *inference* from
   their gap is not: after check 5a, a 0.35-versus-0.71 gap is well inside the
   spread the score produces across pockets that all have an approved drug bound
-  in them — EGFR 6LUD scores **0.013** with osimertinib in it and RORgt 6C1P
-  **0.009** with a ligand in it, against KRAS 6OIM's 0.708 — so a gap that size
+  in them — EGFR 6LUD scores **0.013** with osimertinib in it, against KRAS
+  6OIM's 0.708 — so a gap that size
   discriminates a tool compound from a drug not at all. Judge the ligand on its
   chemistry — bis-electrophile, cytotoxicity, promiscuity reports — never on the
   score of the pocket it sits in.
@@ -155,9 +155,13 @@ not one. Measured over 15 targets, 67 structures and 134 measurements:
 - on **37 holo structures where a drug-like ligand is physically bound and the
   scored pocket is anchored to that ligand** — certain positives by construction,
   spanning all 10 known-druggable targets — the median score is **0.320**, **25
-  of 37 fall below 0.5** and **15 of 37 (41%) fall below 0.1**;
+  of 37 fall below 0.5** and **15 of 37 (41%) fall below 0.1**. (**At least one
+  of the 37 is not a certain positive**: RORgt's 6C1P contains no RORgt — sole
+  entity A8EVM5, an ion transport protein — and its `1N7` anchor is CHAPSO, a
+  detergent. The demotion does not turn on it, but the denominator is 36 clean
+  cases, not 37, and nobody has re-audited the other 36 at residue level.)
 - EGFR 6LUD with osimertinib bound scores **0.013**; JAK1's median is **0.009**
-  across nine approved drugs; RORgt 6C1P is **0.009 at rank 55 of 60**; TYK2
+  across nine approved drugs; TYK2
   6NZP with deucravacitinib is **0.169**; BCL-2 6QGK is **0.025**; NLRP3 runs
   **0.001–0.018** across seven holo crystals including one clinical compound;
 - target-level AUC is **0.720 with a 95% CI of 0.44–0.94** at D=1.6 — the
@@ -172,13 +176,26 @@ it, and do not enter it in `findings` as evidence against the pocket.** A
 falsification block that lists "druggability 0.02, site may not be real" has
 manufactured a finding out of a measurement error rate.
 
-**What to attack instead, on the same data:** the D=1.6 site volume, which
-separated all 15 targets at AUC 1.000. And when volume and druggability
-disagree — a 290 Å³ EGFR site scoring 0.013 — that disagreement is the finding.
-Report it; do not resolve it in either direction. The volume guide it would be
-resolved against (≥240 Å³ druggable, ≤210 Å³ hard) is an **uncalibrated
-proposal**, a 17% margin fitted post hoc on n=15 with only 5 hard targets, and
-it gates nothing.
+**What to attack instead, on the same data:** the D=1.6 site volume. And when
+volume and druggability disagree — a 290 Å³ EGFR site scoring 0.013 — that
+disagreement is the finding. Report it; do not resolve it in either direction.
+
+**Do not resolve it against a volume boundary, because there is not one.** An
+earlier version of this passage said volume "separated all 15 targets at AUC
+1.000" and named a guide of ≥240 Å³ druggable / ≤210 Å³ hard. **That separation
+is RETRACTED (2026-08-15; `CLAUDE.md` rule 4a, `rubric.md`, `OUTPUT_NOTES.md`).**
+A residue-level audit of all 67 calibration structures found four of the five
+hard anchors compromised — MYC's pocket is 100% MAX (P61244) with zero MYC
+residues, IL-11's is 100% IL-11 receptor alpha (Q14626), CD20's anchor ligand is
+cholesterol hemisuccinate (a detergent), TL1A had no site anchor at all — and
+`chain_accessions` was `{}` on **every** entry, so every chain of every assembly
+was scored as target. Two of the druggable anchors fell with them, including
+**RORgt, whose 6C1P contains no RORgt** (sole entity A8EVM5, an ion transport
+protein) even though it was selected by `ligand_site_jaccard`, the path this
+skill calls trustworthy. **Selection basis is necessary and not sufficient: a
+wrong PDB ID passes straight through it, so verify the accession of the entry
+itself.** A volume is a cavity measurement in a structure that was scored. It
+falsifies nothing and confirms nothing on its own.
 
 **Do not reach for persistence as the replacement.** The site pocket was
 detected in 100% of structures for all 15 targets, so persistence is **AUC
@@ -426,6 +443,70 @@ python3 .claude/skills/graph-intake/graph_read.py \
 # L5/L6 on mixed, L7 because rounds already carries the ask.
 ```
 
+### 10. Is the perfect result the absence of a counterexample rather than a measured boundary?
+
+**Run this on any separation, threshold or classifier that comes back perfect,
+including our own.** It is here because we shipped one for part of a day.
+
+A perfect AUC on a small set is not a strong result that happens to be small. It
+is a **statement that no counterexample was in the sample**, and those are two
+different claims. Three things to compute before quoting one:
+
+- **The bootstrap CI is degenerate by construction and must not be quoted.**
+  Resampling a perfectly separated set can never manufacture an inversion that is
+  not in the data, so the interval collapses to `[1.000, 1.000]` as arithmetic,
+  not as evidence. Ours did, and it read as the strongest line in the table while
+  carrying no information at any point. **A CI whose width is zero is a red flag,
+  not a green one.**
+- **The exact permutation p, which is usually not significant.** For AUC = 1.0
+  with 10 positives against 1–2 negatives, exact p runs **0.015 to 0.091**.
+  Perfect separation of a lopsided set is a routine outcome of small n.
+- **The margin, and its stability under a defensible re-anchoring.** Ours moved
+  from **+2.1 Å³** under one anchoring to **−81.6 Å³** under another, and AUC
+  from 1.000 to 0.900 (CI [0.680, 1.000]), by changing nothing but which
+  structures were held to measure each target.
+
+**How it fails in practice:** perfect separation invites you to read the gap
+between the groups as a boundary and quote its edges (ours became "hard ≤ 207 Å³,
+druggable ≥ 242 Å³"). Those edges are the two nearest sample points. They are the
+noisiest quantity in the whole result, and one mis-assigned member moves them.
+
+Record the check whether or not it fires. When it fires, the finding is *"the
+result is consistent with the boundary and also with there being no boundary"* —
+not "the result is wrong".
+
+### 11. Do the label and the measurement share a cause?
+
+**The confound check, and the one that generalises furthest.** Ask it of every
+comparison the dossier makes between a "good" group and a "bad" one: *could I
+have produced this separation without making the measurement at all?*
+
+Test it directly — build the dumbest possible predictor out of the metadata and
+score it. On our 15-target calibration set, the binary flag **"a drug-like
+ligand was co-crystallised"** separates druggable from hard at **AUC 0.900 using
+no structural measurement whatsoever**. Any structural quantity measured on those
+same structures inherits that separation for free.
+
+The mechanism is worth stating in general terms, because it is not specific to
+pockets: **on the "good" side a site is defined by a bound ligand, and on the
+"bad" side there is nothing to anchor to, so the site is whatever ranked highest.
+The two groups were not measured by the same procedure.** In our case the
+hard-side headline medians came from `max_druggability_no_ligand_site` — "the
+most druggable pocket anywhere in the assembly", which identifies no site — for
+MYC, IL-11, TL1A and TNF outright, and KRAS by half.
+
+So the honest conclusion is not that the anchors were wrong:
+
+> **If the hard side can only ever be measured by "whichever pocket ranked
+> highest", then the axis is measuring structure availability, not biology.**
+
+And the corollary, which is why this cannot simply be fixed by better anchors: a
+properly anchored calibration set is close to a contradiction in terms. It would
+need hard targets carrying a real drug-like co-crystal at a defined site, and a
+hard target is largely defined by not having one. **When check 11 fires this way,
+say the axis is unresolvable as posed. Do not promise a re-anchored set that
+cannot exist.**
+
 ## Failure modes
 
 ### An ask instead of a query
@@ -517,6 +598,11 @@ Populate `falsification`:
   **Check 5a is included on every run too, and it can only ever "not fire" as a
   finding** — its result is a note recording the score and the 41% false-negative
   rate beside it. A 5a entry in `findings` is a defect
+- **Checks 10 and 11 apply to any separation or threshold the run relies on,
+  including one of ours.** They fire on the shape of the evidence rather than on
+  the target, so they will most often be recorded as "ran, no separation claim
+  was relied on". When a run *does* lean on a boundary, both are mandatory, and a
+  boundary that has not been through them may not carry a verdict
 - `findings` — what came back, each with its source
 - `survived` — true only if no finding materially undercuts the precedent claim;
   false with an explanation otherwise; never null after a run
