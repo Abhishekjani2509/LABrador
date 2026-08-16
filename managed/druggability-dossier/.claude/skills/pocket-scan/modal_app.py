@@ -58,6 +58,7 @@ import json
 import os
 import shutil
 import subprocess
+from collections.abc import Sequence
 import sys
 import urllib.request
 from pathlib import Path
@@ -378,8 +379,27 @@ def _load(cif: Path) -> tuple[object, list[str], dict[str, str]]:
     return st, missing, renamed
 
 
-def _prep(st, dest: Path, stem: str, chains: list[str] | None) -> tuple[Path, list[str]]:
+def _prep(
+    st, dest: Path, stem: str, chains: list[str] | None,
+    drop_chains: Sequence[str] = (),
+) -> tuple[Path, list[str], list[str]]:
     """The fpocket input: polymer only, from the same object as everything else.
+
+    ... AND NOT THE POLYMER THAT IS THE LIGAND. `het_flag == 'A'` keeps EVERY
+    polymer, so rule 4's strip-every-ligand-before-scoring requirement has been
+    silently violated for any entry whose ligand is a peptide, a nanobody or a
+    designed mini-binder. Measured on 8QFZ (TSLP + a 12-residue Bicycle
+    peptide): with the peptide kept, the ligand-anchored pocket is 283.6 A^3 and
+    SIX of its TEN lining residues are the peptide itself. With the peptide
+    chain dropped the site does not exist at all and the whole target has ONE
+    pocket, 147.8 A^3, 15.4 A away. That is a 136 A^3 swing straight across the
+    discriminating band of the (retracted) rule 4a volume guide, on a decision
+    this file was making by accident.
+
+    `drop_chains` is that decision made on purpose. It is NOT a size heuristic —
+    see `_classify_polymer_chains` for the four cases and the order they are
+    decided in — and the third return value names what was dropped, so nothing
+    is silent.
 
     Chain selection is per-target and deliberate: KRAS is a monomer, TNF-alpha's
     site sits on the trimer axis and disappears if you keep one chain.
@@ -400,8 +420,13 @@ def _prep(st, dest: Path, stem: str, chains: list[str] | None) -> tuple[Path, li
     sel.spacegroup_hm = st.spacegroup_hm
     model = gemmi.Model("1")
     seen_chains = set()
+    dropped: list[str] = []
+    drop = set(drop_chains or ())
     for chain in st[0]:
         if chains and chain.name not in chains:
+            continue
+        if chain.name in drop:
+            dropped.append(chain.name)
             continue
         keep = gemmi.Chain(chain.name)
         for res in chain:
@@ -431,7 +456,162 @@ def _prep(st, dest: Path, stem: str, chains: list[str] | None) -> tuple[Path, li
             f"{sorted(written)}); fpocket residues would not map to the "
             "ligand site"
         )
-    return out, sorted(seen_chains)
+    return out, sorted(seen_chains), sorted(dropped)
+
+
+# A non-target polymer chain at or below this many monomers is a LIGAND, not a
+# partner. PROPOSED, NOT CALIBRATED. The Bicycle peptide in 8QFZ is 12 monomers;
+# the smallest thing anyone would call a binding partner in the fixture set is
+# 9Q8N's LptE at 170+. Nothing in between has been measured, and the test is
+# third of four for that reason — chemistry (`polymer_conjugate`) and the
+# caller's own assertion both decide before size does.
+POLYMER_LIGAND_MAX_MONOMERS = 50
+
+# A non-target polymer chain contributing at least this share of the ANCHORED
+# pocket's lining is that pocket's ligand whatever its size. PROPOSED, NOT
+# CALIBRATED. On 8QFZ the peptide contributes 6 of 10 (0.60); an antibody Fab
+# lining a cavity reported as the target's site contributes 1.00.
+POLYMER_LIGAND_MIN_LINING_FRACTION = 0.25
+
+
+def _chain_monomer_counts(st) -> dict[str, int]:
+    """{chain -> polymer residue count}, on the same objects `_prep` selects."""
+    out: dict[str, int] = {}
+    for chain in st[0]:
+        n = sum(1 for r in chain if r.het_flag == "A" and len(r))
+        if n:
+            out[chain.name] = n
+    return out
+
+
+def _polymer_conjugate_host_chains(holo_call: dict, context, renamed: dict) -> set[str]:
+    """Chains of the polymer entities a `polymer_conjugate` is a part of.
+
+    `ligand_filter` returns `polymer_ligand_precedent` naming the HOST entity of
+    every covalently conjugated component — for 8QFZ, the entity of the bicyclic
+    peptide `LFI` is bonded three times into. `_entity_poly.pdbx_strand_id` gives
+    that entity's chains, which is the thing `_prep` has to drop.
+
+    Empty when there is no context, which is the honest answer: with
+    `_struct_conn` absent nothing is known to be bonded to anything, and this
+    must not be read as "nothing is".
+    """
+    if context is None:
+        return set()
+    ents = {
+        str(p.get("entity_id"))
+        for p in (holo_call.get("polymer_ligand_precedent") or [])
+        if p.get("entity_id")
+    }
+    out: set[str] = set()
+    for eid in ents:
+        ent = (getattr(context, "polymer_entities", {}) or {}).get(eid)
+        for strand in (getattr(ent, "strand_ids", ()) or ()) if ent else ():
+            out.add(renamed.get(strand, strand))
+    return out
+
+
+def _classify_polymer_chains(
+    st, tgt_chains: Sequence[str], verified: bool,
+    caller_chains: Sequence[str] | None, conjugate_chains: set[str],
+    lining_share: dict[str, float] | None = None,
+) -> dict[str, dict]:
+    """Which polymer chains are the target, a partner, or the LIGAND.
+
+    Rule 4 says strip every ligand before scoring, and a Bicycle peptide is a
+    ligand. Four cases, DECIDED IN THIS ORDER, and the order is the whole point
+    — chemistry and the caller's assertion both outrank size:
+
+      target           its `_struct_ref` accession is the run's target      KEEP
+      caller_asserted  named in the `chains` argument (rule 2b)             KEEP
+      polymer_ligand   non-target AND (hosts a `polymer_conjugate`
+                       component, OR <= 50 monomers, OR lines >= 25% of
+                       the anchored pocket)                                 STRIP
+      partner          anything else non-target                             KEEP
+
+    The homo-oligomer cases are safe BY CONSTRUCTION and this is why the test is
+    accession-based rather than sequence- or size-based: TNF-alpha's three
+    subunits are the SAME entity with the SAME accession, so all three are
+    `target` and all three are kept, and the trimer-axis site survives. KRAS
+    4OBE A vs A+B is unaffected. An obligate hetero-oligomer whose site genuinely
+    spans two proteins (9Q8N's LptD/LptE barrel) lands in `partner` and is kept.
+
+    FAILS SAFE ON AN UNVERIFIED CHAIN SET. `verified` False means the entry's
+    UniProt mapping could not be read, so no chain can be shown to be non-target
+    and NOTHING is stripped. Stripping on an unreadable header would delete the
+    target itself.
+    """
+    counts = _chain_monomer_counts(st)
+    tgt = set(tgt_chains or ())
+    caller = set(caller_chains or ())
+    out: dict[str, dict] = {}
+    for ch, n in sorted(counts.items()):
+        if ch in tgt:
+            cls, why = "target", "accession matches the run's target"
+        elif ch in caller:
+            cls, why = "caller_asserted", "named in the `chains` argument (rule 2b)"
+        elif not verified:
+            cls, why = "partner", (
+                "the entry's UniProt mapping could not be read, so this chain "
+                "cannot be shown to be non-target; kept"
+            )
+        elif ch in conjugate_chains:
+            cls, why = "polymer_ligand", (
+                "hosts a component ligand_filter classified `polymer_conjugate`"
+            )
+        elif n <= POLYMER_LIGAND_MAX_MONOMERS:
+            cls, why = "polymer_ligand", (
+                f"non-target polymer of {n} monomers "
+                f"(<= {POLYMER_LIGAND_MAX_MONOMERS})"
+            )
+        elif (lining_share or {}).get(ch, 0.0) >= POLYMER_LIGAND_MIN_LINING_FRACTION:
+            cls, why = "polymer_ligand", (
+                f"non-target chain contributing {lining_share[ch]:.0%} of the "
+                "anchored pocket's lining residues"
+            )
+        else:
+            cls, why = "partner", "non-target, kept and its lining share reported"
+        out[ch] = {
+            "class": cls,
+            "n_monomers": n,
+            "basis": why,
+            "lining_fraction_of_anchored_pocket": (lining_share or {}).get(ch),
+        }
+    return out
+
+
+def _fpocket_once(prep: Path, work: Path, tag: str, d: float) -> list[dict]:
+    """fpocket on one prepared file at one clustering value. Never raises."""
+    run = work / f"{tag}_D{d}"
+    run.mkdir(parents=True, exist_ok=True)
+    tgt = run / prep.name
+    tgt.write_text(prep.read_text())
+    out_dir = run / f"{tgt.stem}_out"
+    # A warm Modal container reuses /tmp; a stale _out would be parsed as this
+    # run's result. Same reason as the main pass.
+    shutil.rmtree(out_dir, ignore_errors=True)
+    try:
+        subprocess.run(  # noqa: S603
+            ["fpocket", "-f", str(tgt), "-D", str(d)],  # noqa: S607
+            check=False, capture_output=True,
+        )
+    except Exception:  # noqa: BLE001
+        return []
+    return _parse_pockets(out_dir)
+
+
+def _anchored_pocket(pockets: list[dict], anchor_residues: list[str]):
+    """The pocket that IS the anchor ligand's site, or None. Jaccard, > 0."""
+    if not anchor_residues:
+        return None
+    best = max(
+        pockets,
+        key=lambda p: _jaccard(p.get("residues", []), anchor_residues) or 0.0,
+        default=None,
+    )
+    if best is None or not (_jaccard(best.get("residues", []), anchor_residues) or 0.0):
+        return None
+    return best
 
 
 class LigandSourceError(RuntimeError):
@@ -570,8 +750,17 @@ def _chemcomp_source():
     return _RcsbChemComps()
 
 
-def _ligands(st, src) -> tuple[list[dict], dict]:
+def _ligands(st, src, context=None) -> tuple[list[dict], dict]:
     """Nonpolymer components, CLASSIFIED BY CHEMISTRY rather than by list.
+
+    `context` is a `ligand_filter.StructureContext` for THIS entry, and it is
+    what turns the covalent rules on. Without it a component that is a covalent
+    constituent of a polymer ligand — the crosslinker of a bicyclic peptide, a
+    warhead on a nanobody — classifies on its own SMILES graph and comes back
+    `druglike`, which is the wrong modality and, worse, makes it the thing the
+    site is anchored on. Measured on 8QFZ: `LFI` is `druglike` with no context
+    and `polymer_conjugate` with one. BUILD IT FROM THE HEADER, never from the
+    assembly file — see `_structure_context`.
 
     comp_id comes from the mmCIF, so it is the FULL component ID: `A1JPS`, not
     the first three characters of it — the legacy PDB truncation is a
@@ -604,11 +793,17 @@ def _ligands(st, src) -> tuple[list[dict], dict]:
         # BEFORE any verdict is read. A source with no SMILES produces a
         # perfectly well-formed, entirely holo-free run; see LigandSourceError.
         _assert_records_carry_smiles(src, distinct)
-    verdicts = LF.classify_ligands(distinct, chemcomps=src) if distinct else {}
-    holo = LF.holo_call(distinct, chemcomps=src) if distinct else {
+    verdicts = (LF.classify_ligands(distinct, chemcomps=src, context=context)
+                if distinct else {})
+    holo = LF.holo_call(distinct, chemcomps=src, context=context) if distinct else {
         "is_holo": False, "druglike_ligands": [], "by_verdict": {},
         "unknown_ligands": [], "undetermined": [], "determined": True,
         "verdicts": {}, "flags": [],
+        # Shape-stable with the classified branch: a consumer reading
+        # `polymer_ligand_precedent` must not have to distinguish "no components
+        # at all" from "no polymer ligand".
+        "polymer_conjugates": [], "polymer_ligand_precedent": [],
+        "context_applied": False,
     }
     ligs = []
     for (c, ch, rs), n in sorted(counts.items(), key=lambda kv: -kv[1]):
@@ -823,6 +1018,165 @@ def _homo_oligomer(
         "identical_chains": sorted(biggest) if len(biggest) > 1 else [],
         "n_polymer_chains": len(names),
         "sequence_identity_threshold": min_identity,
+    }
+
+
+def _target_polymer_chains(
+    st, cif: Path | None, renamed: dict, accession: str | None
+) -> set[str] | None:
+    """Chain names of the polymer entities that ARE the target.
+
+    `_chain_accessions` already maps chains to accessions from `_struct_ref`;
+    this is the same read, expressed as a set and matched through UniProt's own
+    merge history so a deposition naming a since-merged accession still counts
+    (TL1A's Q8NFE9 IS O95150 — see `_accession_matches`).
+
+    RETURNS None WHEN THE ACCESSION IS UNKNOWN, and None must be handled by the
+    caller as "cannot filter", NEVER as "filter to nothing". Filtering to
+    nothing would empty every site signature on an entry whose header would not
+    parse, which converts an unreadable mapping into a confident wrong answer —
+    the same fail-open/fail-closed distinction `_target_chains` makes.
+    """
+    if not accession or cif is None:
+        return None
+    names = [c.name for c in st[0]]
+    chain_acc, status = _chain_accessions(cif, renamed, names)
+    if status != "ok" or not chain_acc:
+        return None
+    out: set[str] = set()
+    for ch, accs in chain_acc.items():
+        for a in accs:
+            if _accession_matches(a, accession)[0]:
+                out.add(ch)
+                break
+    return out or None
+
+
+def _polymer_ligand_control(
+    st, work: Path, pid: str, want: list[str] | None,
+    holo_call: dict, context, tgt_chains: Sequence[str], verified: bool,
+    caller_chains: Sequence[str] | None, renamed: dict,
+    anchor_comp: str | None, d: float = 1.6,
+) -> dict | None:
+    """THE PAIRED MEASUREMENT. Score the site with and without its polymer ligand.
+
+    Returns None when there is nothing to decide — every polymer chain is the
+    target or was named by the caller, which is the TNF-alpha and KRAS case.
+
+    DO NOT REPLACE ONE NUMBER WITH THE OTHER. `volume_a3_stripped` is what gets
+    reported, but a site that COLLAPSES when its polymer ligand is removed is an
+    INDUCED-FIT / occluded site, not an absent one, and this project already has
+    the calibration for exactly that: KRAS switch-II is druggability 0.708 on
+    holo 6OIM and 0.000 on apo 4OBE AT THE SAME SITE, and reading the apo number
+    as a verdict is the thirty-year KRAS error. On 8QFZ the pair is 283.6 A^3
+    with the peptide and NO SITE AT ALL without it, and the pair is far more
+    informative than either number. Neither number alone is interpretable; the
+    difference between them is the finding.
+
+    `induced_fit_signal` true must force `cryptic_pocket_risk: high` and a
+    `tractability.caveat` saying the geometric number cannot be read in either
+    direction without a holo SMALL-MOLECULE structure.
+    """
+    conj = _polymer_conjugate_host_chains(holo_call, context, renamed)
+    prelim = _classify_polymer_chains(
+        st, tgt_chains, verified, caller_chains, conj, None
+    )
+    undecided = [
+        ch for ch, v in prelim.items()
+        if v["class"] in ("polymer_ligand", "partner")
+    ]
+    if not undecided:
+        return None
+
+    anchor_res, _copy = (
+        _ligand_site(st, anchor_comp, None) if anchor_comp else ([], None)
+    )
+    try:
+        prep_wp, _kept_wp, _drop_wp = _prep(st, work, f"{pid}_withpolymer", want)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"{type(exc).__name__}: {exc}", "stage": "prep_withpolymer"}
+    pockets_wp = _fpocket_once(prep_wp, work, f"{pid}_withpolymer", d)
+    anchored = _anchored_pocket(pockets_wp, anchor_res)
+
+    share: dict[str, float] = {}
+    if anchored and anchored.get("residues"):
+        n = len(anchored["residues"])
+        for ch, k in (anchored.get("lining_by_chain") or {}).items():
+            share[ch] = round(k / n, 3)
+
+    final = _classify_polymer_chains(
+        st, tgt_chains, verified, caller_chains, conj, share
+    )
+    lig_chains = sorted(
+        ch for ch, v in final.items() if v["class"] == "polymer_ligand"
+    )
+
+    if lig_chains:
+        try:
+            prep_s, _kept_s, _drop_s = _prep(
+                st, work, f"{pid}_stripcheck", want, drop_chains=lig_chains
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"error": f"{type(exc).__name__}: {exc}", "stage": "prep_stripped"}
+        pockets_s = _fpocket_once(prep_s, work, f"{pid}_stripcheck", d)
+    else:
+        # Nothing to strip: the two inputs are the same file, so say so rather
+        # than paying for an identical second fpocket run.
+        pockets_s = pockets_wp
+    anchored_s = _anchored_pocket(pockets_s, anchor_res)
+
+    v_wp = anchored.get("volume") if anchored else None
+    v_s = anchored_s.get("volume") if anchored_s else None
+    nearest_d = nearest_v = None
+    if anchored and not anchored_s and pockets_s:
+        # SAME COORDINATE FRAME — one structure object, two atom selections — so
+        # this distance is a real distance, unlike a cross-entry centroid
+        # difference. It is how "no site" is distinguished from "the site moved".
+        cands = [
+            (_distance(anchored.get("centroid"), p.get("centroid")), p)
+            for p in pockets_s if p.get("centroid")
+        ]
+        cands = [c for c in cands if c[0] is not None]
+        if cands:
+            nearest_d, near = min(cands, key=lambda c: c[0])
+            nearest_v = near.get("volume")
+    frac = (
+        round(sum(share.get(c, 0.0) for c in lig_chains), 3)
+        if (anchored and lig_chains) else None
+    )
+    return {
+        "clustering_d": d,
+        "anchor_comp_id": anchor_comp,
+        "n_anchor_site_residues": len(anchor_res),
+        "polymer_ligand_chains": lig_chains,
+        "classification": final,
+        # THE REPORTED NUMBER.
+        "volume_a3_stripped": v_s,
+        "volume_a3_with_polymer_ligand": v_wp,
+        "site_present_when_stripped": v_s is not None,
+        "n_pockets_with_polymer_ligand": len(pockets_wp),
+        "n_pockets_stripped": len(pockets_s),
+        "anchored_pocket_lining_by_chain": (
+            anchored.get("lining_by_chain") if anchored else None
+        ),
+        "lining_fraction_from_polymer_ligand": frac,
+        "nearest_pocket_when_site_absent_a": nearest_d,
+        "nearest_pocket_when_site_absent_volume_a3": nearest_v,
+        "induced_fit_signal": bool(v_wp is not None and v_s is None),
+        "forces_cryptic_pocket_risk_high": bool(v_wp is not None and v_s is None),
+        "_why": (
+            "A site that exists only while its polymer ligand is present is an "
+            "INDUCED-FIT / occluded site, not an absent one. This project has "
+            "the calibration for that already: KRAS switch-II is 0.708 on holo "
+            "6OIM and 0.000 on apo 4OBE at the same site, and reading the apo "
+            "number as a verdict is the thirty-year KRAS error. Report the "
+            "pair. Neither number alone is interpretable and the difference "
+            "between them is the finding. volume_a3_stripped is what goes in "
+            "tractability.pocket_volume_a3.primary_d1_6_a3; "
+            "induced_fit_signal true forces cryptic_pocket_risk high and a "
+            "caveat that the geometric number cannot be read in either "
+            "direction without a holo SMALL-MOLECULE structure."
+        ),
     }
 
 
@@ -1053,6 +1407,22 @@ def _parse_pockets(out_dir: Path) -> list[dict]:
         # is half of what tells a core apart from a site; enclosure is the
         # other half (see `_buried_core_flag`).
         p["lining_residue_names"] = [names.get(t) for t in p["residues"]]
+        # WHICH CHAINS LINE IT, ON EVERY POCKET, ALWAYS. The cheapest field in
+        # this file and the one that would have caught the entire wrong-protein
+        # failure class on the face of the output, with no accession lookup, no
+        # classification and no judgement: MYC's headline pocket is 100% MAX,
+        # IL-11's is 100% Q14626 (the receptor), RORgt's 6C1P pocket is 100% an
+        # ion channel, IL-13's is inside an antibody Fab, and 8QFZ's is 6 of 10
+        # residues on a 12-mer bicyclic peptide. Every one of those is a
+        # `lining_by_chain` a reader can see. It is deliberately NOT conditional
+        # on a chain resolver having succeeded, because the resolver failing is
+        # one of the ways this goes wrong (`chain_accessions` was `{}` on every
+        # entry of the retracted calibration set while the adjacent `_why`
+        # asserted it resolved).
+        p["lining_by_chain"] = {
+            ch: sum(1 for r in p["residues"] if r.split("/")[0] == ch)
+            for ch in sorted({r.split("/")[0] for r in p["residues"]})
+        }
         p["n_apolar_lining_residues"] = sum(
             1 for n in names.values() if n in APOLAR_RESIDUES
         )
@@ -1492,6 +1862,14 @@ def _annotate_on_target(
             round(len(on) / len(res), 3) if res else None
         )
         p["off_target_lining_chains"] = sorted({c for c in chains if c not in tgt})
+        # The same number as `on_target_residue_fraction` read from the other
+        # end, and it is the one a reader scans for. Reported whether or not the
+        # chain set is verified: an unverified `1.0` here says "every lining
+        # residue is on a chain this run could not attribute", which is a
+        # finding, not a blank.
+        p["lining_fraction_non_target"] = (
+            round(1.0 - (len(on) / len(res)), 3) if res else None
+        )
         p["on_target"] = (
             None if (not verified or not res)
             else (len(on) / len(res)) >= POCKET_MIN_ON_TARGET_FRACTION
@@ -1793,6 +2171,34 @@ def _fetch_header(pdb_id: str, dest: Path) -> Path | None:
         keep.append(line)
     hdr.write_text("\n".join(keep) + "\n")
     return hdr
+
+
+def _structure_context(pdb_id: str, dest: Path, accession: str | None):
+    """`ligand_filter.StructureContext` for one entry, or None.
+
+    FROM THE HEADER, NEVER FROM THE ASSEMBLY. RCSB strips `_struct_conn` from
+    assembly files exactly as it strips `_struct_ref` — verified on 8QFZ, whose
+    `-assembly1.cif` carries 23 categories and neither of those two. A context
+    built from the coordinate file this module already holds comes back with an
+    empty link table that is INDISTINGUISHABLE FROM "nothing is covalently
+    bonded", and `LFI` goes straight back to `druglike`. `ligand_filter` detects
+    this itself (`StructureContext.has_struct_conn_category` is False, every
+    verdict is flagged `struct_conn_absent_from_context` and confidence drops),
+    but the right fix is to hand it the header.
+
+    `_fetch_header` is already called once per entry for the accession, and it
+    caches on disk, so this costs NO additional network call.
+    """
+    import ligand_filter as LF
+
+    hdr = _fetch_header(pdb_id, dest)
+    if hdr is None:
+        return None
+    try:
+        return LF.StructureContext.from_mmcif_path(
+            hdr, entry_id=pdb_id, target_accession=accession)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _uniprot_from_cif(cif: Path | None) -> list[str]:
@@ -4770,94 +5176,6 @@ def pocket_scan(
     signature_donor_homo: dict | None = None
     signature_n_residues_in = len(site_residues or [])
 
-    # ---- an out-of-ensemble holo reference, resolved FIRST -----------------
-    # `mdpocket_site_donor` names a holo structure deliberately NOT measured —
-    # the five apo TNF-alpha entries with 2AZ5 donating the site. It is
-    # resolved before anything else because it serves three stages: it donates
-    # the site SIGNATURE for the fpocket pass below, it is the holo half of the
-    # cryptic comparison, and it defines the mdpocket site. Resolving it late
-    # meant a pure-apo run fell back to "most druggable pocket anywhere" in the
-    # fpocket pass while a perfectly good holo reference sat one argument away.
-    donor: dict | None = None
-    donor_error: str | None = None
-    if mdpocket_site_donor and mdpocket_site_donor not in pdb_ids:
-        try:
-            dcif = _fetch(mdpocket_site_donor, work)
-            dst, _dmiss, _dren = _load(dcif)
-            dprep, dchains = _prep(dst, work, mdpocket_site_donor, None)
-            dligs, _dholo = _ligands(dst, chemcomp_src)
-            dcomp = next(
-                (lig["comp_id"] for lig in dligs
-                 if ligand_codes and lig["comp_id"] in ligand_codes),
-                next((lig["comp_id"] for lig in dligs if lig["druglike"]), None),
-            )
-            if not dcomp:
-                raise RuntimeError(
-                    f"{mdpocket_site_donor} carries no drug-like ligand, so it "
-                    "cannot donate a site"
-                )
-            dsite, dcopy = _ligand_site(dst, dcomp, dchains)
-            dkeep, dcounts = _ligand_contact_chains(dst, dcomp, dcopy)
-            donor = {
-                "pdb_id": mdpocket_site_donor,
-                "cif": dcif,
-                "prepped": dprep,
-                "in_ensemble": False,
-                "comp_id": dcomp,
-                "ligand_chain": dcopy.split("/")[0] if dcopy else None,
-                "ligand_copy": dcopy,
-                "site_chains": dkeep,
-                "site_chain_atom_counts": dcounts,
-                "site_residues": dsite,
-                "homo_oligomer": _homo_oligomer(dst),
-                "ligand_xyz": [
-                    [a.pos.x, a.pos.y, a.pos.z]
-                    for chain in dst[0] for res in chain
-                    if res.het_flag == "H" and res.name == dcomp
-                    and (dcopy is None or
-                         f"{chain.name}/{res.seqid.num}" == dcopy)
-                    for a in res
-                ],
-            }
-        except Exception as exc:  # noqa: BLE001
-            donor_error = (
-                f"site donor {mdpocket_site_donor}: {type(exc).__name__}: {exc}"
-            )
-
-    if not site_signature and donor and donor["site_residues"]:
-        site_signature = {r.split("/")[-1] for r in donor["site_residues"]}
-        signature_source = f"{donor['pdb_id']}:{donor['comp_id']} (site donor)"
-        signature_n_residues_in = len(donor["site_residues"])
-        signature_donor_homo = donor["homo_oligomer"]
-
-    # A holo structure anywhere in the ensemble donates its ligand site as the
-    # signature for the apo ones, so order the pass holo-first.
-    if not site_signature:
-        for pid in pdb_ids:
-            try:
-                raw = _fetch(pid, work)
-                st, _chains_avail, _renames = _load(raw)
-                ligs, _sholo = _ligands(st, chemcomp_src)
-                dl = [lig for lig in ligs if lig["druglike"]]
-                if not dl:
-                    continue
-                comp = next(
-                    (lig["comp_id"] for lig in ligs
-                     if ligand_codes and lig["comp_id"] in ligand_codes),
-                    dl[0]["comp_id"],
-                )
-                res, _copy = _ligand_site(st, comp, None)
-                if res:
-                    site_signature = {r.split("/")[-1] for r in res}
-                    signature_source = f"{pid}:{comp}"
-                    signature_n_residues_in = len(res)
-                    # How badly the donor site collapses is itself the finding:
-                    # 19 residues -> 11 numbers on a homotrimer.
-                    signature_donor_homo = _homo_oligomer(st)
-                    break
-            except Exception:  # noqa: BLE001, S112
-                continue
-
     # ---- WHICH PROTEIN IS THE TARGET, resolved before anything reads a chain
     # Three separate wrong answers all came from not knowing this: the target
     # sequence picked by chain length (S1PR1's G-beta-1), the homo-oligomer
@@ -4866,6 +5184,15 @@ def pocket_scan(
     # at Jaccard 0.79-0.94), and disorder measured on whichever chain happened
     # to be longest. The accession is already an input, and every entry declares
     # its own in `_struct_ref`.
+    #
+    # MOVED ABOVE THE TWO SITE-DONOR BLOCKS, and that move is load-bearing. Both
+    # donors build a `ligand_filter.StructureContext`, the context needs the
+    # target accession to tell "bonded to the target" from "bonded to another
+    # polymer", and this block only reads headers so it depends on nothing
+    # below it. Resolved late, the SIGNATURE DONOR LOOP — the one that picks the
+    # component whose contact shell becomes the site signature — ran with no
+    # context at all, and on 8QFZ that made `LFI` `druglike` and let the
+    # crosslinker of a bicyclic peptide define the site.
     target_accession = (uniprot_accession or "").strip() or None
     accession_basis = "caller" if target_accession else None
     accession_counts: dict[str, int] = {}
@@ -4894,6 +5221,143 @@ def pocket_scan(
                "Pass uniprot_accession to disambiguate.")
         )
 
+    # ---- an out-of-ensemble holo reference, resolved SECOND ----------------
+    # `mdpocket_site_donor` names a holo structure deliberately NOT measured —
+    # the five apo TNF-alpha entries with 2AZ5 donating the site. It is
+    # resolved before anything else because it serves three stages: it donates
+    # the site SIGNATURE for the fpocket pass below, it is the holo half of the
+    # cryptic comparison, and it defines the mdpocket site. Resolving it late
+    # meant a pure-apo run fell back to "most druggable pocket anywhere" in the
+    # fpocket pass while a perfectly good holo reference sat one argument away.
+    donor: dict | None = None
+    donor_error: str | None = None
+    if mdpocket_site_donor and mdpocket_site_donor not in pdb_ids:
+        try:
+            dcif = _fetch(mdpocket_site_donor, work)
+            dst, _dmiss, _dren = _load(dcif)
+            dprep, dchains, _ddrop = _prep(dst, work, mdpocket_site_donor, None)
+            dligs, _dholo = _ligands(
+                dst, chemcomp_src,
+                _structure_context(mdpocket_site_donor, work, target_accession),
+            )
+            dcomp = next(
+                (lig["comp_id"] for lig in dligs
+                 if ligand_codes and lig["comp_id"] in ligand_codes),
+                next((lig["comp_id"] for lig in dligs if lig["druglike"]), None),
+            )
+            if not dcomp:
+                raise RuntimeError(
+                    f"{mdpocket_site_donor} carries no drug-like ligand, so it "
+                    "cannot donate a site"
+                )
+            dsite, dcopy = _ligand_site(dst, dcomp, dchains)
+            dkeep, dcounts = _ligand_contact_chains(dst, dcomp, dcopy)
+            donor = {
+                "pdb_id": mdpocket_site_donor,
+                "cif": dcif,
+                "prepped": dprep,
+                "in_ensemble": False,
+                "comp_id": dcomp,
+                "ligand_chain": dcopy.split("/")[0] if dcopy else None,
+                "ligand_copy": dcopy,
+                "site_chains": dkeep,
+                "site_chain_atom_counts": dcounts,
+                "site_residues": dsite,
+                "homo_oligomer": _homo_oligomer(dst),
+                # The donor's OWN target chains, for the signature filter below.
+                # None means "cannot filter" and must never be read as "filter
+                # to nothing" — see `_target_polymer_chains`.
+                "target_polymer_chains": _target_polymer_chains(
+                    dst, _fetch_header(mdpocket_site_donor, work),
+                    _dren, target_accession,
+                ),
+                "ligand_xyz": [
+                    [a.pos.x, a.pos.y, a.pos.z]
+                    for chain in dst[0] for res in chain
+                    if res.het_flag == "H" and res.name == dcomp
+                    and (dcopy is None or
+                         f"{chain.name}/{res.seqid.num}" == dcopy)
+                    for a in res
+                ],
+            }
+        except Exception as exc:  # noqa: BLE001
+            donor_error = (
+                f"site donor {mdpocket_site_donor}: {type(exc).__name__}: {exc}"
+            )
+
+    # RESIDUE NUMBERS FROM A DIFFERENT POLYMER ARE NOT THIS PROTEIN'S RESIDUE
+    # NUMBERS, and the signature discards chain identity by design. The bicyclic
+    # peptide in 8QFZ numbers from 1, so 9 of the 13 residues in `LFI`'s contact
+    # shell carry numbers 11-22 that ALSO exist on TSLP and mean something else
+    # entirely; matched chain-agnostically they land on a different part of the
+    # protein. Chain-agnostic matching is right for an inter-subunit site on ONE
+    # protein (TNF-alpha's axial channel) and wrong across two DIFFERENT
+    # proteins, and the homo-oligomer guard cannot see the difference because
+    # nothing collapses — `collapsed_by` was 0 on exactly this failure.
+    signature_foreign_dropped = 0
+    signature_foreign_residues: list[str] = []
+    if not site_signature and donor and donor["site_residues"]:
+        _tgt_ch = donor.get("target_polymer_chains")
+        _res = donor["site_residues"]
+        signature_foreign_residues = (
+            [r for r in _res if r.split("/")[0] not in _tgt_ch] if _tgt_ch else []
+        )
+        signature_foreign_dropped = len(signature_foreign_residues)
+        _res_t = [r for r in _res if r.split("/")[0] in _tgt_ch] if _tgt_ch else _res
+        site_signature = {r.split("/")[-1] for r in _res_t}
+        signature_source = f"{donor['pdb_id']}:{donor['comp_id']} (site donor)"
+        signature_n_residues_in = len(_res)
+        signature_donor_homo = donor["homo_oligomer"]
+
+    # A holo structure anywhere in the ensemble donates its ligand site as the
+    # signature for the apo ones, so order the pass holo-first.
+    if not site_signature:
+        for pid in pdb_ids:
+            try:
+                raw = _fetch(pid, work)
+                st, _chains_avail, _renames = _load(raw)
+                # WITH THE STRUCTURAL CONTEXT. This loop is where
+                # `dl[0]` picks the component whose contact shell becomes the
+                # site signature, so a crosslinker misread as `druglike` defines
+                # the site for the whole ensemble. On 8QFZ that component was
+                # `LFI`, and with the context it is `polymer_conjugate` and does
+                # not reach `dl` at all.
+                ligs, _sholo = _ligands(
+                    st, chemcomp_src,
+                    _structure_context(pid, work, target_accession),
+                )
+                dl = [lig for lig in ligs if lig["druglike"]]
+                if not dl:
+                    continue
+                comp = next(
+                    (lig["comp_id"] for lig in ligs
+                     if ligand_codes and lig["comp_id"] in ligand_codes),
+                    dl[0]["comp_id"],
+                )
+                res, _copy = _ligand_site(st, comp, None)
+                tgt_ch = _target_polymer_chains(
+                    st, _fetch_header(pid, work), _renames, target_accession
+                )
+                foreign = (
+                    [r for r in res if r.split("/")[0] not in tgt_ch]
+                    if tgt_ch else []
+                )
+                res_t = (
+                    [r for r in res if r.split("/")[0] in tgt_ch] if tgt_ch else res
+                )
+                if res:
+                    site_signature = {r.split("/")[-1] for r in res_t}
+                    signature_source = f"{pid}:{comp}"
+                    signature_n_residues_in = len(res)
+                    signature_foreign_dropped = len(foreign)
+                    signature_foreign_residues = foreign
+                    # How badly the donor site collapses is itself the finding:
+                    # 19 residues -> 11 numbers on a homotrimer.
+                    signature_donor_homo = _homo_oligomer(st)
+                    break
+            except Exception:  # noqa: BLE001, S112
+                continue
+
     # THE MEASURED COLLAPSE, computed once. This is what decides whether a
     # residue-number signature can identify a site at all — not how many chains
     # the donor has. 19 residues -> 11 numbers on a homotrimer is the failure;
@@ -4920,8 +5384,18 @@ def pocket_scan(
                 if chains.get(pid)
                 else None
             )
-            prepped, used_chains = _prep(st, work, pid, want)
-            ligs, holo_call = _ligands(st, chemcomp_src)
+            # ---- RESOLVED BEFORE PREP, because prep now has a decision to make
+            # The chains fpocket is given are no longer "every polymer chain":
+            # a polymer that is the LIGAND has to come out (rule 4 strips every
+            # ligand before scoring, and a Bicycle peptide is a ligand). Telling
+            # a ligand chain from a partner chain needs the accession mapping
+            # and the ligand verdicts, so both are resolved first and `_prep`
+            # runs last. `avail_chains` is exactly what `_prep` would have kept.
+            avail_chains = sorted(
+                c for c in _chain_monomer_counts(st) if not want or c in want
+            )
+            ctx = _structure_context(pid, work, target_accession)
+            ligs, holo_call = _ligands(st, chemcomp_src, ctx)
             # Target chains by ACCESSION. The homo-oligomer guard asks whether
             # the SITE SIGNATURE is ambiguous, so a partner's homodimer is not
             # its business: 8G94's CD69 pair (25 and 27 residues) tripped it and
@@ -4932,7 +5406,7 @@ def pocket_scan(
                 [c.name for c in st[0]],
             )
             tgt_info = _target_chains(
-                chain_acc, target_accession, used_chains, acc_status
+                chain_acc, target_accession, avail_chains, acc_status
             )
             tgt_chains, tgt_basis = tgt_info["chains"], tgt_info["basis"]
             if tgt_info["refuse"]:
