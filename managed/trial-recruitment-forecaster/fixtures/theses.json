@@ -1,0 +1,110 @@
+[
+  {
+    "whyInSet": "Hero retrospective case. Dupilumab was approved for EoE in 2022; running this thesis with asOf=2018-01-01 tests whether the node calls it enrollable using only pre-approval evidence. Broad biomarker, deep precedent — should score well.",
+    "thesis": {
+      "id": "dupi-eoe",
+      "asset": {
+        "name": "dupilumab",
+        "modality": "antibody",
+        "sponsor": "Regeneron/Sanofi"
+      },
+      "target": { "symbol": "IL4R", "direction": "block" },
+      "disease": { "name": "eosinophilic esophagitis" },
+      "biomarkerPopulation": {
+        "marker": "esophageal eosinophil count >= 15/hpf on biopsy",
+        "prevalenceInDisease": 0.85,
+        "assayAvailable": true
+      },
+      "tissue": "esophageal mucosa",
+      "endpoint": {
+        "name": "Proportion achieving peak eosinophil count <= 6/hpf",
+        "type": "binary",
+        "expectedEffectSize": 0.8
+      },
+      "mechanism": "IL-4Ra blockade shuts down IL-4/IL-13 signalling, reducing type 2 inflammation and eosinophil recruitment to esophageal epithelium.",
+      "evidence": [],
+      "uncertainty": 0.3
+    }
+  },
+  {
+    "whyInSet": "Adjacent-indication mode (was 'rare-disease/thin-precedent' — that premise is void: CT.gov concept-expands 'eosinophilic gastritis' to the whole eosinophilic-GI family, so EG borrows EoE's deep precedent pool). Now tests that borrowed sibling-indication velocity produces sane, honestly-labeled numbers rather than false precision about EG itself.",
+    "thesis": {
+      "id": "dupi-eg",
+      "asset": {
+        "name": "dupilumab",
+        "modality": "antibody",
+        "sponsor": "Regeneron/Sanofi"
+      },
+      "target": { "symbol": "IL4R", "direction": "block" },
+      "disease": { "name": "eosinophilic gastritis" },
+      "biomarkerPopulation": {
+        "marker": "gastric eosinophil count >= 30/hpf in 5 hpf",
+        "prevalenceInDisease": 0.7,
+        "assayAvailable": true
+      },
+      "tissue": "gastric mucosa",
+      "endpoint": {
+        "name": "Change in gastric eosinophil count",
+        "type": "continuous",
+        "expectedEffectSize": 0.7
+      },
+      "mechanism": "Same IL-4Ra axis as EoE, applied to a rarer eosinophilic GI disorder with far less trial precedent.",
+      "evidence": [],
+      "uncertainty": 0.55
+    }
+  },
+  {
+    "whyInSet": "Solvable-relaxation mode. A moderately narrow phenotype marker (30%) in a deeply precedented indication: slow as specified, but a concrete biomarker broadening should rescue it. This fixture proves the counterfactual search finds a genuine minimum instead of reporting 'none' — the broaden-the-marker stage moment.",
+    "thesis": {
+      "id": "il13-eoe-fibrostenotic",
+      "asset": {
+        "name": "cendakimab",
+        "modality": "antibody",
+        "sponsor": "Bristol Myers Squibb"
+      },
+      "target": { "symbol": "IL13", "direction": "block" },
+      "disease": { "name": "eosinophilic esophagitis" },
+      "biomarkerPopulation": {
+        "marker": "fibrostenotic phenotype (EREFS ring/stricture subscore >= 2)",
+        "prevalenceInDisease": 0.3,
+        "assayAvailable": true
+      },
+      "tissue": "esophageal mucosa",
+      "endpoint": {
+        "name": "Change in dysphagia symptom score",
+        "type": "continuous",
+        "expectedEffectSize": 0.7
+      },
+      "mechanism": "IL-13 drives epithelial barrier dysfunction and subepithelial fibrosis in EoE; blockade should benefit the fibrostenotic subset most, at the cost of narrowing the enrollable population.",
+      "evidence": [],
+      "uncertainty": 0.45
+    }
+  },
+  {
+    "whyInSet": "Narrow-biomarker failure mode. A marker in 6% of patients should push predicted enrolment past the infeasibility threshold and force the counterfactual branch to fire — this is the fixture that proves the close-the-loop feedback edge works.",
+    "thesis": {
+      "id": "narrow-marker-asthma",
+      "asset": {
+        "name": "dupilumab",
+        "modality": "antibody",
+        "sponsor": "Regeneron/Sanofi"
+      },
+      "target": { "symbol": "IL4R", "direction": "block" },
+      "disease": { "name": "severe asthma" },
+      "biomarkerPopulation": {
+        "marker": "blood eosinophils >= 1500 cells/uL AND FeNO >= 50 ppb",
+        "prevalenceInDisease": 0.06,
+        "assayAvailable": true
+      },
+      "tissue": "airway epithelium",
+      "endpoint": {
+        "name": "Annualised severe exacerbation rate",
+        "type": "time_to_event",
+        "expectedEffectSize": 0.35
+      },
+      "mechanism": "Dual type 2 biomarker enrichment intended to concentrate effect size, at the cost of shrinking the enrollable population.",
+      "evidence": [],
+      "uncertainty": 0.4
+    }
+  }
+]

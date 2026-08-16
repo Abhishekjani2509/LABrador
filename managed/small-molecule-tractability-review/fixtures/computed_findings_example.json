@@ -1,0 +1,181 @@
+{
+  "_why_in_set": "Worked examples of the `computed_finding` record type, which exists because our methods produce knowledge the literature does not have -- measured pocket volumes, interface residues, cryptic-mechanism classifications, cofold results -- and that knowledge must be able to travel WITHOUT ever becoming a literature finding. Three valid records and one that must be rejected. Every number below was measured in this repo and is cited to the file it came from; nothing here was invented for illustration except the `run_id` strings, which are identifiers rather than measurements. Validate with: python3 .claude/skills/graph-intake/computed_findings.py fixtures/computed_findings_example.json",
+  "_generated": "2026-08-15",
+  "_rules_this_file_exercises": {
+    "no_quote_field": "SKILL.md failure mode 9 and SCHEMA.md's one mechanical guarantee -- every upstream `findings[].quote` is string-matched against the fetched abstract, failures counted in coverage.no_quote_discarded. A computed result has provenance and no sentence, so the field is ABSENT rather than empty.",
+    "computed_confidence_not_confidence": "Upstream `confidence` is how strongly a paper states a claim; ours is measurement uncertainty. Different name, capped at 0.6 -- the same cap SCHEMA.md puts on gaps, 'a proposal, not a finding'.",
+    "leakage_risk_required": "Not optional. The laundering hazard is a cofold contaminated by PDB training data re-entering as an ordinary finding on a later round with the flag gone (CLAUDE.md pocket_neighbour_precedent.cofold_transfer.leakage_note).",
+    "provenance_required": "Rule 10 -- every numeric claim carries a source. method + version + inputs + run_id, rejected at construction if missing."
+  },
+
+  "computed_findings": [
+    {
+      "_expect": "accept",
+      "_note": "Pocket volume. Rule 4: volume is the reproducible geometric number, druggability is not -- so this record reports volume and a separate record would be needed for druggability, with its own leakage basis.",
+      "_values_from": {
+        "584.6": "fixtures/pocket_calibration.json -> structures[6OIM].pockets[rank 1].volume_a3",
+        "0.708 / 17-of-22 / Jaccard 0.773": "same block, recorded in `notes` as context, not as this record's value",
+        "fpocket 4.2.3, -D 1.6, prep": "fixtures/pocket_calibration.json -> _method",
+        "run_id": "illustrative identifier, not a measurement"
+      },
+      "kind": "computed",
+      "id": "cf_kras_6oim_switchii_volume",
+      "result_type": "pocket_volume",
+      "about": {
+        "uniprot_accession": "P01116",
+        "pdb_ids": ["6OIM"],
+        "chains": ["A"],
+        "site": "switch-II (sotorasib site)"
+      },
+      "statement": "On the holo KRAS G12C structure 6OIM with all ligands stripped, fpocket detects the switch-II site as its top-ranked pocket at 584.6 A^3.",
+      "value": 584.6,
+      "units": "A^3",
+      "computed_confidence": 0.5,
+      "leakage_risk": false,
+      "leakage_basis": "fpocket volume is a geometric measurement over alpha spheres with no trained parameters, so there is no training corpus for this number to leak from. Two separate cautions, neither of which is leakage in this record: (a) the fpocket DRUGGABILITY score IS a fitted logistic regression on 21 positives against 292 others, so a pocket_druggability record needs its own basis; (b) 6OIM was deposited in 2019, so under an as_of_date before that this record must be excluded at source, not trimmed afterwards (rule 8).",
+      "provenance": {
+        "method": "fpocket",
+        "version": "4.2.3 (conda-forge build hb88c64c_2; binary self-reports 4.0, upstream cosmetic mismatch)",
+        "inputs": {
+          "pdb_id": "6OIM",
+          "assembly": "deposited preferred assembly, monomer",
+          "chains": ["A"],
+          "clustering_d": 1.6,
+          "min_alpha_spheres_i": 15,
+          "prep": "protein only, altloc A, hydrogens stripped; 1336 ATOM and zero HETATM records against 277 HETATM in the raw entry"
+        },
+        "run_id": "pocketscan-6OIM-D1.6-20260815-01",
+        "run_date": "2026-08-15",
+        "parameters_note": "-D 1.6 is KRAS-specific tuning and does NOT generalise; on TNF-alpha it gives 0.002 at a co-crystallised 570 Da site. A reported range must sweep D over at least {1.6, 2.4} (rule 4)."
+      },
+      "sources": [
+        "fixtures/pocket_calibration.json (in-repo run, 2026-08-15)",
+        "PDB 6OIM",
+        "CLAUDE.md rule 4 (volume is the primary geometric number; strip ligands before scoring)"
+      ],
+      "notes": "Context, not this record's value: at the same run the site scores druggability 0.708 at rank 1 and recovers 17 of 22 true contact residues (Jaccard 0.773). The matched apo measurement on 4OBE is the separate record that makes this one interesting -- same site, druggability 0.000 at rank 4 of 5, volume 230.4 A^3."
+    },
+
+    {
+      "_expect": "accept",
+      "_note": "Protein-protein cofold on an assembly that is already in the PDB. leakage_risk TRUE, so it is a method check and is not evidence in any slot -- computed or literature. This is the record the laundering rule exists for.",
+      "_values_from": {
+        "1TNF / 2AZ5 / 1A8M / 2E7A / 2ZJC / 5TSW": "fixtures/pocket_calibration.json -> REPRODUCED_THROUGH_THE_PIPELINE_2026_08_15.tnf_result_VOID.ensemble (the ensemble is real; the druggability numbers in that block are WITHDRAWN and are not used here)",
+        "0.00 A^3 / 281.8-546.0 A^3 / 312.5 A^3": "fixtures/pocket_calibration.json -> MDPOCKET_CALIBRATION_2026_08_15.THE_FINDING",
+        "Boltz-2 trained on the PDB": "CLAUDE.md -> pocket_neighbour_precedent.cofold_transfer.leakage_note and rule 5",
+        "value": "categorical on purpose -- no cofold RMSD has been measured in this repo, and inventing one would be the exact defect this type is meant to prevent"
+      },
+      "kind": "computed",
+      "id": "cf_tnfa_trimer_cofold_methodcheck",
+      "result_type": "cofold_control",
+      "about": {
+        "uniprot_accession": "P01375",
+        "pdb_ids": ["1TNF", "2AZ5"],
+        "chains": ["A", "B", "C"],
+        "site": "3-fold trimer axis (SPD304 cavity)"
+      },
+      "statement": "Boltz-2 cofolded three P01375 protomers from sequence alone and returned the C3 homotrimer with the third protomer packed across the 3-fold-axis site. Run as a method check against the deposited assembly; it is not evidence about the trimer or about the site.",
+      "value": "reproduces_reference",
+      "units": null,
+      "computed_confidence": 0.3,
+      "leakage_risk": true,
+      "leakage_basis": "The complex being cofolded is already deposited, repeatedly: 1TNF (1993), the holo 2AZ5, and the four further apo entries 1A8M, 2E7A, 2ZJC and 5TSW used as this repo's TNF-alpha ensemble. Boltz-2 is trained on the PDB, so recovering this assembly measures recall of the training set rather than prediction, and it is a method check only, never retrospective evidence. Compounding it: cofolding runs from SEQUENCE, and apo and holo TNF-alpha share a sequence, so a sequence-only cofold cannot distinguish the occluded state from the open one and is not testing the site at all.",
+      "provenance": {
+        "method": "boltz-2 cofold (protein-protein, no template supplied)",
+        "version": "boltz 2.x, msa_server default, 5 samples, recycling 3",
+        "inputs": {
+          "chains": ["P01375 residues 77-233", "P01375 residues 77-233", "P01375 residues 77-233"],
+          "templates": "none -- sequence only",
+          "reference_assembly": "1TNF",
+          "ligand": "none (protein-protein)"
+        },
+        "run_id": "cofold-P01375-trimer-20260815-03",
+        "run_date": "2026-08-15"
+      },
+      "sources": [
+        "PDB 1TNF, 2AZ5, 1A8M, 2E7A, 2ZJC, 5TSW",
+        "fixtures/pocket_calibration.json -> MDPOCKET_CALIBRATION_2026_08_15",
+        "CLAUDE.md rule 5 (cofolding cannot find a pocket) and the cofold_transfer leakage_note"
+      ],
+      "notes": "What the site claim actually rests on is measured without any cofold: mdpocket returns 0.00 A^3 at the true SPD304 site in four of five intact apo trimers, and 281.8-546.0 A^3 in those same five once the third chain is deleted, against a holo dimer reference of 312.5 A^3. Use those. This record exists to show that the cofold agreed, and that agreement here is worth nothing."
+    },
+
+    {
+      "_expect": "accept",
+      "_note": "Cryptic-mechanism classification. Also the cap demonstration: the caller passed computed_confidence 0.85 and to_record() clamped it to 0.6, recording the original in computed_confidence_capped_from rather than silently rewriting it.",
+      "_values_from": {
+        "8.8 A at Glu63": "fixtures/pocket_calibration.json -> THE_FINDING.physical_collapse_evidence.switch_ii_backbone_displacement_holo_vs_apo",
+        "RMSD 0.86 A on 128 core CA": "same block, superposition line",
+        "6 atoms < 2.0 A / self-control 1 atom": "same block, sotorasib_clashes_in_apo_frame and self_control_baseline",
+        "zero of 12 clashing atoms are backbone; Arg68/Met72/His95": "CLAUDE.md rule 5",
+        "25 of 27 loop-motion sites reached nanomolar": "CLAUDE.md rule 5, citing Lazou, Kozakov, Joseph-McCarthy & Vajda, Drug Discov Today 2024"
+      },
+      "kind": "computed",
+      "id": "cf_kras_switchii_cryptic_mechanism",
+      "result_type": "cryptic_mechanism",
+      "about": {
+        "uniprot_accession": "P01116",
+        "pdb_ids": ["6OIM", "4OBE"],
+        "chains": ["A"],
+        "site": "switch-II"
+      },
+      "statement": "Superposing apo 4OBE onto holo 6OIM, the switch-II site classifies as loop_or_backbone_motion: maximum backbone C-alpha displacement 8.8 A at Glu63. Classified on C-alpha displacement, NOT on clash composition -- zero of the 12 atoms clashing at 2.0 A are backbone, and keying on that would hand the canonical nanomolar target a micromolar prognosis.",
+      "value": "loop_or_backbone_motion",
+      "units": null,
+      "computed_confidence": 0.6,
+      "computed_confidence_capped_from": 0.85,
+      "leakage_risk": false,
+      "leakage_basis": "No trained model is involved: this is a superposition of two deposited experimental structures and a distance measurement between them. Nothing was predicted, so there is no training corpus to leak from. The date constraint is separate and still binding -- 6OIM is a 2019 entry, so under the KRAS as_of_date of 2012-12-31 this record cannot be produced at all, which is precisely the rung-5 point that the method knows when it cannot see.",
+      "provenance": {
+        "method": "structural superposition + per-residue C-alpha distance, with ligand-placement clash attribution",
+        "version": "in-repo analysis, 2026-08-15; superposition on 128 core CA excluding both switch regions, RMSD 0.86 A",
+        "inputs": {
+          "holo_reference": "6OIM (chain A, sotorasib MOV covalent to Cys12)",
+          "apo_frame": "4OBE (chain A, GDP/Mg, complete 1-169)",
+          "clash_cutoffs_a": [2.0, 2.5, 3.0],
+          "self_control": "6OIM against itself -- 1 atom within 2.0 A, the Cys12 covalent bond"
+        },
+        "run_id": "cryptic-P01116-4OBE-vs-6OIM-20260815-02",
+        "run_date": "2026-08-15"
+      },
+      "sources": [
+        "fixtures/pocket_calibration.json -> THE_FINDING.physical_collapse_evidence",
+        "PDB 6OIM, PDB 4OBE",
+        "CLAUDE.md rule 5",
+        "Lazou, Kozakov, Joseph-McCarthy & Vajda, Drug Discov Today 2024 (CryptoSite set: 25 of 27 loop-motion sites reached nanomolar; of 18 side-chain sites only 10 had affinity data and all bound weakly)"
+      ],
+      "notes": "The mechanism is a prior on achievable potency, not a taxonomy label, so this record carries cryptic_potency_prior = nanomolar. Contrast the TNF-alpha axis at 1.62 A C-alpha displacement, which is occluded and NOT cryptic -- its site is recovered in all five apo structures once the third subunit is removed, so it fails Vajda's 'absent in all or nearly all unbound structures' criterion."
+    },
+
+    {
+      "_expect": "reject",
+      "_note": "DELIBERATELY INVALID. Six rules broken at once, and it must be rejected on every one. (1) It carries a `quote` -- a method sentence dressed up as something a paper said, which is the laundering attempt itself; upstream findings string-match quotes against a fetched abstract and this string is in no abstract. (2) It uses `confidence`, the upstream field, meaning 'how strongly a paper states this', for what is actually measurement spread, and sets it to 0.88 -- above the 0.6 cap it also fails to use `computed_confidence` for. (3) It carries `paper`, so on the next round it reads as literature-grade evidence from p3. (4) `leakage_risk` and `leakage_basis` are absent, which is exactly how a contaminated result travels unlabelled. (5) provenance has no `version` and no `run_id`, so the number cannot be reproduced or traced -- rule 10. (6) `result_type` is not in the closed vocabulary, and `units` is missing for a numeric value. Its content is the final insult: 651.0 is the WITHDRAWN TNF-alpha druggability spread, void since 2026-08-15 because the pockets were matched on shared residue numbers and mdpocket showed the matched pocket sat 7.7 A from the site it claimed, with 12.2 A of internal inconsistency across the ensemble. A record type that admits this one lets a withdrawn figure re-enter the graph as evidence.",
+      "_values_from": {
+        "651.0 and the void status": "fixtures/pocket_calibration.json -> REPRODUCED_THROUGH_THE_PIPELINE_2026_08_15.tnf_result_VOID -- WITHDRAWN, do not cite",
+        "7.7 A / 12.2 A": "same block, why_it_is_void"
+      },
+      "kind": "computed",
+      "id": "cf_tnfa_druggability_spread_650x",
+      "result_type": "druggability_spread",
+      "about": {
+        "uniprot_accession": "P01375",
+        "pdb_ids": ["2AZ5", "1TNF", "1A8M", "2E7A", "2ZJC", "5TSW"]
+      },
+      "statement": "Druggability at the TNF-alpha SPD304 site varies 651-fold across five apo structures of the same site.",
+      "quote": "Druggability at the same site varies 651-fold across the apo ensemble, from 0.001 in 2ZJC to 0.651 in 1A8M.",
+      "paper": "p3",
+      "value": 651.0,
+      "confidence": 0.88,
+      "provenance": {
+        "method": "fpocket + residue-number pocket matching",
+        "inputs": {
+          "signature_donor": "2AZ5 (holo)",
+          "apo_ensemble": ["1TNF", "1A8M", "2E7A", "2ZJC", "5TSW"]
+        }
+      },
+      "sources": [
+        "fixtures/pocket_calibration.json -> tnf_result_VOID (WITHDRAWN)"
+      ]
+    }
+  ]
+}

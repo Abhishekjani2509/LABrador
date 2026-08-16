@@ -1,0 +1,272 @@
+# Trial Recruitment Forecaster — state of play
+
+Node (4) of the GO Hackathon pipeline, Track A. Owner: Abhishek.
+Answers: *given an indication thesis, could this trial actually be enrolled?*
+
+## What exists and is verified working
+
+| File | What it is |
+|---|---|
+| `thesis.ts` | **The team-wide contract.** Zod schema for an indication thesis. Upstream (hypothesis node) emits it, ROI consumes the result. Not yet agreed with the team — see waiting-on-team. |
+| `ctgov.ts` | ClinicalTrials.gov API v2 client. Free, no key. `asOf` horizons, `getTrial(nctId)`, endpoint-window parsing (`enrollmentMonths`). |
+| `recruitability.ts` | The engine. Empirical velocity → biomarker narrowing (floored) → eligibility burden (median of 3 Claude reads of real I/E prose) → competition → powering (phase-3 floored) → sites from precedent → counterfactual search. |
+| `backtest.ts` | Validation harness: predicted vs actual enrolment for completed trials, horizon rolled back to each trial's start. Since 2026-08-15 late also reports two √-dilution EXPERIMENT columns (pool-median + at-scale anchors) — evidence-only, not in the engine. |
+| `fixtures/theses.json` | 4 fixtures, one per mode, each with a `whyInSet` rationale. |
+| `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
+| `economics-bridge.ts` | **Adapter B** (COORDINATION §5): RecruitabilityResult → launch-delay overlay for Vince's economics node, with best-effort pricing. See section below. |
+| `evidence-bridge.ts` | **Adapter A** (COORDINATION §5): research-evidence-mapper graph → `IndicationThesis.evidence[]`, validated row-by-row with `Evidence.parse`. Run against the real `runs/g_1a4f` graph. See section below. |
+| `INTEROP-highlander.md` | Verification report (COORDINATION §5): does `hypothesis-highlander` actually speak `RecruitabilityResult` + `thesis.ts`? Mismatch table + minimal adapter recommendation. Read-only on Vince's dir. |
+
+Verified end to end on 2026-08-15 (evening): typecheck + ultracite clean, all
+four fixtures coherent, hero retrospective solid, backtest runs. `managed/trial-recruitment-forecaster`
+is un-gitignored (narrow negation; full `/managed-agent-setup` Phase 2 with
+auth wiring remains a team decision).
+
+## The model, current form
+
+```
+months = requiredN / (sites × velocity × max(prevalence × eligibility, 0.10) × 1/(1 + 0.08 × competitors))
+```
+
+- **velocity**: median pts/site/ENROLLING-month over interventional completed
+  precedents (100-result pages — one page of 50 was measurably unstable).
+  Each precedent's registry window is corrected for its own primary-endpoint
+  follow-up ("At week 24" → −5.5 mo), floored at window/3.
+- **requiredN**: textbook two-arm formula floored by the indication's phase-3
+  precedent median when ≥3 phase-3 precedents exist. The real EoE phase 3
+  enrolled 321 where the formula said 65; history wins. Basis is reported.
+- **sites**: p75 of site counts among precedents with enrollment ≥ N/2
+  (registrational sponsors behave like the upper quartile, not the single-site
+  academic median), clamped to [40, 250]; explicit `opts.sites` wins;
+  basis reported.
+- **competition**: interventional-only. asOf runs use the window
+  approximation (started ≤ horizon < primary completion) — current-status
+  RECRUITING is era-leaky.
+- **eligibility**: Claude reads precedent I/E prose; median multiplier of 3
+  samples (`temperature: 0` is rejected by claude-sonnet-5 — "deprecated for
+  this model"; sampling is the variance pin). Bad samples are dropped, not
+  fatal.
+- **counterfactual**: bisection for the smallest biomarker relaxation
+  reaching ≤18 mo ("good") or <48 ("feasible"); a borderline design
+  (19–47 mo, good unreachable) gets a sites-needed answer instead of a no-op
+  relaxation; "none" states all-comers months + sites needed.
+
+## Fixture results (2026-08-15, after adversarial review round)
+
+| Fixture | Result | Counterfactual |
+|---|---|---|
+| dupi-eoe @2018-01-01 (hero) | **12 mo, 100/100** — leak-free on all axes: N=88 (2018's own phase-3 median), 40 sites, ~20 interventional competitors *at the horizon*, failed-precedents horizon-filtered | none needed |
+| dupi-eoe today | 22 mo, 87/100 | borderline: no relaxation reaches 18; ~85 sites would |
+| dupi-eg today | 25 mo, 77/100 | **"good" tier: broaden 70%→96% → 18 mo** |
+| il13-eoe-fibrostenotic | 63 mo, 0/100 | **"feasible" tier: broaden 30%→40% → 47 mo** |
+| narrow-marker-asthma | 181 mo, 0/100, ~37 screens/enrollee | "feasible" tier: broaden 6%→86% → 47 mo — i.e. abandon the enrichment strategy, which is dupilumab's real severe-asthma story |
+
+All three counterfactual tiers (good / feasible / borderline-none) are now
+demonstrated across the fixture set.
+
+Gift finding intact and now horizon-honest: the 2018 run cites only pre-2018
+recruitment deaths (NCT01458418 "inability to complete enrollment",
+NCT01404832 "inadequate recruitment"); NCT02881372 ("lack of recruitment",
+withdrawn 2023) appears only in today-runs.
+
+## Economics bridge (Adapter B, shipped 2026-08-15 late)
+
+`bun managed/trial-recruitment-forecaster/economics-bridge.ts --fixture <id> |
+--from-json <saved-result> [--planned-months 18] [--save-result <path>]`
+
+What it does: converts a RecruitabilityResult into an "economics overlay" —
+`simulatedLaunchDelayYears` = max(0, round((simulatedMonthsToEnroll −
+plannedMonths)/12)), a triangular `simulatedLaunchDelayRangeYears`
+(low/mode/high, whole years, from `simulatedMonthsRange`) for
+`SimulationAssumptions.launch_delay_years`, counterfactual passthrough with
+`simulatedMonthsSavedByCounterfactual`, and a `basis` string per number. If
+`uv` is available it prices the delay by running Vince's demo analysis
+read-only (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on his SYNTHETIC
+demo fixture, self-stamped NOT_DECISION_GRADE) → `simulatedDelayCostUSD` +
+`simulatedCounterfactualValueUSD`; otherwise it emits the overlay with
+`pricing: unavailable` instead of failing.
+
+What it does NOT do: it never writes into `managed/therapeutic-program-economics/`
+(the analyst/orchestrator applies the overlay); it does NOT map `score` →
+approval probabilities (category error — recruitability is not PoA) and does
+NOT map months → `stage_durations_years` (in engine.py durations only shift
+stage cost timing, they don't move launch) — the file header documents both
+forbidden wirings. The `launch_year`-delta application convention still needs
+Vince's confirmation. Verified run (dupi-eoe today): 22 mo → delay 0 whole
+years (0.33 unrounded), range {0,0,3}; counterfactual saves 3 months →
+priced at ~$1.27M against the synthetic economics fixture.
+
+## Evidence bridge (Adapter A, shipped 2026-08-15 late)
+
+`bun managed/trial-recruitment-forecaster/evidence-bridge.ts <graph.json>` →
+`{evidence, dropped, provenance}`. Read-only against Soliman's directory.
+
+Mapping (full rules + citations in the file header): `claim` = the finding's
+**verbatim quote** plus its from/how/to triple and a `[graph_id#finding_id]`
+tag (the quote is the inspectability payload — never paraphrased, and the
+finding's own undocumented `claim` field, which IS a paraphrase, is ignored);
+`says` yes/no/no_effect → `direction` supports/contradicts/**no_effect** (never
+collapsed — that is what §6 item 3 added the third value for); `source` =
+`doi:…` else `PMID:…`, and a finding whose paper has neither is DROPPED, not
+placeholder-sourced; `sourceType` = `publication`; `strength` =
+clamp01(study-type quality × 0.8 if preprint), the table copied from the
+mapper's own `assemble.py:199` `_STUDY_QUALITY`. Findings whose link `basis`
+is `background_only`/`hedged_only` are excluded, mirroring Rafal's
+graph-intake (`graph_read.py:31 NON_ACTIONABLE_BASIS`) so two consumers of one
+upstream agree on what is actionable. Every emitted row goes through
+`Evidence.parse`; failures are dropped and counted.
+
+**Real-artifact run** (`managed/research-evidence-mapper/runs/g_1a4f.json`,
+round 2, status ok): **12 findings → 11 Evidence rows, 1 dropped** (f6,
+`non_actionable_basis` — background_only). 10 supports / 1 contradicts (n_f3,
+"However, it did not inhibit IL‐1–induced cytokines in RA FLS."), strength 0.5
+for the three test_tube papers and 0.6 for the animal one. No `no_effect`
+finding exists in this graph, so that path is exercised only on a synthetic
+input — flagged for Soliman as the untested branch.
+
+**Schema deviations found in the real artifact** (reported in
+`provenance.schemaDeviations`, not repaired — for Soliman):
+
+1. every finding lacks `round` and `flags`, both promised by SCHEMA.md;
+2. every paper lacks `round`, also promised;
+3. every finding carries an undocumented `claim` field (a model paraphrase);
+   `papers` carry an undocumented (but useful) `pmid`;
+4. `findings/r2.json` is a **full snapshot**, not the append-only round chunk
+   SCHEMA.md describes — it repeats all seven r1 rows. Anyone concatenating
+   the chunk files double-counts; the bridge dedupes on finding id and reports
+   collisions, and takes the full graph file as its supported input;
+5. f6 is cited by no link, so it has no `basis` — the bridge derives one the
+   way `assemble.py:299 link_basis` would for a one-finding link.
+
+Open question for Soliman: whether a `hedged: true` finding inside a `mixed`
+link should take a strength discount. It does not today; inventing a
+multiplier the mapper does not define would be worse than saying so.
+
+## Highlander interop (verified 2026-08-15 late, read-only)
+
+Full table in [`INTEROP-highlander.md`](./INTEROP-highlander.md). Headline:
+the two `RecruitabilityResult` fields `hypothesis-highlander` reads (`score`,
+`simulatedMonthsToEnroll`) **match this node exactly — nothing to rename here**.
+What has drifted is its hand-written Python mirror of `thesis.ts`: it puts
+`uniprotAccession` at the top level (zod strips it silently — Rafal's join key
+is lost in both directions, verified by running both parsers) and its
+`Evidence.direction` has only two values, so a thesis carrying the `no_effect`
+rows `evidence-bridge.ts` now emits raises `AssertionError` inside its
+`validate()`. It also ships its own Adapter A/B whose numbers disagree with
+this node's bridges (strength formula, `no_effect` handling, whole-vs-fractional
+delay years, a hardcoded $5.06M/yr rate). Fixes are all on highlander's side;
+this node changes nothing.
+
+## Backtest results and what they mean
+
+`bun managed/trial-recruitment-forecaster/backtest.ts` — 6 completed EoE-family trials.
+The comparator is now honest: predicted ENROLLING months vs the registry
+window minus each trial's own endpoint window.
+
+- Bullseyes when structure matches: lirentelimab 2.0x edge, CC-93538 safety
+  0.92x, reslizumab 0.69x.
+- **Known, isolated limitation: per-site velocity does not transfer across
+  site-count scales.** The three registrational efficacy trials predict
+  0.24–0.39x (too fast): precedent pools are 5–40-site trials at
+  0.4–0.6 pt/site/mo; real 95–212-site machines ran 0.07–0.13.
+- **√-dilution DECIDED against engine adoption (2026-08-15 late, 22 fresh
+  backtest rows across two conditions).** The earlier on-paper claim that
+  velocity × √(medianPrecedentSites/targetSites) "lands all three at
+  1.09–1.13x" is VOID: run live, the pool-median anchor degenerates to **1**
+  on every EoE and AD row (single-site academic studies dominate any
+  condition's completed pool), blowing predictions to 3–17x actual (EoE-12
+  panel: median |error| 270% vs base 62%). An at-scale anchor (median sites
+  among precedents with enrollment ≥ N/2 — the same population
+  `sitesFromPrecedent` trusts) does help EoE, where the scale mismatch is
+  real: within-2x 7/10 vs base 6/12, and the three registrational trials move
+  from 0.24–0.39x to 0.56–0.62x. But it wrecks atopic dermatitis, whose base
+  model is already well-calibrated (8/10 within 2x, 53% median error → 3/10,
+  329% diluted): when the precedent pool already contains at-scale trials,
+  any dilution double-counts. Conclusion: √-dilution is a correction for
+  measured pool-vs-target scale mismatch, not a universal term — adopting it
+  unconditionally degrades well-calibrated conditions. It stays OUT of the
+  engine; backtest.ts now prints both variants as EXPERIMENT columns on
+  every run, so future panels keep accumulating evidence for a gated form
+  (apply only when the pool is measurably small-site relative to the target).
+- Panel hygiene: NCT04991935 is a rollover study (enrolls pre-consented
+  parent-trial patients) — an unfair backtest target; consider excluding
+  extension/rollover designs from discovery.
+
+## Fixed today (all previously-listed engine items)
+
+1. Counterfactual bisection search with good/feasible/none tiers (old
+   "double prevalence once" output void).
+2. Low-prevalence blowup → 10% narrowing floor + `screensPerEnrollee`
+   (2314-months output void).
+3. Powering reconciled: phase-3 precedent median floors the formula.
+4. Sites from precedent (p75 at scale, [40, 250]) instead of hardcoded 40.
+5. asOf era-leaks closed: precedent completion filter + historical
+   competition window; interventional-only everywhere.
+6. Eligibility variance pinned (median-of-3; temperature rejected by API).
+7. Endpoint-window correction: velocities and backtest compare enrolling
+   months, not registry windows.
+8. Fixture set: added il13-eoe-fibrostenotic (solvable relaxation); dupi-eg
+   rationale rewritten — CT.gov concept-expands EG to the eosinophilic-GI
+   family, so its old "thin precedent" premise was void; it now tests
+   adjacent-indication borrowing.
+
+## Adversarial review round (21-agent workflow, same day)
+
+11 confirmed findings, all fixed: percentile() nearest-rank off-by-one (p75
+of a 4-sample pool was the MAX — now linear interpolation); monthsBetween
+mixed UTC parsing with local getters (off-by-one months west of UTC, silent
+trial drops — now getUTC*); **asOf runs leaked post-horizon terminations
+into failedPrecedents** (a 2018 run showed 2019–2023 failures as kill-mode
+fuel — now horizon-filtered); one-page truncation with fetched totals
+discarded (completed page → 300, competition counts scaled by total/page,
+sampling disclosed in `why`); NaN-surviving LLM multiplier and un-validated
+drivers/citedTrials (strict validation, bad samples dropped); one fetch or
+one bad NCT id killing whole demo/backtest runs (allSettled + one retry on
+429/5xx); NaN panel size silently producing an empty "successful" backtest
+(validated, throws usage).
+
+## Known limitations (ranked)
+
+1. Velocity scale-transfer (above) — the big one, isolated by the backtest.
+   √-dilution as a blanket fix is now REJECTED on 22-row/two-condition
+   evidence (see backtest section); the open problem is narrower: a gate
+   that detects when the precedent pool's scale actually mismatches the
+   target before applying any correction.
+2. **The Claude eligibility multiplier is an unclosed post-horizon channel
+   in asOf runs**: the model has 2025-era knowledge of the asset, and the
+   criteria text is the registry's CURRENT version. The prompt now pins the
+   horizon and forbids outside knowledge, but that constrains, not proves.
+   The honest phrasing on stage: "every *registry-derived* number is
+   horizon-filtered; the eligibility judgment is a present-day model reading
+   period criteria text."
+3. GOOD_MONTHS=18 may be miscalibrated for registrational N: real phase 3s
+   enrol in ~30 months. Consider phase-scaled thresholds.
+4. Eligibility multiplier still drifts with corpus changes (search-result
+   order), just not with sampling dice.
+5. Historical-competition window counts trials missing dates as absent, and
+   page-scaled counts assume the page is representative of the total.
+
+## Waiting on team input (not blocked on code)
+
+- **Ratify `thesis.ts`** with Sean / Abraham / Weichi and Vince before the
+  integration hour, or nothing composes. Update 2026-08-15 late: all four
+  §6 schema items are now IMPLEMENTED in `thesis.ts` as additive, optional,
+  backward-compatible changes (`mechanismHypothesis` enum, `target.uniprotAccession`,
+  `Evidence.direction` gains `no_effect`, modality boundary declared in a
+  comment); every pre-change fixture still parses. What remains is the
+  human step: sign-offs per the checklist in COORDINATION.md §6.
+- **Team fixture asset** — dupilumab/EoE was a unilateral pick to unblock.
+- **`/managed-agent-setup` Phase 2** (full un-ignore + auth wiring) — team
+  decision; this node is already narrowly un-ignored.
+- **Managed Agent wrap** — needs a fresh session by design: `/clear`, then
+  `/managed-agent-prototype`; the engine becomes `tools.ts` handlers. Do it
+  after thesis ratification so the contract doesn't shift under the deploy.
+
+## Honesty requirement
+
+Every number this node emits is simulated. Field names say so
+(`simulatedMonthsToEnroll`, `simulatedPredictedMonths`), and provenance
+fields (`poweringBasis`, `sitesBasis`, `why`) say where each factor came
+from. Keep it that way in any UI — this node produces the most
+authoritative-looking output in the pipeline and is the easiest to misread
+as validated. In the backtest, only the "actual" column is real.

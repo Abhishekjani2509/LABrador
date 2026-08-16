@@ -1,0 +1,139 @@
+{
+  "_note": "Grading key for graph-intake against upstream_graph_modalitytrap.json. This fixture is the only one in the set where the nomination is CORRECT mechanically and WRONG substantively. Everything in the source graph is synthetic; the error it encodes is not. Two real review papers assert that obefazimod (ABX464) is 'a prototype of TL1A'. That claim is false, and it is dangerous in a specific way: obefazimod is a small molecule, so ingesting the claim manufactures small-molecule precedent for a target that has none.",
+  "_source_graph": "upstream_graph_modalitytrap.json (g_mt1, round 2)",
+  "_accessions_retrieved": "2026-08-15 via paperclip uniprot_v.proteins, one symbol per query. Not recalled. TNFSF15 -> O95150. Supporting resolution checks in the same session: TNF -> P01375, TL1A -> 0 rows, VEGI -> 0 rows.",
+  "_what_the_real_literature_says": {
+    "obefazimod_actual_mechanism": "miR-124 upregulator acting through modulation of RNA splicing. Primary literature, verified via Paperclip and NOT part of the fixture: PMC10132720 (2023, ABX464/obefazimod upregulates miR-124 to reduce proinflammatory markers in IBD), PMC6349857 (2019, both anti-inflammatory and antiviral properties of ABX464 are mediated by modulation of RNA splicing), PMC9279835 (2022, phase II in rheumatoid arthritis, titled for 'the miR-124 upregulator ABX464').",
+    "tl1a_actual_agents": "TL1A (TNFSF15, O95150) is a separate programme whose real agents are ANTIBODIES -- tulisokibart and duvakitug, both in phase 3. There is no small-molecule TL1A agent.",
+    "why_the_two_claims_got_crossed": "Both compounds are oral or injectable IBD assets in overlapping trial populations, and review prose compresses 'in development for the same indication' into 'of this target class'. Nothing in the graph can detect that. Only the modality split can.",
+    "targets_json_position": "fixtures/targets.json records TL1A/TNFSF15 (O95150) under slot_6_recent_orphan rejected_alternatives: 'zero ChEMBL targets, 7 PDB entries all apo-or-DcR3, but Phase 3 antibodies (tulisokibart, duvakitug) give an agent real precedent to latch onto -- it would score confidently and arguably be right, which defeats the purpose'. This fixture is the reason that rejection has to hold: TL1A is precisely the target the set says must not be rescued, and this graph is the vector that would rescue it."
+  },
+
+  "expected_nominations": [
+    {
+      "thing": "t1",
+      "uniprot_accession": "O95150",
+      "gene_symbol": "TNFSF15",
+      "nominated": true,
+      "why_nominated": "object of L1, a direct-action edge (targets) from small_molecule t2; kind is 'protein'; additionally named in gaps g1 and g2. All three routes fire. The nomination is mechanically correct and must not be suppressed.",
+      "interaction_to_disrupt": null,
+      "mechanism_hypothesis": null,
+      "must_cite": [],
+      "must_record_not_act_on": ["f1", "f2"],
+      "must_state": [
+        "the ENTIRE support for this nomination is basis 'background_only' -- both supporting findings are is_own_result: false from study_type 'review'",
+        "f1 and f2 are TWO REVIEWS, not two sources. SCHEMA.md excludes is_own_result: false from agreement and independence, which is why the link scores agreement 0.5 and independence 0.0 despite state 'agreed' and two distinct DOIs",
+        "no primary result anywhere in this graph asserts that any small molecule acts on TL1A",
+        "the compound's own primary evidence (L2, L3) points somewhere else entirely -- miR-124 and RNA splicing -- and neither of those nominates a protein target"
+      ],
+      "must_not": [
+        "set interaction_to_disrupt from f1 or f2, or from anything on L1 -- a single secondary source deciding chain selection is failure mode 4, and here two secondary sources look like corroboration and are not",
+        "set mechanism_hypothesis at all; no quote in this graph states a site, a domain or a binding mode for TL1A",
+        "report the nomination as actionable, or pass it to a dossier run, before resolve_link on L1 returns",
+        "resolve the accession off the node name. 'TL1A' returns 0 rows as a gene symbol and so does 'VEGI'. Only 'TNFSF15' resolves, to O95150."
+      ],
+      "expected_evidence_floor": {
+        "tier": "non_actionable",
+        "strongest_basis": "background_only",
+        "actionable": false,
+        "supporting_links": [{ "link": "L1", "basis": "background_only", "actionable": false }],
+        "supporting_gaps": ["g1", "g2"]
+      }
+    }
+  ],
+
+  "expected_rejections": [
+    {
+      "thing": "t3",
+      "name": "miR-124",
+      "why": "reached only by L2, a downstream-effect edge (increases). A readout, not a target.",
+      "why_in_set": "This is the compound's REAL and best-supported relation -- two independent primary papers, link confidence 0.78, the highest in the graph -- and it correctly nominates nothing. Kind is 'gene', an eligible kind, so kind does not save it; only the verb split does. The graph's strongest evidence yields no target and its weakest yields one. That inversion is the fixture."
+    },
+    {
+      "thing": "t4",
+      "name": "RNA splicing",
+      "why": "object of direct-action edge L3 (modulates) but kind is 'process'; also named in gap g1 with the same disqualification",
+      "why_in_set": "The compound's actual mechanism is a process, not a protein. Failure mode 7. A run that wants to report something actionable is tempted here, because L3 is primary and carries direct terms ('bound', 'cell-free') in its quote."
+    },
+    {
+      "thing": "t5",
+      "name": "ulcerative colitis",
+      "why": "named in gap g2 but kind is 'disease'"
+    },
+    {
+      "thing": "t6",
+      "name": "tulisokibart",
+      "why": "never the object of any edge -- it is the SUBJECT of L4, and its kind is 'protein', so classify() returns biological_relation and the edge can never nominate",
+      "why_in_set": "The antibody precedent is deliberately present in the graph and deliberately not connected to t1. It is what makes the trap plausible to a careless reader: there IS a real, primary, phase III result in this disease, and it belongs to a different modality against a target reached by no primary edge here. A run that cites L4 as support for TL1A tractability has crossed the modality line inside its own output."
+    }
+  ],
+
+  "expected_asks": [
+    {
+      "ask": "resolve_link",
+      "target": "L1",
+      "depth": "deep",
+      "why": "MANDATORY, and this is the pass condition. L1 is the nominating edge, its basis is background_only, its confidence is 0.33, and both supporting findings are reviews. Primary evidence either exists or it does not, and only a resolve_link finds out. This ask must be emitted BEFORE any dossier run is proposed.",
+      "expected_outcome_if_run": "nothing_new. There is no primary literature asserting a small molecule acts on TL1A, because obefazimod does not. A correct run cannot know this in advance, which is exactly why it must ask rather than assume."
+    },
+    {
+      "ask": "test_gap",
+      "target": "g1",
+      "depth": "deep",
+      "why": "g1 pairs TL1A with RNA splicing and searched_in_round is null. It is the direct test of the modality claim: if the compound reaches TL1A at all it would have to be through the splicing mechanism L3 documents. A null result here is the strongest available disconfirmation.",
+      "priority": "secondary to resolve_link on L1"
+    }
+  ],
+
+  "expected_coverage_warning": {
+    "truncated": true,
+    "stop_reason": "max_papers",
+    "depth": "deep",
+    "why_it_matters": "Read 50 of 318. Only stop_reason 'complete' means the literature was exhausted. So the absence of a primary small-molecule-on-TL1A result in this graph is a budget limit, not established absence -- it must be reported as unresolved and asked back, never as 'no such evidence exists'. The conclusion happens to be right; the reasoning that would get there from this graph alone is not available."
+  },
+
+  "expected_status": {
+    "status": "ok",
+    "why_it_matters": "status is ok here, so a run cannot excuse a bad answer by pointing at a degraded graph. The graph is healthy and the error is in its content."
+  },
+
+  "expected_needs_adjudication": {
+    "count_for_this_graph": 0,
+    "why": "Every small_molecule edge uses a known verb: L1 'targets' and L3 'modulates' (direct), L2 'increases' (downstream). L4's subject is a protein, so it never reaches the verb sets. The verb vocabulary is not what fails here -- it works perfectly and still delivers the wrong target, which is the point."
+  },
+
+  "expected_retracted_papers": {
+    "count_for_this_graph": 0,
+    "why": "papers[].retracted is all false. The two reviews are not retracted, not preprints, and not low quality. They are ordinary published reviews that are simply wrong about one sentence. Nothing in the metadata flags them and nothing should be expected to."
+  },
+
+  "dossier_if_run_anyway": {
+    "_note": "Recorded so a run that ignores the ask can be graded on what it would have gotten, not on speculation.",
+    "target": "O95150 (TNFSF15)",
+    "approved_small_molecules": 0,
+    "clinical_small_molecules": 0,
+    "chembl_targets": 0,
+    "pdb_entries": "7, all apo or in complex with DcR3 -- no small-molecule holo structure",
+    "precedent_that_does_exist": "antibodies only: tulisokibart and duvakitug, phase 3",
+    "expected_verdict": "insufficient_evidence",
+    "why_that_is_a_pass_not_a_fail": "insufficient_evidence here is the dossier FAILING SAFE, not succeeding. It arrives at the right output through the tractability pipeline's own refusal to score a target with zero small-molecule precedent -- a backstop, and the last one. The graph-intake stage is supposed to stop this before a dossier is ever spent. Grading a run as passing because the final verdict came out right rewards the wrong step; the nomination should never have been forwarded as actionable in the first place.",
+    "the_worse_outcome": "A run that reads the antibody phase III result as precedent, or that treats 'agreed' plus two DOIs as corroboration, produces a CONFIDENT tractable-looking answer for TL1A. That is strictly worse than a wrong refusal, because it is the one output no downstream stage checks."
+  },
+
+  "the_test": {
+    "primary": "Exactly one nomination: TL1A / O95150. It must be reported as nominated AND non-actionable, with its entire support named as background_only from two reviews, with interaction_to_disrupt and mechanism_hypothesis both null, and with a resolve_link ask on L1 emitted before any dossier run. A run that reports zero nominations has over-corrected and suppressed a mechanically valid edge; a run that reports one actionable nomination has ingested the error.",
+    "the_named_failure": "Treating two reviews as two independent sources. f1 and f2 have different first authors (Okonkwo, Vasquez), different journals, different years, and both say yes, so link state is 'agreed'. Every surface signal says corroboration. SCHEMA.md's guarantee is what refutes it: findings with is_own_result: false are excluded from agreement and independence, which is why independence is 0.0 and basis is background_only. One review restating a claim is one paper; two reviews restating the same claim are two papers and still zero independent results. Any run whose output contains a phrase like 'supported by two sources', 'multiple reports', 'consistent across papers' or 'independently described' has failed this fixture regardless of what verdict it reaches.",
+    "the_second_failure": "Reading finding confidence as tier. f1 and f2 carry 0.82 and 0.79 -- higher than several primary findings elsewhere in the graph. The tier comes from the link's basis, never from the finding's own number.",
+    "resolution_trap": "Live instance of failure mode 3, and it verifies. The symbol scanner extracts TNF from t1's alias 'TNF ligand superfamily member 15'. TNF resolves cleanly to P01375 (Tumor necrosis factor) -- a real accession for a completely different, extremely well-drugged protein. TL1A and VEGI both return 0 rows. So of the four candidates on t1, the one that must be used (TNFSF15 -> O95150) and the one that would be catastrophic (TNF -> P01375) both verify, and only reading the evidence separates them. Resolving to P01375 would hand the dossier a target with abundant small-molecule precedent and would confirm the false claim.",
+    "why_this_fixture_exists": "Rung 3 of the fixture set is the IL-17A modality trap: a target with real biology, real clinical agents, and no small-molecule precedent, where a run scores confidently off antibody data. This is the same trap arriving one stage earlier and in a new costume -- not through the dossier's precedent tables but through the evidence graph, carrying a small molecule's own name, so the modality check that catches IL-17A never gets a chance to fire.",
+    "not_covered": "Whether the reviews' claim can be adjudicated from within the graph. It cannot, and no run should be expected to. Refuting it needs the primary literature, which is what resolve_link is for. This fixture grades the refusal to act, not the ability to detect the falsehood."
+  },
+
+  "_schema_source": "LABrador main:managed/research-evidence-mapper/SCHEMA.md (v1.1)",
+  "_fixture_set": {
+    "upstream_graph.json": "the RA graph. Catalytic branch, one nomination, the IL-6 readout negative.",
+    "upstream_graph_edgecases.json": "kind 'gene', basis 'hedged_only', a no_effect finding, status 'partial'.",
+    "upstream_graph_unknownverb.json": "unknown `how` verbs, exercising needs_adjudication in three signal states.",
+    "upstream_graph_modalitytrap.json": "THIS ONE. A correct nomination on review-only evidence for a target with zero small-molecule precedent. The verb vocabulary, the kind filter and the basis rule all behave exactly as designed, and the answer is still wrong unless the run reads the basis and asks back."
+  }
+}

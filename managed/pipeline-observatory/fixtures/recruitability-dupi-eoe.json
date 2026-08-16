@@ -1,0 +1,69 @@
+{
+  "counterfactual": {
+    "achieves": "none",
+    "change": "Feasible but slow at 22 months; no biomarker relaxation reaches 18 months (all-comers gives 19). Comfortable enrolment would need ~85 sites at the current marker.",
+    "simulatedMonthsAfter": 19
+  },
+  "eligibility": {
+    "citedTrials": ["NCT03029091", "NCT02227836", "NCT03191864", "NCT04322708"],
+    "drivers": [
+      "exclusion of other causes of esophageal eosinophilia (Crohn's, Churg-Strauss, achalasia, hypereosinophilic syndrome, celiac, parasitic infection)",
+      "esophageal stricture precluding endoscope passage or requiring recent dilation",
+      "washout/restriction on prior biologics including anti-IL-4R/dupilumab, anti-IL-5, anti-IgE, anti-TNF within 12-24 weeks",
+      "restriction/stability requirements on corticosteroids (systemic, swallowed, topical) and PPI/diet regimens",
+      "symptom/dysphagia frequency thresholds required at screening",
+      "general safety exclusions (malignancy, infections, bleeding disorders, esophageal varices, pregnancy)"
+    ],
+    "multiplier": 0.55,
+    "reasoning": "Across EoE trials, a substantial share of biomarker-positive patients are excluded due to comorbid causes of eosinophilia, structural esophageal contraindications, and required washouts from steroids/biologics/PPIs, as seen consistently in NCT03029091, NCT02227836, NCT03191864, and NCT04322708. Given dupilumab's specific overlap with the anti-IL-4R washout exclusion in NCT04322708 and stricture/medication stability requirements common across trials, roughly half of biomarker-positive patients would be expected to pass full eligibility."
+  },
+  "evidence": {
+    "competingTrials": 13,
+    "precedentTrials": [
+      "NCT03029091",
+      "NCT02227836",
+      "NCT03191864",
+      "NCT04311970",
+      "NCT04322708",
+      "NCT00961233",
+      "NCT05634746",
+      "NCT04593251",
+      "NCT06501274",
+      "NCT02778867"
+    ]
+  },
+  "failedPrecedents": [
+    {
+      "nctId": "NCT05152563",
+      "whyStopped": "Company decision"
+    },
+    {
+      "nctId": "NCT01458418",
+      "whyStopped": "Inability to complete enrollment due to difficulty in finding subjects"
+    },
+    {
+      "nctId": "NCT02881372",
+      "whyStopped": "lack of recruitment"
+    },
+    {
+      "nctId": "NCT04543409",
+      "whyStopped": "High-level results from the MESSINA Phase III trial showed that AstraZeneca's Fasenra (benralizumab) did not meet one of the two dual-primary endpoints. Given the lack of clear benefit in this patient population, study has been terminated."
+    },
+    {
+      "nctId": "NCT03245840",
+      "whyStopped": "Sponsor decision"
+    }
+  ],
+  "phase3MedianN": 159,
+  "poweringBasis": "phase-3 precedent median (23 trials) floors the effect size d=0.8 estimate of 65",
+  "precedentMedianN": 41,
+  "requiredN": 159,
+  "score": 0.8666666666666667,
+  "screensPerEnrollee": 2,
+  "simulatedMonthsRange": [8, 55],
+  "simulatedMonthsToEnroll": 22,
+  "sites": 69,
+  "sitesBasis": "precedent",
+  "waterfallDelta": 9,
+  "why": "159 patients (phase-3 precedent median (23 trials) floors the effect size d=0.8 estimate of 65) at 69 sites (p75 of at-scale precedents); precedent velocity 0.46 pt/site/mo across 91 completed trials, narrowed by 85% biomarker prevalence and 55% eligibility pass rate, with ~13 interventional trials competing for the same patients."
+}

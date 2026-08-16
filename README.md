@@ -1,191 +1,198 @@
-# mvp — prototype in Claude Code, ship on the Claude Developer Platform
+# LABrador
 
-## tl;dr
+> **Working on this repo?** Read [`COORDINATION.md`](./COORDINATION.md) first
+> on every pull of `main` — it holds the team state (done / pending / unowned /
+> hazards) and the process for landing work.
 
-What you build for customer 1 is wrong by customer 12 — so spend the batch on
-customers, not agent frameworks. Two skills take you from "works in my Claude
-Code" => "works for my customer":
+LABrador is a hackathon workspace for stress-testing therapeutic program
+hypotheses. Its components examine four different questions: whether the
+literature supports the mechanism, whether the target is tractable with a small
+molecule, whether a proposed trial can recruit, and whether the resulting
+program economics hold together.
 
-- `/managed-agent-prototype {voice-mode braindump}` — an agent that does the
-  job, live in your session
-- `/managed-agent-deploy` => a deployed agent endpoint, in minutes not days
+The repository is not wired into one end-to-end product yet. `managed/` is a
+workspace convention, not a maturity claim: some directories contain runnable
+engines, one is a partial agent prototype, one is a design packet, and one is
+an internal infrastructure probe.
 
-Clone it and have your agent set it up (`/managed-agent-setup`). Built on
-Claude Managed Agents with an [eve](https://eve.dev) router in front, so
-frontends, Slack, and email are config, not code.
+## Capabilities
 
----
+| Capability | What it actually does | Current state |
+| --- | --- | --- |
+| **Small-Molecule Tractability Review** | Combines chemical precedent, structural pocket analysis, and a falsification pass into a provenance-heavy target review. | Partial agent prototype with four skills, calibration fixtures, a Modal pocket scanner, and no deployment manifest or router wrapper |
+| **Trial Recruitment Forecaster** | Estimates enrollment time from trial precedent, sample size, site count, biomarker prevalence, eligibility burden, and competition. | Runnable local TypeScript engine with fixtures, a demo, and a six-trial backtest; not a Managed Agent |
+| **Research Evidence Mapper** | Plans to turn papers into a persistent graph of exact claims, disagreements, and untested relationships. | Design packet only; the agent, skills, deterministic assembler, and fixtures remain to be built |
+| **Therapeutic Program Economics** | Simulates pricing, access, affordability, patent-window cash flow, risk-adjusted NPV, and uncertainty from analyst-supplied inputs. | Runnable Python package with CLI, Streamlit UI, synthetic fixtures, and regression tests; not a Managed Agent |
 
-The transcript where your agent finally worked *is* the spec. This starter
-turns it into a deployed agent.
-
-You prototype the way you already do: open Claude Code and iterate until the
-thing works — `/managed-agent-prototype` turns a braindump about the customer
-into that working session. Then `/managed-agent-deploy` compiles the session
-into a **Claude Managed Agent**: a server-side agent on Anthropic's
-infrastructure with its own sandbox, versioned config, sessions that survive
-restarts, and an event API you can call from anywhere. The skills you wrote
-while prototyping upload to the platform **unchanged** — same `SKILL.md`
-format on your laptop and in production. That continuity is the point: no
-rewrite between "works on my machine" and "deployed".
-
-## Why it's shaped like this
-
-Revenue is king and distribution is the moat. Every day of the batch counts,
-and it counts in customers onboarded — not in architecture. Whatever you
-engineer against customer one is already wrong; the real product shows up
-somewhere around customer 10, 20, 30.
-
-So treat every customer as forward-deployed engineering. Sit with them, get the
-agent working on *their* use case in a single Claude Code session, then let
-`/managed-agent-deploy` compile that session into a deployed agent. "It works
-locally" → shipped, in one afternoon. Then go get the next customer.
-
-What that deletes is the detour. You closed the deal — now what, a week of
-architecture? LangChain? LangGraph? Agent SDK? AI SDK? Temporal? queues? where
-does state live? sandbox? tools? streaming? auth? That's an engineering
-exercise, and it onboards nobody. The answers are already wired up here.
-Talk to customers, ship product.
-
-The story, end to end:
-
-1. **Prototype** — `claude` in this repo, then
-   `/managed-agent-prototype <braindump>`. Type or dictate the whole picture —
-   the customer, the job, what goes in, what should come out, what to test
-   against. The skill asks
-   one question at a time (each with a recommended answer), scaffolds
-   `managed/<your-agent>/` fixtures-first, and then does the agent's job
-   right there in the session against those fixtures until it works. Snags
-   included — they're the good part.
-2. **Compile & deploy** — `/managed-agent-deploy <your-agent>`. Claude mines the
-   transcript (including the debugging lessons), asks you a few questions — each
-   with a recommended answer — and emits the rest of the artifact: manifest,
-   custom-tool handlers, the access list, the router wrapper, plus a grading
-   rubric if you opt into defining an outcome. Then it uploads the skills,
-   creates (or versions) the agent on the Managed Agents API, and doesn't hand
-   back until a smoke test against the *deployed* agent passes. (`bun run deploy
-   <your-agent>` re-runs that upload on its own any time; it's idempotent.)
-3. **Call it** — `bun run console <your-agent>` opens the deployed agent in
-   the Claude Console's visual session runner (`-- --once "…"` runs one task
-   headless — that path also answers custom tools, which the web Console
-   can't). This is the endpoint: any backend can drive it with three HTTP
-   calls.
-4. **Put it in front of users** — `bun run dev` starts the included
-   [eve](https://eve.dev) router (Vercel's agent framework, running Claude)
-   with your deployed agents wired in as its tools. The eve wrapper exists
-   for exactly one reason: integration. eve is the best thing going at
-   building *around* an agent — a streaming frontend, Slack, email, whatever
-   channel your users live in — so putting a compiled agent in front of a
-   customer is channel config, not a relay service you write. This repo
-   doesn't rebuild the part Vercel is genuinely good at.
+The **Sandbox Capability Probe** under
+[`managed/sandbox-capability-probe`](./managed/sandbox-capability-probe) is
+development infrastructure, not a product capability. It is the only currently
+deployed Managed Agent in the repository and exists to test the remote
+sandbox's Python runtime, memory mount, filesystem, network access, and bundled
+skill files.
 
 ## Quickstart
 
+The TypeScript workspace requires [Bun](https://bun.sh). Commands that call
+Claude also require `ANTHROPIC_API_KEY`; typechecking and static checks do not.
+
 ```bash
-git clone <this repo> && cd mvp
-claude                 # then, in the session:
-                       #   /managed-agent-setup    ← installs deps, sets up .env, checks your key
-                       #   (/clear after setup — your transcript is compiler input)
-                       #   /managed-agent-prototype what customer-1 needs, in your own words …
-                       #   /managed-agent-deploy customer-1-agent   ← once it works
+git clone https://github.com/Abhishekjani2509/LABrador.git
+cd LABrador
+bun install --frozen-lockfile
+cp .env.example .env
+# Add ANTHROPIC_API_KEY to .env when you need model-backed commands.
+
+bun run typecheck
+bun run check
 ```
 
-## How a compiled agent runs
+## Trial Recruitment Forecaster
 
-```
-you / eve router / your backend
-        │  task
-        ▼
-lib/claude-managed-agent.ts ── create session ──► Managed Agents API
-        │                                │ agent runs in its cloud sandbox
-        │◄─── SSE event stream ──────────┤
-        │                                │
-        │◄── requires_action ────────────┤ agent calls a custom tool
-        ├─── user.custom_tool_result ───►│ handler ran in YOUR process
-        │                                │
-        └◄── final agent.message ────────┘
-```
+[`managed/trial-recruitment-forecaster`](./managed/trial-recruitment-forecaster)
+accepts a structured `IndicationThesis`, queries ClinicalTrials.gov, and
+estimates how long a proposed trial would take to enroll. It derives enrollment
+velocity from completed precedent trials, estimates the required sample size
+and site count, uses Claude to read eligibility criteria, discounts for
+biomarker narrowing and competing trials, and proposes a counterfactual when
+the original design looks too slow.
 
-Custom tools are the bridge to your systems: the deployed agent pauses, your
-process executes the handler from `managed/<name>/tools.ts`, posts the result,
-and the agent continues. The process calling the agent *is* the tool server —
-no extra infrastructure.
+```bash
+# Every bundled fixture against current evidence
+bun managed/trial-recruitment-forecaster/demo.ts
 
-## Why Managed Agents, and not agents inside eve?
+# One fixture
+bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe
 
-Fair question — eve can host agents of its own. The answer is the harness:
-your prototype runs on Claude Code (CLAUDE.md, skills, fixtures), and Managed
-Agents run that same harness in the cloud. Keeping the dev environment (local,
-Claude Code) and the deployed environment (cloud, Managed Agents) as close to
-identical as possible is what makes the compile trustworthy — same
-instructions, same `SKILL.md`s, so you get the same results, outcomes, and
-outputs you watched work in the session. eve is the integration layer around
-that runtime, not a substitute for it.
+# The same fixture with a historical registry horizon
+bun managed/trial-recruitment-forecaster/demo.ts dupi-eoe 2018-01-01
 
-## Repo layout
-
-```
-managed/<name>/        # one dir per agent — the workspace you prototype in
-                       #   AND the thing that gets deployed
-                       #   (empty until your first /managed-agent-prototype)
-  CLAUDE.md            #   SOURCE — the agent's instructions, deployed verbatim
-  .claude/skills/      #   SOURCE — uploaded to the Skills API straight from here
-  fixtures/            #   SOURCE — what you test against; never uploaded
-  manifest.json        #   COMPILED — the deployed agent's config
-  tools.ts             #   COMPILED — custom-tool handlers, run in your process
-  acl.ts               #   COMPILED — who may call this agent through the router
-  rubric.md            #   COMPILED — only if you defined an outcome
-.claude/skills/
-  managed-agent-prototype/   # braindump → an agent that works in-session
-  managed-agent-deploy/      # that session → a deployed agent
-  managed-agent-setup/       # make the repo yours: version agents, wire auth
-agent/                 # the eve router app — the integration layer (step 4)
-  tools/<name>.ts      # COMPILED — eve tool wrapper (file name = tool name)
-lib/claude-managed-agent.ts  # session runtime: SSE loop + custom-tool answering
-scripts/               # deploy.ts, console.ts
-docs/                  # frame.md (why this exists), audience.md (who it's for)
+# Backtest against the default panel or selected trials
+bun managed/trial-recruitment-forecaster/backtest.ts
+bun managed/trial-recruitment-forecaster/backtest.ts NCT03633617 NCT04394351
 ```
 
-One directory, both roles: you write the instructions, skills and fixtures;
-the four `COMPILED` files plus `agent/tools/<name>.ts` are build output — but
-build output you can edit. Recompiling three-way-merges your hand-edits with
-the new derivation; it never clobbers them.
+The output includes simulated enrollment months and range, required sample
+size, sites, screening burden, cited precedent, failed trials, and the smallest
+modeled change that reaches the target time window. These are modeled estimates,
+not observed outcomes. Historical runs filter registry evidence by date, but
+the model-based eligibility read cannot guarantee a sealed historical knowledge
+boundary; [`NEXT.md`](./managed/trial-recruitment-forecaster/NEXT.md) records
+that limitation and the known large-site forecasting error.
 
-Agents are untracked by default — fixtures often carry real customer data —
-so `git status` stays quiet as you build. When the repo becomes yours, run
-`/managed-agent-setup`: it removes that `.gitignore` block so your agents
-version, and walks you through wiring your auth (Supabase, WorkOS, Clerk,
-better-auth, your own JWT) into the router so per-agent ACLs enforce.
+The shared [`IndicationThesis`](./managed/trial-recruitment-forecaster/thesis.ts)
+contract covers the asset, target direction, disease, biomarker population,
+endpoint, mechanism, evidence, and uncertainty. Other planned pipeline stages
+have not adopted it yet.
 
-## And there's more
+## Small-Molecule Tractability Review
 
-- **Remote MCP servers** (streamable-HTTP) carry over to the deployed agent's
-  `mcp_servers`, with OAuth handled by platform credential vaults. You
-  prototype against a repo-root `.mcp.json` you add; a `managed/<name>/.mcp.json`
-  is for when one agent should deploy with a set of its own.
-- **Dreaming** (research preview): the platform consolidates memory across
-  your agent's sessions while it's idle — comes with the platform, nothing to
-  wire here.
-- **Scheduled deployments**: run any of these agents on a cron straight from
-  the API — no worker of your own, and nothing in this repo to set up.
-- The eve router deploys to Vercel as-is; add channels (Slack, email, your
-  app's frontend) from eve's catalog when you want them — your agents are
-  already wired in as its tools.
-- **Per-caller access**: `/managed-agent-deploy` asks who may call the agent —
-  everyone, one org, a named list of users — and writes the answer to
-  `managed/<name>/acl.ts`. Wire your auth into the router ([eve auth
-  guide](https://eve.dev/docs/guides/auth-and-route-protection)) and
-  `lib/access.ts` enforces it, so each customer's session only sees their own
-  agents ([how it works](https://eve.dev/docs/guides/dynamic-capabilities)).
+[`managed/small-molecule-tractability-review`](./managed/small-molecule-tractability-review)
+is a specialist prototype for one narrow question: can this protein target be
+addressed with a small molecule? It keeps retrieved precedent separate from
+computed structural tractability, because approved biologics do not establish
+small-molecule tractability and geometric pocket scoring can miss ligand-induced
+sites.
 
-## Next steps
+- [`CLAUDE.md`](./managed/small-molecule-tractability-review/CLAUDE.md) defines the input and JSON review contract.
+- [`fixtures/README.md`](./managed/small-molecule-tractability-review/fixtures/README.md) explains the ten-target calibration set and its failure modes.
+- [`pipeline.html`](./managed/small-molecule-tractability-review/pipeline.html) is a standalone visual walkthrough.
 
-- **Stream tool-call results through the router.** Today a dispatched Managed
-  Agent is a long-running tool call: the router waits for it to finish, then
-  folds the final answer into the reply stream. eve doesn't yet support
-  streaming a tool call's results as they happen — as soon as it does, your
-  users watch the specialist work instead of waiting on it.
+The repository contains real procedural skills and a Modal pocket-scanning
+implementation, but the complete review is not runnable through `bun run
+console`: there is no manifest, custom-tool bridge, rubric, or router wrapper.
+
+## Research Evidence Mapper
+
+[`managed/research-evidence-mapper`](./managed/research-evidence-mapper) is the
+design for a research agent that searches papers, extracts exact source-backed
+claims, distinguishes primary evidence from cited background, surfaces
+condition-dependent disagreement, and records missing relationships worth
+testing. Follow-up requests would extend a persistent graph rather than start
+over.
+
+- [`SCHEMA.md`](./managed/research-evidence-mapper/SCHEMA.md) defines requests, graph JSON, and persistent storage.
+- [`CONTRACT.md`](./managed/research-evidence-mapper/CONTRACT.md) assigns search, extraction, assembly, and deployment responsibilities.
+- [`BUILD.md`](./managed/research-evidence-mapper/BUILD.md) gives the implementation order and blocking verification criteria.
+
+Those files describe planned guarantees. No implementation currently enforces
+them, and long-lived Paperclip authentication remains an open integration gate.
+
+## Therapeutic Program Economics
+
+[`managed/therapeutic-program-economics`](./managed/therapeutic-program-economics)
+is a deterministic Python simulator, not an autonomous research agent. It takes
+a validated therapeutic program, explicitly typed comparable prices, and a
+random seed; then it produces pricing corridors, access and affordability
+views, annual cash flow, protected and post-loss-of-exclusivity revenue,
+risk-adjusted NPV percentiles, warnings, provenance, and a decision-grade flag.
+
+It requires Python 3.11 or 3.12. From its directory:
+
+```bash
+cd managed/therapeutic-program-economics
+uv sync --frozen --extra dev
+
+uv run labrador validate fixtures/demo_program.json \
+  --comparables fixtures/demo_comparables.json
+uv run labrador analyze fixtures/demo_program.json \
+  --comparables fixtures/demo_comparables.json \
+  --simulations 1000 --seed 42
+uv run streamlit run app.py
+```
+
+Every bundled economic input is synthetic and therefore
+`NOT_DECISION_GRADE`. Public reimbursement and list prices remain distinct
+from estimated or observed net prices, and the output is screening support—not
+medical, reimbursement, investment, legal, or patent advice. The component's
+own [README](./managed/therapeutic-program-economics/README.md) documents its
+full input and output contracts.
+
+## Managed Agents harness
+
+The root workspace includes a harness for turning a specialist that works in
+Claude Code into a callable Claude Managed Agent:
+
+1. Run `/managed-agent-prototype <description>` to build and exercise a
+   specialist under `managed/<name>/`.
+2. Run `/managed-agent-deploy <name>` from that working session to create its
+   manifest, access policy, custom-tool handlers, and eve wrapper, then deploy
+   and smoke-test it.
+3. Use `bun run console <name> -- --once "task"` for a headless call, or `bun
+   run console <name>` for the visual console.
+4. Use `bun run dev` after wrappers exist under `agent/tools/` to expose the
+   specialists through the eve router.
+
+`bun run deploy <name>` creates or versions remote resources and writes their
+identifiers into the component's manifest. It is an external state change, not
+a local build command.
+
+## Repository layout
+
+```text
+managed/
+  small-molecule-tractability-review/  partial target-review agent
+  trial-recruitment-forecaster/        runnable enrollment model
+  research-evidence-mapper/            agent design packet
+  therapeutic-program-economics/       runnable economics simulator
+  sandbox-capability-probe/             internal deployed probe
+agent/                                  eve router and generated wrappers
+lib/                                    Managed Agents runtime and access rules
+scripts/                                deploy and console CLIs
+.claude/skills/                         prototype, deploy, and setup workflows
+```
+
+## Integration gaps
+
+- There is no top-level orchestrator connecting hypothesis generation,
+  evidence mapping, tractability, recruitment, and economics.
+- Only the sandbox probe currently has a deployment manifest; no product
+  capability is registered with the root eve router.
+- The shared `IndicationThesis` does not yet feed the economics simulator or
+  the planned evidence mapper.
+- The four capabilities use different maturity and verification standards, so
+  their outputs should not yet be presented as one validated decision pipeline.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT — see [`LICENSE`](./LICENSE).

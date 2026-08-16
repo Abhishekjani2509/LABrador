@@ -1,0 +1,44 @@
+[
+  {
+    "confidence": 0.56,
+    "id": "g1",
+    "implied_by": [
+      "L3",
+      "L5"
+    ],
+    "missing": [
+      "t1",
+      "t4"
+    ],
+    "note": "both connect to t3; no direct link reported (implied via 2 intermediates)",
+    "searched_in_round": null
+  },
+  {
+    "confidence": 0.1838,
+    "id": "g2",
+    "implied_by": [
+      "L1",
+      "L2"
+    ],
+    "missing": [
+      "t2",
+      "t5"
+    ],
+    "note": "both connect to t1; no direct link reported",
+    "searched_in_round": null
+  },
+  {
+    "confidence": 0.3536,
+    "id": "g4",
+    "implied_by": [
+      "L2",
+      "L3"
+    ],
+    "missing": [
+      "t2",
+      "t3"
+    ],
+    "note": "both connect to t1; no direct link reported",
+    "searched_in_round": null
+  }
+]

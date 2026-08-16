@@ -114,6 +114,15 @@ export type RunTaskOptions = {
   task: string;
   /** Hard cap on one task, in milliseconds. Default 10 minutes. */
   timeoutMs?: number;
+  /**
+   * Abort if the agent has not called an MCP tool within this window.
+   *
+   * A total timeout only tells you the run was slow. This tells you it never
+   * reached its tools at all -- a dead MCP server, an expired credential, a
+   * misconfigured toolset -- which is a different failure and worth failing
+   * fast on instead of burning the whole budget waiting. Set 0 to disable.
+   */
+  mcpSilenceMs?: number;
   tools?: CustomToolSpec[];
 };
 
@@ -124,6 +133,19 @@ export type RunTaskResult = {
   sessionId: string;
   /** Final agent message text (or the last one before end-turn idle). */
   text: string;
+};
+
+/**
+ * A progress snapshot yielded by `streamTask` while the managed agent works.
+ * Snapshots are cumulative (each replaces the previous), matching eve's
+ * last-write-wins `action.partial` semantics for generator tools.
+ */
+export type TaskProgress = {
+  /** What just happened, e.g. `agent message` or `custom tool: pocket_scan`. */
+  activity: string;
+  /** Latest agent message text seen so far (empty until the first message). */
+  message: string;
+  sessionId: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -241,11 +263,35 @@ function titleSnippet(task: string, maxLen = 60): string {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+// If an agent has not touched an MCP tool in this long it is not slow -- it
+// never got to its tools at all. Fail fast and name the likely causes.
+const DEFAULT_MCP_SILENCE_MS = 120_000;
 
 /**
  * Run one task against a deployed managed agent and wait for the result.
+ * Thin consumer of `streamTask` for callers that don't need progress.
  */
 export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
+  const run = streamTask(opts);
+  for (;;) {
+    // biome-ignore lint/performance/noAwaitInLoops: draining a generator is inherently sequential
+    const next = await run.next();
+    if (next.done) {
+      return next.value;
+    }
+  }
+}
+
+/**
+ * Run one task against a deployed managed agent, yielding a `TaskProgress`
+ * snapshot as the agent works; the generator's return value is the final
+ * `RunTaskResult`. This is what the eve tool wrappers consume from their
+ * `async *execute` so intermediate results stream to clients as
+ * `action.partial` events.
+ */
+export async function* streamTask(
+  opts: RunTaskOptions
+): AsyncGenerator<TaskProgress, RunTaskResult> {
   const client = opts.client ?? makeClient();
   const { deployment } = opts.manifest;
   if (!deployment?.agent_id) {
@@ -304,7 +350,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunTaskResult> {
     });
   }
 
-  return consumeUntilEndTurn({ client, opts, sessionId });
+  return yield* consumeUntilEndTurn({ client, opts, sessionId });
 }
 
 type PendingToolUse = { name: string; input: Record<string, unknown> };
@@ -332,15 +378,65 @@ type StreamState = {
   pendingToolUses: Map<string, PendingToolUse>;
 };
 
-async function consumeUntilEndTurn(args: {
+/**
+ * Fail fast when an agent that declares an MCP server never calls one.
+ *
+ * A total timeout tells you the run was slow; this tells you it never reached
+ * its tools, which is a different fault with different causes -- and one worth
+ * surfacing in two minutes rather than after the whole budget is gone.
+ */
+function assertMcpAlive(a: {
+  deadline: number | null;
+  sawMcpCall: boolean;
+  sessionId: string;
+  silenceMs: number;
+}): void {
+  if (a.deadline === null || a.sawMcpCall || Date.now() <= a.deadline) {
+    return;
+  }
+  throw new Error(
+    `no MCP tool call within ${a.silenceMs}ms (session ${a.sessionId}). The agent never reached its MCP tools — check the server is reachable, its credential is valid and unexpired, and the manifest declares an mcp_toolset with permission always_allow.`
+  );
+}
+
+function assertRunAlive(a: {
+  deadline: number;
+  sessionId: string;
+  timeoutMs: number;
+}): void {
+  if (Date.now() > a.deadline) {
+    throw new Error(
+      `runTask timed out after ${a.timeoutMs}ms (session ${a.sessionId})`
+    );
+  }
+}
+
+/**
+ * Only watch agents that actually declare an MCP server -- otherwise an
+ * agent with no MCP at all would trip the watchdog every time.
+ */
+function mcpWatchdogConfig(opts: RunTaskOptions): {
+  deadline: number | null;
+  silenceMs: number;
+} {
+  const expectsMcp = (opts.manifest.mcp_servers ?? []).length > 0;
+  const silenceMs = expectsMcp
+    ? (opts.mcpSilenceMs ?? DEFAULT_MCP_SILENCE_MS)
+    : 0;
+  return { deadline: silenceMs > 0 ? Date.now() + silenceMs : null, silenceMs };
+}
+
+async function* consumeUntilEndTurn(args: {
   client: Anthropic;
   sessionId: string;
   opts: RunTaskOptions;
-}): Promise<RunTaskResult> {
+}): AsyncGenerator<TaskProgress, RunTaskResult> {
   const { client, sessionId, opts } = args;
   const toolsByName = new Map((opts.tools ?? []).map((t) => [t.name, t]));
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
+  const mcpWatch = mcpWatchdogConfig(opts);
+  let sawMcpCall = false;
   const state: StreamState = {
     lastMessage: "",
     longestMessage: "",
@@ -351,11 +447,7 @@ async function consumeUntilEndTurn(args: {
   const stream = await client.beta.sessions.events.stream(sessionId);
 
   for await (const raw of stream) {
-    if (Date.now() > deadline) {
-      throw new Error(
-        `runTask timed out after ${timeoutMs}ms (session ${sessionId})`
-      );
-    }
+    assertRunAlive({ deadline, sessionId, timeoutMs });
     opts.onEvent?.(SessionEvent.parse(raw));
 
     const parsed = KnownEvent.safeParse(raw);
@@ -364,6 +456,14 @@ async function consumeUntilEndTurn(args: {
     }
     const event = parsed.data;
 
+    sawMcpCall = sawMcpCall || event.type === "agent.mcp_tool_use";
+    assertMcpAlive({
+      deadline: mcpWatch.deadline,
+      sawMcpCall,
+      sessionId,
+      silenceMs: mcpWatch.silenceMs,
+    });
+
     if (event.type === "session.status_terminated") {
       throw new Error(
         `session ${sessionId} terminated: ${JSON.stringify(event.error ?? "")}`
@@ -371,6 +471,10 @@ async function consumeUntilEndTurn(args: {
     }
     if (event.type !== "session.status_idle") {
       trackEvent(event, state);
+      const activity = activityFor(event);
+      if (activity) {
+        yield { activity, message: state.lastMessage, sessionId };
+      }
       continue;
     }
     if (event.stop_reason?.type !== "requires_action") {
@@ -392,6 +496,23 @@ async function consumeUntilEndTurn(args: {
   }
 
   return { outcome: state.outcome, sessionId, text: finalText(opts, state) };
+}
+
+/** Human-readable label for a progress snapshot; undefined = nothing to show. */
+function activityFor(event: KnownEvent): string | undefined {
+  switch (event.type) {
+    case "agent.message":
+      return "agent message";
+    case "agent.custom_tool_use":
+      return `custom tool: ${event.name}`;
+    case "agent.tool_use":
+    case "agent.mcp_tool_use":
+      return "tool use";
+    case "span.outcome_evaluation_end":
+      return `outcome evaluated: ${event.result}`;
+    default:
+      return;
+  }
 }
 
 function trackEvent(event: KnownEvent, state: StreamState): void {
