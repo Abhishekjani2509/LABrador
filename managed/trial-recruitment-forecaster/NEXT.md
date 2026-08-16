@@ -13,6 +13,7 @@ Answers: *given an indication thesis, could this trial actually be enrolled?*
 | `backtest.ts` | Validation harness: predicted vs actual enrolment for completed trials, horizon rolled back to each trial's start. |
 | `fixtures/theses.json` | 4 fixtures, one per mode, each with a `whyInSet` rationale. |
 | `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
+| `economics-bridge.ts` | **Adapter B** (COORDINATION §5): RecruitabilityResult → launch-delay overlay for Vince's economics node, with best-effort pricing. See section below. |
 
 Verified end to end on 2026-08-15 (evening): typecheck + ultracite clean, all
 four fixtures coherent, hero retrospective solid, backtest runs. `managed/trial-recruitment-forecaster`
@@ -65,6 +66,33 @@ Gift finding intact and now horizon-honest: the 2018 run cites only pre-2018
 recruitment deaths (NCT01458418 "inability to complete enrollment",
 NCT01404832 "inadequate recruitment"); NCT02881372 ("lack of recruitment",
 withdrawn 2023) appears only in today-runs.
+
+## Economics bridge (Adapter B, shipped 2026-08-15 late)
+
+`bun managed/trial-recruitment-forecaster/economics-bridge.ts --fixture <id> |
+--from-json <saved-result> [--planned-months 18] [--save-result <path>]`
+
+What it does: converts a RecruitabilityResult into an "economics overlay" —
+`simulatedLaunchDelayYears` = max(0, round((simulatedMonthsToEnroll −
+plannedMonths)/12)), a triangular `simulatedLaunchDelayRangeYears`
+(low/mode/high, whole years, from `simulatedMonthsRange`) for
+`SimulationAssumptions.launch_delay_years`, counterfactual passthrough with
+`simulatedMonthsSavedByCounterfactual`, and a `basis` string per number. If
+`uv` is available it prices the delay by running Vince's demo analysis
+read-only (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on his SYNTHETIC
+demo fixture, self-stamped NOT_DECISION_GRADE) → `simulatedDelayCostUSD` +
+`simulatedCounterfactualValueUSD`; otherwise it emits the overlay with
+`pricing: unavailable` instead of failing.
+
+What it does NOT do: it never writes into `managed/therapeutic-program-economics/`
+(the analyst/orchestrator applies the overlay); it does NOT map `score` →
+approval probabilities (category error — recruitability is not PoA) and does
+NOT map months → `stage_durations_years` (in engine.py durations only shift
+stage cost timing, they don't move launch) — the file header documents both
+forbidden wirings. The `launch_year`-delta application convention still needs
+Vince's confirmation. Verified run (dupi-eoe today): 22 mo → delay 0 whole
+years (0.33 unrounded), range {0,0,3}; counterfactual saves 3 months →
+priced at ~$1.27M against the synthetic economics fixture.
 
 ## Backtest results and what they mean
 
