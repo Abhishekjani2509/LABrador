@@ -1,0 +1,187 @@
+{
+  "synthetic": true,
+  "decision_grade": "NOT_DECISION_GRADE",
+  "warning": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one.",
+  "comparables": [
+    {
+      "comparable_id": "syn-ra-class-jaki-primary",
+      "name": "SYNTHETIC oral JAK-inhibitor class comparator (primary match)",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC)",
+      "target_population": "Adults with seropositive moderate-to-severe RA, inadequate response to methotrexate (SYNTHETIC)",
+      "line_of_therapy": "Third line",
+      "geography": "United States",
+      "route": "ORAL",
+      "price": {
+        "amount": 148000,
+        "currency": "USD",
+        "basis": "LIST",
+        "period": "ANNUAL",
+        "price_year": 2026,
+        "units_per_year": null,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-A-PRICE",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "MIXED",
+      "access_restrictions": ["Synthetic biomarker confirmation"],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    },
+    {
+      "comparable_id": "syn-ra-class-jaki-net-anchor",
+      "name": "SYNTHETIC oral JAK-inhibitor class, modelled-net scenario",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC)",
+      "target_population": "Adults with seropositive moderate-to-severe RA, inadequate response to methotrexate (SYNTHETIC)",
+      "line_of_therapy": "Third line",
+      "geography": "United States",
+      "route": "ORAL",
+      "price": {
+        "amount": 115000,
+        "currency": "USD",
+        "basis": "ESTIMATED_NET",
+        "period": "ANNUAL",
+        "price_year": 2026,
+        "units_per_year": null,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-A-NET-SCENARIO",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "MIXED",
+      "access_restrictions": ["Synthetic biomarker confirmation"],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    },
+    {
+      "comparable_id": "syn-ra-class-il6-net",
+      "name": "SYNTHETIC IL-6 pathway biologic class, modelled-net scenario",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC) - adjacent context",
+      "target_population": "Adults with refractory synthetic inflammatory syndrome",
+      "line_of_therapy": "Second line",
+      "geography": "United States",
+      "route": "SUBCUTANEOUS_SELF",
+      "price": {
+        "amount": 48000,
+        "currency": "USD",
+        "basis": "ESTIMATED_NET",
+        "period": "ANNUAL",
+        "price_year": 2026,
+        "units_per_year": null,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-EXPANSION-NET",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "MIXED",
+      "access_restrictions": ["Synthetic prior therapy requirement"],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    },
+    {
+      "comparable_id": "syn-ra-class-antitnf",
+      "name": "SYNTHETIC anti-TNF biologic class comparator",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC)",
+      "target_population": "Adults with seropositive moderate-to-severe RA, inadequate response to methotrexate (SYNTHETIC)",
+      "line_of_therapy": "Second line",
+      "geography": "United States",
+      "route": "ORAL",
+      "price": {
+        "amount": 121500,
+        "currency": "USD",
+        "basis": "PUBLIC_REIMBURSEMENT",
+        "period": "ANNUAL",
+        "price_year": 2026,
+        "units_per_year": null,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-B-PRICE",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "PUBLIC_MULTIPAYER",
+      "access_restrictions": ["Synthetic step therapy"],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    },
+    {
+      "comparable_id": "syn-ra-class-context",
+      "name": "SYNTHETIC RA context comparator (non-matching line of therapy)",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC) - adjacent context",
+      "target_population": "Adults with moderate synthetic inflammatory syndrome",
+      "line_of_therapy": "First line",
+      "geography": "United States",
+      "route": "ORAL",
+      "price": {
+        "amount": 76000,
+        "currency": "USD",
+        "basis": "ESTIMATED_NET",
+        "period": "ANNUAL",
+        "price_year": 2026,
+        "units_per_year": null,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-C-PRICE",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "COMMERCIAL_INSURANCE",
+      "access_restrictions": [],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    },
+    {
+      "comparable_id": "syn-ra-class-excluded",
+      "name": "SYNTHETIC excluded comparator (kept so the exclusion stays visible)",
+      "therapeutic_area": "Immunology / rheumatology (SYNTHETIC)",
+      "indication": "Moderate-to-severe rheumatoid arthritis, MTX-inadequate response (SYNTHETIC) - adjacent context",
+      "target_population": "Adults with metastatic synthetic solid tumor",
+      "line_of_therapy": "First line",
+      "geography": "United Kingdom",
+      "route": "INTRAVENOUS",
+      "price": {
+        "amount": 92000,
+        "currency": "GBP",
+        "basis": "LIST",
+        "period": "COURSE",
+        "price_year": 2026,
+        "units_per_year": 1,
+        "evidence": {
+          "source_id": "SYNTHETIC-DEMO-COMP-D-PRICE",
+          "evidence_type": "SYNTHETIC",
+          "grade": "SYNTHETIC",
+          "synthetic": true,
+          "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+        }
+      },
+      "target_or_mechanism": "SYNTHETIC_RA_CLASS",
+      "payer_type": "PUBLIC_SINGLE_PAYER",
+      "access_restrictions": ["Synthetic HTA restriction"],
+      "evidence": {},
+      "notes": "SYNTHETIC. Comparable identities relabelled to RA treatment CLASSES; every price amount is inherited verbatim from the fictitious demo catalogue. These are NOT the prices of any real RA product and must never be read as one."
+    }
+  ]
+}

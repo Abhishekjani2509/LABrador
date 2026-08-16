@@ -1,0 +1,73 @@
+{
+  "counterfactual": {
+    "achieves": "none",
+    "change": "No biomarker relaxation works: even all-comers (100%) predicts 282 months at 85 sites. The binding constraints are elsewhere — N=340 against 189 competing trials; feasibility would need ~510 sites even without the biomarker.",
+    "simulatedMonthsAfter": 282
+  },
+  "eligibility": {
+    "citedTrials": [
+      "NCT01061736",
+      "NCT00810836",
+      "NCT01194414",
+      "NCT01416493",
+      "NCT00563849"
+    ],
+    "drivers": [
+      "active disease thresholds (tender/swollen joint counts, CRP/ESR elevation) exclude many MTX-IR patients who are only mildly active",
+      "prior biologic/TNF exposure and non-response exclusions remove a substantial fraction of inadequate-responders",
+      "stable background therapy requirements (DMARD/steroid dose stability for 4-12 weeks) and steroid dose caps (≤10mg/day) exclude unstable or higher-dose patients",
+      "general eligibility restrictions (age limits, exclusion of other rheumatic disease, recent major surgery, active infection) remove additional patients"
+    ],
+    "multiplier": 0.35,
+    "reasoning": "Across precedent RA trials, activity-level thresholds (tender/swollen joints, CRP/ESR), prior biologic exposure exclusions, and stable background therapy/steroid dose requirements are recurring filters that would exclude a sizable share of seropositive MTX-IR patients even after the biomarker requirement is met. Combining these compounding filters (each retaining roughly 60-85%) yields an overall pass-rate multiplier of about 0.35."
+  },
+  "evidence": {
+    "competingTrials": 189,
+    "precedentTrials": [
+      "NCT01061736",
+      "NCT00810836",
+      "NCT01416493",
+      "NCT01194414",
+      "NCT00563849",
+      "NCT03008590",
+      "NCT00750880",
+      "NCT00815906",
+      "NCT01534884",
+      "NCT02760316"
+    ]
+  },
+  "failedPrecedents": [
+    {
+      "nctId": "NCT01955733",
+      "whyStopped": "Substance discontinued"
+    },
+    {
+      "nctId": "NCT02390700",
+      "whyStopped": "Business decision based on lack of enrollment"
+    },
+    {
+      "nctId": "NCT01525654",
+      "whyStopped": "Ran out of funding"
+    },
+    {
+      "nctId": "NCT00083759",
+      "whyStopped": "The biological effect seen with natalizumab was not sufficient to warrant further development in RA."
+    },
+    {
+      "nctId": "NCT04143841",
+      "whyStopped": "Financial constraints"
+    }
+  ],
+  "phase3MedianN": 269,
+  "poweringBasis": "effect size d=0.35",
+  "precedentMedianN": 98.5,
+  "requiredN": 340,
+  "score": 0,
+  "screensPerEnrollee": 5,
+  "simulatedMonthsRange": [96, 1211],
+  "simulatedMonthsToEnroll": 470,
+  "sites": 85,
+  "sitesBasis": "precedent",
+  "waterfallDelta": -12,
+  "why": "340 patients (effect size d=0.35) at 85 sites (p75 of at-scale precedents); precedent velocity 0.65 pt/site/mo across 196 completed trials (sampled from 2268 registered), narrowed by 60% biomarker prevalence and 35% eligibility pass rate, with ~189 interventional trials competing for the same patients."
+}

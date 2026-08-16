@@ -51,8 +51,7 @@
  * comments, so the page and the artifact can never drift apart.
  */
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -64,13 +63,31 @@ import {
   type RecruitabilityResult,
 } from "../trial-recruitment-forecaster/recruitability.ts";
 import { IndicationThesis } from "../trial-recruitment-forecaster/thesis.ts";
+// The envelope machinery moved to trace.ts when pipeline.ts needed the same
+// shapes. Same types, same helpers — a trace from either runner renders on the
+// same page.
+import {
+  buildVerdict,
+  capped as cappedTo,
+  type DataSource,
+  digest,
+  envelope,
+  firstLine,
+  type HonestyLabel,
+  injectTrace,
+  type KeyNumber,
+  REPO_ROOT,
+  type StepResult,
+  type Trace,
+  type TraceEnvelope,
+  VERSION,
+} from "./trace.ts";
 
 // ---------------------------------------------------------------------------
 // Where things live. Resolved from this file's own location so the script runs
 // from any working directory.
 // ---------------------------------------------------------------------------
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(HERE, "..", "..");
 const FORECASTER_DIR = join(
   REPO_ROOT,
   "managed",
@@ -101,202 +118,11 @@ const MS_PER_SECOND = 1000;
 const MONTHS_PER_YEAR = 12;
 const PERCENT = 100;
 
-/**
- * The block in observatory.html that holds the trace. Declared at module level
- * because the linter (rightly) wants regexes compiled once, not per call.
- */
-const TRACE_BLOCK = /<!-- TRACE-JSON:BEGIN[\s\S]*?<!-- TRACE-JSON:END -->/;
-/** `<` inside a <script> block would end the block early; escape it. */
-const LT = /</g;
-
-// ---------------------------------------------------------------------------
-// THE TRACE ENVELOPE. One shape, every node, no exceptions.
-// The commented JSON Schema in DESIGN.md explains why each field exists and
-// which question a skeptical reader is asking when they look at it.
-// ---------------------------------------------------------------------------
-
-/** What kind of identifier a reader can go check for themselves. */
-type DataSourceKind =
-  | "doi"
-  | "nct"
-  | "price_observation"
-  | "structure"
-  | "synthetic";
-
-type DataSource = {
-  /** The checkable id itself: "NCT03633617", "10.1038/…", "syn-comp-primary". */
-  id: string;
-  kind: DataSourceKind;
-  /** Plain language: what this record was USED FOR in this node. */
-  role: string;
-};
-
-type KeyNumber = {
-  /** Verbatim from the node where the node emits one — never paraphrased. */
-  basis: string;
-  label: string;
-  unit: string;
-  value: number | string;
-};
-
-/** The vocabulary of honesty. Nothing here is ever removed downstream. */
-type HonestyLabelName =
-  | "ASSUMED"
-  | "DEGRADED"
-  | "INSUFFICIENT_EVIDENCE"
-  | "NOT_DECISION_GRADE"
-  | "SIMULATED"
-  | "SYNTHETIC";
-
-type HonestyLabel = {
-  /** Where the label came from — file, field, or the engine's own output. */
-  detail: string;
-  label: HonestyLabelName;
-  /** Which numbers in this envelope the label applies to. */
-  scope: string;
-};
-
-type Handoff = {
-  /** The file that does the translation, so the seam is auditable. */
-  adapter: string;
-  /** Plain language: exactly what crossed the boundary. */
-  payloadSummary: string;
-  toNode: string;
-};
-
-type TraceEnvelope = {
-  /** Known limitations that a reader should carry forward. Never empty-by-lazy. */
-  caveats: string[];
-  dataSources: DataSource[];
-  decision: {
-    honestyLabels: HonestyLabel[];
-    keyNumbers: KeyNumber[];
-    /** One plain sentence a non-specialist can read out loud. */
-    summary: string;
-  };
-  durationMs: number;
-  inputs: {
-    /** sha256 over canonicalised JSON — proves two runs saw the same input. */
-    digest: string;
-    humanSummary: string;
-    /** Where the input came from (file path, upstream node, CLI flag). */
-    source: string;
-  };
-  node: string;
-  startedAt: string;
-  /** ok = ran; degraded = ran but something was missing; skipped = never ran. */
-  status: "degraded" | "ok" | "skipped";
-  version: {
-    commit: string;
-    /** true = the working tree had uncommitted edits when this ran. */
-    dirty: boolean;
-    /** The exact command or entry point that produced this envelope. */
-    runner: string;
-  };
-  /** null on the terminal node — nothing was handed on. */
-  handoff: Handoff | null;
-};
-
-type Trace = {
-  envelopes: TraceEnvelope[];
-  generatedAt: string;
-  run: {
-    fixtureId: string;
-    plannedMonths: string;
-    seed: string;
-    simulations: string;
-  };
-  traceVersion: string;
-  verdict: {
-    /** Node-by-node ancestry of the final number, oldest first. */
-    ancestry: { node: string; status: string; summary: string }[];
-    /** The end statement, in plain language. */
-    headline: string;
-    /** Every honesty label anywhere in the chain, deduplicated. */
-    honestyLabels: HonestyLabel[];
-    /** Whether the chain completed, and what it means if it did not. */
-    status: "complete" | "incomplete";
-  };
-};
-
-// ---------------------------------------------------------------------------
-// Small helpers. Each does one thing so the main flow reads like a checklist.
-// ---------------------------------------------------------------------------
-
-/** Recursively sort object keys, so the same data always digests the same. */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonical);
-  }
-  if (value && typeof value === "object") {
-    const source = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(source).sort()) {
-      out[key] = canonical(source[key]);
-    }
-    return out;
-  }
-  return value;
-}
-
-/**
- * A short fingerprint of an input payload. A reader who re-runs the pipeline
- * can compare digests to prove two runs really did start from the same data,
- * without reading (or being shown) the payload itself.
- */
-function digest(value: unknown): string {
-  const json = JSON.stringify(canonical(value));
-  return `sha256:${createHash("sha256").update(json).digest("hex").slice(0, 16)}`;
-}
-
-/** Which commit produced this trace, and whether the tree was clean. */
-function gitVersion(): { commit: string; dirty: boolean } {
-  try {
-    const commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    }).trim();
-    const status = execFileSync("git", ["status", "--porcelain"], {
-      cwd: REPO_ROOT,
-      encoding: "utf8",
-    }).trim();
-    return { commit, dirty: status.length > 0 };
-  } catch {
-    return { commit: "unknown (git unavailable)", dirty: true };
-  }
-}
-
-const VERSION = gitVersion();
-
-/** Fill in the boilerplate every envelope shares. */
-function envelope(
-  parts: Omit<TraceEnvelope, "version"> & { version?: TraceEnvelope["version"] }
-): TraceEnvelope {
-  return { ...parts, version: parts.version ?? { ...VERSION, runner: "" } };
-}
-
-/** First line of an error, which is the part a human actually reads. */
-function firstLine(err: unknown): string {
-  const text = err instanceof Error ? err.message : String(err);
-  return text.split("\n")[0] ?? text;
-}
-
-/** Cap a list of ids and say plainly how many were left out. */
-function capped(ids: string[]): string[] {
-  if (ids.length <= MAX_LISTED_SOURCES) {
-    return ids;
-  }
-  const shown = ids.slice(0, MAX_LISTED_SOURCES);
-  return [...shown, `…and ${ids.length - shown.length} more`];
-}
-
 // ---------------------------------------------------------------------------
 // STEP 1 — trial-recruitment-forecaster.
 // Runs live: it queries ClinicalTrials.gov for real precedent trials and asks
 // Claude to read their real eligibility prose. Costs API calls.
 // ---------------------------------------------------------------------------
-
-type StepResult<T> = { error?: string; ms: number; value?: T };
 
 async function runForecaster(
   thesis: IndicationThesis
@@ -312,12 +138,18 @@ async function runForecaster(
 
 /** The NCT ids this node actually leaned on, each with the role it played. */
 function forecasterSources(result: RecruitabilityResult): DataSource[] {
-  const precedent = capped(result.evidence.precedentTrials).map((id) => ({
+  const precedent = cappedTo(
+    result.evidence.precedentTrials,
+    MAX_LISTED_SOURCES
+  ).map((id) => ({
     id,
     kind: "nct" as const,
     role: "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors",
   }));
-  const cited = capped(result.eligibility.citedTrials).map((id) => ({
+  const cited = cappedTo(
+    result.eligibility.citedTrials,
+    MAX_LISTED_SOURCES
+  ).map((id) => ({
     id,
     kind: "nct" as const,
     role: "Eligibility prose Claude actually read to estimate the screen-failure rate",
@@ -932,57 +764,12 @@ function economicsEnvelope(step: StepResult<EconomicsOutput>): TraceEnvelope {
 // it. Deduplicated honesty labels, so nothing quietly drops off the end.
 // ---------------------------------------------------------------------------
 
-function buildVerdict(envelopes: TraceEnvelope[]): Trace["verdict"] {
-  const ancestry = envelopes.map((e) => ({
-    node: e.node,
-    status: e.status,
-    summary: e.decision.summary,
-  }));
-  const seen = new Set<string>();
-  const honestyLabels: HonestyLabel[] = [];
-  for (const env of envelopes) {
-    for (const label of env.decision.honestyLabels) {
-      const key = `${label.label}::${label.scope}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        honestyLabels.push(label);
-      }
-    }
-  }
-  const complete = envelopes.every((e) => e.status === "ok");
+/** This runner's own end statement; the rest of the verdict is mechanical. */
+function demoHeadline(envelopes: TraceEnvelope[], complete: boolean): string {
   const money = envelopes.at(-1)?.decision.keyNumbers[0];
-  const headline = complete
+  return complete
     ? `Chain ran end to end. The recruitment forecast is a simulation, the money it feeds is priced on a fictitious programme, and the economics engine stamps its own output NOT_DECISION_GRADE — so this number sizes a question, it does not answer one. Last number in the chain: ${money?.label ?? "none"} = ${money?.value ?? "n/a"}.`
     : "Chain did NOT run end to end. At least one node degraded or was skipped; the panels below say which, and no number was substituted for the missing step.";
-  return {
-    ancestry,
-    headline,
-    honestyLabels,
-    status: complete ? "complete" : "incomplete",
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Keeping the page and the artifact in lockstep: the trace is injected into
-// observatory.html between two marker comments, so the rendered page can never
-// show numbers that are not in the saved JSON.
-// ---------------------------------------------------------------------------
-
-function injectIntoHtml(trace: Trace): string {
-  if (!existsSync(OBSERVATORY_HTML)) {
-    return "observatory.html not found — skipped injection";
-  }
-  const html = readFileSync(OBSERVATORY_HTML, "utf8");
-  if (!TRACE_BLOCK.test(html)) {
-    return "observatory.html has no TRACE-JSON markers — skipped injection";
-  }
-  const safe = JSON.stringify(trace, null, 2).replace(LT, "\\u003c");
-  const block = `<!-- TRACE-JSON:BEGIN (regenerated by trace-demo.ts — do not hand-edit) -->\n<script id="trace-data" type="application/json">\n${safe}\n</script>\n<!-- TRACE-JSON:END -->`;
-  writeFileSync(
-    OBSERVATORY_HTML,
-    html.replace(TRACE_BLOCK, () => block)
-  );
-  return "observatory.html updated with this run's trace";
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,13 +856,17 @@ async function main(): Promise<void> {
       simulations: SIMULATIONS,
     },
     traceVersion: "1.0",
-    verdict: buildVerdict(envelopes),
+    verdict: buildVerdict(envelopes, (complete) =>
+      demoHeadline(envelopes, complete)
+    ),
   };
 
   const tracePath = join(FIXTURES_DIR, "trace-demo-output.json");
   writeFileSync(tracePath, `${JSON.stringify(trace, null, 2)}\n`);
   process.stderr.write(`\nwrote ${tracePath.replace(`${REPO_ROOT}/`, "")}\n`);
-  process.stderr.write(`${injectIntoHtml(trace)}\n`);
+  process.stderr.write(
+    `${injectTrace(OBSERVATORY_HTML, trace, "trace-demo.ts")}\n`
+  );
   process.stdout.write(`${trace.verdict.headline}\n`);
 }
 

@@ -7,15 +7,15 @@
   "eligibility": {
     "citedTrials": ["NCT03029091", "NCT02227836", "NCT03191864", "NCT04322708"],
     "drivers": [
-      "exclusion of other causes of esophageal eosinophilia (Crohn's, Churg-Strauss, achalasia, hypereosinophilic syndrome, celiac, parasitic infection)",
-      "esophageal stricture precluding endoscope passage or requiring recent dilation",
-      "washout/restriction on prior biologics including anti-IL-4R/dupilumab, anti-IL-5, anti-IgE, anti-TNF within 12-24 weeks",
-      "restriction/stability requirements on corticosteroids (systemic, swallowed, topical) and PPI/diet regimens",
-      "symptom/dysphagia frequency thresholds required at screening",
-      "general safety exclusions (malignancy, infections, bleeding disorders, esophageal varices, pregnancy)"
+      "exclusion of other causes of esophageal eosinophilia (hypereosinophilic syndrome, Churg-Strauss/EGPA, parasitic infection, celiac, Crohn's, achalasia)",
+      "esophageal stricture precluding endoscope passage or requiring dilation",
+      "washout/stability requirements for PPIs, topical/systemic corticosteroids, and prior biologics (esp. exclusion of prior anti-IL-4R/dupilumab exposure)",
+      "requirement for symptomatic dysphagia frequency/severity thresholds",
+      "exclusion for concomitant EG/EoD or eosinophilic colitis and other GI comorbidities",
+      "contraception/pregnancy and general safety/lab exclusions"
     ],
     "multiplier": 0.55,
-    "reasoning": "Across EoE trials, a substantial share of biomarker-positive patients are excluded due to comorbid causes of eosinophilia, structural esophageal contraindications, and required washouts from steroids/biologics/PPIs, as seen consistently in NCT03029091, NCT02227836, NCT03191864, and NCT04322708. Given dupilumab's specific overlap with the anti-IL-4R washout exclusion in NCT04322708 and stricture/medication stability requirements common across trials, roughly half of biomarker-positive patients would be expected to pass full eligibility."
+    "reasoning": "Across EoE trials, the biomarker-positive population is further reduced by exclusions for alternative causes of eosinophilia, structural esophageal disease, recent steroid/biologic use, and symptom/dysphagia entry thresholds (NCT03029091, NCT02227836, NCT03191864, NCT04322708). These stacked but only partially overlapping criteria typically remove roughly half of biomarker-positive patients."
   },
   "evidence": {
     "competingTrials": 13,

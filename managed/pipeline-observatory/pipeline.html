@@ -1,0 +1,1784 @@
+<!doctype html>
+<!--
+  pipeline.html — the FULL chain, rendered for a human.
+
+  Sibling of observatory.html, and deliberately the same renderer: same styles,
+  same panel code, same marker mechanism. The only differences are the title and
+  which runner writes the data block. observatory.html shows the three-station
+  trace-demo; this page shows all seven stations of `bun run pipeline`
+  (hypothesis → thesis → evidence → tractability → recruitment → economics).
+
+  WHAT THIS PAGE IS: a plain-language reading of ONE pipeline run. It shows,
+  node by node: what data was used (with ids you can go and check), what number
+  the node produced and on what basis, what it handed to the next node, and
+  which parts are simulated, synthetic or explicitly not decision-grade.
+
+  WHERE THE NUMBERS COME FROM: the <script id="trace-data"> block near the top
+  of <body>, which `pipeline.ts` regenerates from a real run and writes into
+  this file between the TRACE-JSON markers. The page has no other data source —
+  it cannot show a number that is not in the saved artifact
+  (fixtures/pipeline-irak4-ra.trace.json). Open this file directly in a browser;
+  it loads nothing from the network.
+
+  HOW IT IS BUILT: one inline <style>, one inline <script>, no frameworks, no
+  fonts, no images, no fetch. Every value is inserted with textContent, never
+  innerHTML — a basis string written by a language model is treated as text,
+  never as markup.
+
+  VISUAL PRECEDENT: managed/small-molecule-tractability-review/pipeline.html —
+  monospace, warm paper ground, two-tone ink, borders instead of shadows,
+  inversion as the only alarm signal. This page adds exactly one accent colour,
+  used for nothing except honesty flags, because the brief is that a reader must
+  not be able to miss them.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>The Glassbox — Pipeline Observatory</title>
+    <style>
+    /* ---------------------------------------------------------------
+                                                           TOKENS. Two inks on warm paper, plus one alarm colour reserved
+                                                           exclusively for honesty flags and degraded steps.
+                                                           --------------------------------------------------------------- */
+    :root {
+      --bg: #d7d2ac;
+      --paper: #e2ddbc;
+      --ink: #1a1a1a;
+      --ink-70: rgba(26, 26, 26, 0.7);
+      --ink-45: rgba(26, 26, 26, 0.45);
+      --ink-22: rgba(26, 26, 26, 0.22);
+      --ink-12: rgba(26, 26, 26, 0.12);
+      --flag: #8c2f16;
+      --flag-ink: #f6efd8;
+      --mono:
+        ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    /* The same page after dark; the character (warm, printed) is kept. */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #17150f;
+        --paper: #1e1c14;
+        --ink: #e6e0c4;
+        --ink-70: rgba(230, 224, 196, 0.7);
+        --ink-45: rgba(230, 224, 196, 0.45);
+        --ink-22: rgba(230, 224, 196, 0.22);
+        --ink-12: rgba(230, 224, 196, 0.12);
+        --flag: #e0644a;
+        --flag-ink: #17150f;
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 13px;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    main {
+      max-width: 1080px;
+      padding: 0 20px 80px;
+      margin: 0 auto;
+    }
+    a {
+      color: inherit;
+    }
+
+    /* --- HEADER: what run this is, and how to reproduce it ---------- */
+    header {
+      max-width: 1080px;
+      padding: 22px 20px 18px;
+      margin: 0 auto;
+      border-bottom: 2px solid var(--ink);
+    }
+    .kicker {
+      font-size: 9.5px;
+      color: var(--ink-45);
+      text-transform: uppercase;
+      letter-spacing: 0.17em;
+    }
+    h1 {
+      margin: 6px 0 8px;
+      font-size: 19px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .lede {
+      max-width: 68ch;
+      margin: 0 0 16px;
+      color: var(--ink-70);
+    }
+    .runmeta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+      border: 1px solid var(--ink);
+    }
+    .runmeta div {
+      min-width: 0;
+      padding: 6px 12px;
+      border-right: 1px solid var(--ink-22);
+    }
+    .runmeta div:last-child {
+      border-right: 0;
+    }
+    .runmeta dt {
+      margin: 0;
+      font-size: 8.5px;
+      color: var(--ink-45);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+    .runmeta dd {
+      margin: 0;
+      font-size: 11.5px;
+      word-break: break-all;
+    }
+
+    /* --- READ-THIS-FIRST banner ------------------------------------ */
+    .verdict-top {
+      margin: 26px 0;
+      background: var(--paper);
+      border: 3px solid var(--ink);
+    }
+    .verdict-top h2 {
+      padding: 6px 14px;
+      margin: 0;
+      font-size: 10px;
+      color: var(--bg);
+      text-transform: uppercase;
+      letter-spacing: 0.17em;
+      background: var(--ink);
+    }
+    .verdict-top p {
+      padding: 14px;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.65;
+    }
+
+    /* --- The chain rail: node -> handoff -> node -------------------- */
+    .rail {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: stretch;
+      margin: 26px 0 34px;
+    }
+    .rail-node {
+      flex: 1 1 220px;
+      padding: 10px 12px;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+    }
+    .rail-node .n {
+      font-size: 11.5px;
+      font-weight: 700;
+      word-break: break-word;
+    }
+    .rail-arrow {
+      align-self: center;
+      padding: 0 2px;
+      font-size: 16px;
+      color: var(--ink-45);
+    }
+
+    /* --- One panel per node ---------------------------------------- */
+    .node {
+      margin: 0 0 34px;
+      background: var(--paper);
+      border: 1px solid var(--ink);
+    }
+    .node-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: baseline;
+      padding: 10px 14px;
+      color: var(--bg);
+      background: var(--ink);
+      border-bottom: 1px solid var(--ink);
+    }
+    .node-head .idx {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .node-head .name {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    .node-head .meta {
+      margin-left: auto;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      opacity: 0.75;
+    }
+    .pill {
+      padding: 1px 7px;
+      font-size: 9.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      border: 1px solid currentColor;
+    }
+    .pill.bad {
+      color: var(--flag-ink);
+      background: var(--flag);
+      border-color: var(--flag);
+    }
+
+    section.block {
+      padding: 14px;
+      border-top: 1px solid var(--ink-22);
+    }
+    section.block:first-of-type {
+      border-top: 0;
+    }
+    .block > h3 {
+      margin: 0 0 10px;
+      font-size: 9.5px;
+      color: var(--ink-45);
+      text-transform: uppercase;
+      letter-spacing: 0.17em;
+    }
+    .plain {
+      max-width: 74ch;
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .muted {
+      font-size: 12px;
+      color: var(--ink-70);
+    }
+
+    /* --- Data used: ids a reader can actually go and check ---------- */
+    .srcgroup {
+      margin-bottom: 12px;
+    }
+    .srcgroup h4 {
+      margin: 0 0 4px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    ul.ids {
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+    ul.ids li {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 3px 0;
+      border-bottom: 1px dotted var(--ink-12);
+    }
+    .id-link {
+      font-weight: 700;
+      white-space: nowrap;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .id-dead {
+      font-weight: 700;
+      color: var(--ink-70);
+      white-space: nowrap;
+      border-bottom: 1px dashed var(--ink-45);
+    }
+    .id-role {
+      flex: 1 1 320px;
+      font-size: 12px;
+      color: var(--ink-70);
+    }
+    .nocheck {
+      padding: 0 5px;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--flag-ink);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      background: var(--flag);
+    }
+
+    /* --- Numbers, each with its basis quoted verbatim -------------- */
+    .num {
+      padding: 0 0 0 12px;
+      margin: 0 0 14px;
+      border-left: 3px solid var(--ink);
+    }
+    .num .v {
+      font-size: 17px;
+      font-weight: 700;
+    }
+    .num .l {
+      font-size: 10px;
+      color: var(--ink-45);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    .num .b {
+      max-width: 82ch;
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--ink-70);
+    }
+    .num .b::before {
+      font-size: 9px;
+      color: var(--ink-45);
+      letter-spacing: 0.1em;
+      content: "BASIS, IN THE NODE'S OWN WORDS: ";
+    }
+
+    /* --- HONESTY FLAGS. The loudest thing on the page. ------------- */
+    .flags {
+      background: var(--paper);
+      border: 3px solid var(--flag);
+    }
+    .flags > h3 {
+      padding: 6px 14px;
+      margin: 0;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--flag-ink);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      background: var(--flag);
+    }
+    .flag {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 10px 14px;
+      border-top: 1px solid var(--ink-12);
+    }
+    .flag:first-of-type {
+      border-top: 0;
+    }
+    .flag .tag {
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--flag-ink);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+      background: var(--flag);
+      /* Hazard stripes: loud without needing a second colour. */
+      background-image: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.14) 0 6px,
+        rgba(0, 0, 0, 0) 6px 12px
+      );
+    }
+    .flag .txt {
+      flex: 1 1 340px;
+    }
+    .flag .scope {
+      font-weight: 700;
+    }
+    .flag .detail {
+      font-size: 12px;
+      color: var(--ink-70);
+    }
+
+    /* --- Handoff + caveats ----------------------------------------- */
+    .handoff {
+      padding: 10px 12px;
+      border: 1px dashed var(--ink);
+    }
+    .handoff .to {
+      font-size: 10px;
+      color: var(--ink-45);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+    ul.caveats {
+      padding-left: 18px;
+      margin: 0;
+    }
+    ul.caveats li {
+      max-width: 84ch;
+      margin-bottom: 7px;
+      color: var(--ink-70);
+    }
+
+    /* --- Terminal verdict + ancestry -------------------------------- */
+    .terminal {
+      background: var(--paper);
+      border: 3px solid var(--ink);
+    }
+    .terminal > h2 {
+      padding: 8px 14px;
+      margin: 0;
+      font-size: 12px;
+      color: var(--bg);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      background: var(--ink);
+    }
+    ol.ancestry {
+      padding: 0 0 0 14px;
+      margin: 0;
+      list-style: none;
+      counter-reset: anc;
+    }
+    ol.ancestry li {
+      position: relative;
+      padding: 0 0 16px 16px;
+      counter-increment: anc;
+      border-left: 2px solid var(--ink);
+    }
+    ol.ancestry li:last-child {
+      padding-bottom: 0;
+      border-left-color: transparent;
+    }
+    ol.ancestry li::before {
+      position: absolute;
+      top: 0;
+      left: -11px;
+      width: 20px;
+      height: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 20px;
+      color: var(--bg);
+      text-align: center;
+      content: counter(anc);
+      background: var(--ink);
+    }
+    ol.ancestry .who {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+    footer {
+      padding-top: 14px;
+      margin-top: 40px;
+      font-size: 12px;
+      color: var(--ink-70);
+      border-top: 2px solid var(--ink);
+    }
+    code {
+      padding: 1px 5px;
+      background: var(--ink-12);
+    }
+    .fallback {
+      padding: 14px;
+      margin: 30px 0;
+      border: 3px solid var(--flag);
+    }
+    </style>
+  </head>
+  <body>
+    <!--
+      THE DATA. Regenerated in place by trace-demo.ts on every run. Everything
+      the page shows is read from here; nothing is hard-coded in the markup.
+    -->
+    <!-- TRACE-JSON:BEGIN (regenerated by pipeline.ts — do not hand-edit) -->
+    <script id="trace-data" type="application/json">
+    {
+      "envelopes": [
+        {
+          "caveats": [
+            "The generator's own coverage line: depth deep, read 6/49, TRUNCATED. A truncated search means \"this search did not surface it\", never \"nobody has shown it\".",
+            "--dry-run means NO model calls: this is the deterministic structural slate, so nothing here was written by a language model.",
+            "PROFILE NOTE, verified by running both: --profile valuation shortlists ZERO on this graph (it requires two independent research groups and a protein/gene node on the path; g_1a4f has one group and no protein entity). This run uses --profile default."
+          ],
+          "dataSources": [
+            {
+              "id": "g_1a4f",
+              "kind": "doi",
+              "role": "Evidence graph the hypotheses were enumerated from — 12 findings across 0 papers, each finding carrying a verbatim quote"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "Support/novelty/testability are the generator's own scores over graph structure, not measurements of the world.",
+                "label": "SIMULATED",
+                "scope": "the ranking scores on every hypothesis"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "Structural enumeration over the graph at profile \"default\"; ids: H-g2, H-g1, H-g4, H-chain-t1-t4-2, H-analog-t4-t2-via-t1",
+                "label": "Hypotheses shortlisted",
+                "unit": "hypotheses",
+                "value": 5
+              },
+              {
+                "basis": "Findings in the source graph, each with a verbatim quote.",
+                "label": "Findings available",
+                "unit": "findings",
+                "value": 12
+              }
+            ],
+            "summary": "The generator read graph g_1a4f (\"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\") and shortlisted 5 hypotheses without a single model call."
+          },
+          "durationMs": 502,
+          "handoff": {
+            "adapter": "managed/trial-recruitment-forecaster/thesis-bridge.ts",
+            "payloadSummary": "slate.json with 5 hypotheses; hypothesis H-g1 is the one carried forward (its subject IS the IRAK4 inhibitor).",
+            "toNode": "adapter-d (thesis-bridge)"
+          },
+          "inputs": {
+            "digest": "sha256:fbcbb33e16ec7d33",
+            "humanSummary": "The only real evidence graph committed to this repo: research-evidence-mapper run g_1a4f, an IRAK4-in-rheumatoid-arthritis question.",
+            "source": "managed/research-evidence-mapper/runs/g_1a4f.json"
+          },
+          "node": "hypothesis-generator (hyp_gen)",
+          "startedAt": "2026-08-16T03:28:56.477Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "uv run python -m hyp_gen.cli --graph \u003cgraph> --profile default --dry-run --out \u003cdir>"
+          }
+        },
+        {
+          "caveats": [
+            "The search is a sample, not the literature: 6 of 49 results were read. Absence of a link is weak evidence of absence.",
+            "This chain traverses at least one link against its stated direction. Do not assert the reverse relation as established.",
+            "Novelty here rests on a gap, but this graph is not entitled to strong absence claims. Treat 'nobody has shown X' as 'this search did not surface X'.",
+            "7 of this thesis's fields could not come from the graph and were supplied by the analyst frame. They are listed as ASSUMED honesty labels, one per field, with the reason each is not a graph finding.",
+            "No finding on this hypothesis's path was dropped: every one converted to a valid Evidence row."
+          ],
+          "dataSources": [
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            },
+            {
+              "id": "doi:10.1186/s13075-023-03145-0",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            },
+            {
+              "id": "doi:10.1186/s13075-023-03145-0",
+              "kind": "doi",
+              "role": "Paper whose verbatim quote became an Evidence row on this thesis"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "ASSUMED. The trial population an IRAK4-inhibitor RA program would realistically enrol, mirroring the entry criteria of the RA JAK-inhibitor and biologic trials this class competes with (seropositive, inadequate response to methotrexate). The graph contains no epidemiology of any kind — no prevalence, no assay availability — so all three fields are analyst decisions.",
+                "label": "ASSUMED",
+                "scope": "biomarkerPopulation = seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate @ prevalence 0.6, assay true"
+              },
+              {
+                "detail": "ASSUMED. The graph states no endpoint and no effect size. ACR20 at week 12 is the conventional registrational primary endpoint for RA trials, which makes it the honest choice for a forecast that will be compared against RA precedent trials.",
+                "label": "ASSUMED",
+                "scope": "endpoint = ACR20 response at week 12 (binary, d=0.35)"
+              },
+              {
+                "detail": "ASSUMED. REQUIRED for this slate: g_1a4f contains no `disease` entity at all (its 5 things are 2 small_molecule and 3 process nodes), so every hypothesis's object_name is a process, not an indication. Without this override the bridge would put 'MyD88 dimerization inhibition' in disease.name. The disease is named in the graph's own question string, which the bridge echoes verbatim in provenance.diseaseBasis so a reader can check the substitution. Slate question, verbatim: \"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\". object_name the override replaced: \"MyD88 dimerization inhibition\" (thing kind: small_molecule).",
+                "label": "ASSUMED",
+                "scope": "disease.name = rheumatoid arthritis"
+              },
+              {
+                "detail": "NO protein/gene node exists on this path (graph carries none), so the frame's targetSymbolOverride was used: ASSUMED-but-checkable. REQUIRED for this slate: g_1a4f carries no protein or gene entity (Rafal hit the same wall in graph-intake — COORDINATION §3), so no interior path node can supply a target symbol. IRAK4 is named inside the thing's own name ('IRAK4 inhibition', t1) and its aliases, so this is reading the graph's string rather than importing outside knowledge — but it is still the analyst asserting it, not the graph typing it.",
+                "label": "ASSUMED",
+                "scope": "target.symbol = IRAK4"
+              },
+              {
+                "detail": "ASSUMED-but-checkable. Q9NWZ3 is the human IRAK4 accession in UniProt. Supplied because thesis.ts §6 item 2 makes it the tractability node's join key and the graph has no accession on any thing.",
+                "label": "ASSUMED",
+                "scope": "target.uniprotAccession = Q9NWZ3"
+              },
+              {
+                "detail": "frame override (ASSUMED. The slate's path verb for this hypothesis is `suppresses`, which is NOT in the mapper's closed `how` enum (SCHEMA.md: inhibits|activates|binds|increases|decreases|drives|associated_with), so the bridge maps it to `modulate` rather than guessing. The analyst states `inhibit` because the asset IS an IRAK4 inhibitor. Delete this field to see the bridge's own conservative mapping instead.); the graph verb is \"suppresses\", which maps to \"modulate\"",
+                "label": "ASSUMED",
+                "scope": "target.direction = inhibit"
+              },
+              {
+                "detail": "the graph has no tissue field; this is the analyst's reading of where the findings were measured",
+                "label": "ASSUMED",
+                "scope": "tissue = synovium"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "asset IRAK4 inhibition (small_molecule), target IRAK4 / Q9NWZ3, direction inhibit, disease rheumatoid arthritis",
+                "label": "Thesis emitted",
+                "unit": "id",
+                "value": "H-g1"
+              },
+              {
+                "basis": "Rows converted from the hypothesis's own evidence pack, 0 dropped. Directions: supports, supports, supports, contradicts, supports, supports.",
+                "label": "Evidence rows carried",
+                "unit": "rows",
+                "value": 6
+              },
+              {
+                "basis": "1 − the generator's support score. 1 − scores.support (0.423)",
+                "label": "Uncertainty",
+                "unit": "0–1",
+                "value": 0.577
+              }
+            ],
+            "summary": "The slate hypothesis is now a valid IndicationThesis: IRAK4 inhibition inhibiting IRAK4 in rheumatoid arthritis, carrying 6 sourced evidence rows and 7 analyst assumptions."
+          },
+          "durationMs": 31,
+          "handoff": {
+            "adapter": "the thesis object itself (thesis.ts is the shared contract)",
+            "payloadSummary": "IndicationThesis \"H-g1\" — population \"seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate\" at 60% prevalence, endpoint \"ACR20 response at week 12\".",
+            "toNode": "trial-recruitment-forecaster"
+          },
+          "inputs": {
+            "digest": "sha256:68c26af735d16ae8",
+            "humanSummary": "Slate hypothesis H-g1 plus the analyst frame that supplies the two things a literature graph cannot: the trial population and the endpoint.",
+            "source": "managed/pipeline-observatory/fixtures/hypgen-irak4-ra.slate.json + managed/trial-recruitment-forecaster/fixtures/irak4-ra.frame.json"
+          },
+          "node": "adapter-d (thesis-bridge)",
+          "startedAt": "2026-08-16T03:28:56.981Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "bun managed/trial-recruitment-forecaster/thesis-bridge.ts \u003cslate> --frame \u003cframe> --hypothesis H-g1"
+          }
+        },
+        {
+          "caveats": [
+            "SCHEMA DEVIATION in the source graph (reported to its owner, never repaired here): 12/12 findings lack `round` (SCHEMA.md findings row)",
+            "SCHEMA DEVIATION in the source graph (reported to its owner, never repaired here): 12/12 findings lack `flags` (SCHEMA.md findings row)",
+            "SCHEMA DEVIATION in the source graph (reported to its owner, never repaired here): 4/4 papers lack `round` (SCHEMA.md papers row)",
+            "SCHEMA DEVIATION in the source graph (reported to its owner, never repaired here): 12/12 findings carry an undocumented `claim` field (a paraphrase; the bridge uses `quote` instead)",
+            "SCHEMA DEVIATION in the source graph (reported to its owner, never repaired here): 1/12 findings are cited by no link, so basis was derived (f6)",
+            "1 finding(s) dropped: 1× non_actionable_basis. Drops are counted, never silent.",
+            "Coverage check: the thesis carries 6 of the 11 actionable rows in the graph. The rest are about entities off this hypothesis's path — present in the graph, deliberately not attached to this thesis."
+          ],
+          "dataSources": [
+            {
+              "id": "doi:10.1016/j.apsb.2022.11.023",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1016/j.apsb.2022.11.023",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1002/art.41953",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1016/j.apsb.2022.11.023",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1186/s13075-023-03145-0",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1186/s13075-023-03145-0",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1186/s13075-023-03145-0",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            },
+            {
+              "id": "doi:10.1172/jci.insight.149825",
+              "kind": "doi",
+              "role": "Paper cited by at least one converted finding"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "Strength is not a measurement: clamp01(STUDY_QUALITY[study_type] * (is_preprint ? 0.8 : 1)); table mirrors assemble.py:199",
+                "label": "ASSUMED",
+                "scope": "the strength score on every evidence row"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "Adapter A over the full graph; 1 dropped (1× non_actionable_basis).",
+                "label": "Actionable evidence rows in the graph",
+                "unit": "rows",
+                "value": 11
+              },
+              {
+                "basis": "Rows the chosen hypothesis's own evidence pack supplied, converted at station 2.",
+                "label": "Rows on the thesis",
+                "unit": "rows",
+                "value": 6
+              }
+            ],
+            "summary": "The graph supports 11 actionable evidence rows in total; 6 of them sit on this thesis."
+          },
+          "durationMs": 25,
+          "handoff": {
+            "adapter": "reported alongside the thesis, not merged into it",
+            "payloadSummary": "Provenance only. Station 2 already attached the rows this hypothesis's path supports; this station exists so a reader can see what was NOT attached.",
+            "toNode": "the reader"
+          },
+          "inputs": {
+            "digest": "sha256:fbcbb33e16ec7d33",
+            "humanSummary": "Every finding in the whole graph, not just the ones on the chosen hypothesis's path.",
+            "source": "managed/research-evidence-mapper/runs/g_1a4f.json"
+          },
+          "node": "adapter-a (evidence-bridge)",
+          "startedAt": "2026-08-16T03:28:57.012Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "bun managed/trial-recruitment-forecaster/evidence-bridge.ts \u003cgraph>"
+          }
+        },
+        {
+          "caveats": [
+            "TRACTABILITY DID NOT ENRICH THIS THESIS. The rows below are about other proteins; treating them as IRAK4 evidence would be the exact failure this pipeline is built to prevent.",
+            "JAK1: SUBJECT MISMATCH: this dossier measures JAK1 (P23458), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target.",
+            "TNF: single-assay dominance: FOUND — the top assay is 45.0% of all bioactivity and it measures IRAK4, not TNF. The 2,582-compound figure is a statement about that assay. assay_type is no defence: the split is B 5830 / F 617, about 90% binding, and the IRAK4 cellular assay is in the B bucket.",
+            "TNF: best potency from a characterised assay: FOUND — the headline 0.03 nM Ki (CHEMBL3640299, assay CHEMBL3705047) has the description 'Inhibition assay using TNF-alpha' and nothing else. Rejected as uncharacterised. The reported figure is instead the SPR Kd of 1.3 nM against immobilised trimer, three orders weaker and characterised.",
+            "TNF: axis_conflict: The two axes point in opposite directions and neither is wrong. RETRIEVED: zero approved small molecules against five approved biologics, and the 2,582-compound figure is not what it looks like — 45.0% of all bioactivity comes from an IRAK4 monocyte assay that measures a different protein and uses TNF only as a cellular readout. The headline 0.03 nM Ki sits behind an assay described only as 'Inhibition assay using TNF-alpha', which is unusable, so the reported potency here is the weaker but characterised SPR Kd of 1.3 nM. COMPUTED: refused. The pocket run completed but could not identify the site across the ensemble, so no volume, no D=1.6 primary and no druggability are reported here. An earlier version of this field called TNF 'the strongest pocket signal in the fixture set, exceeding JAK1 on every metric' - that superlative is WITHDRAWN 2026-08-15. It ranked targets against a calibration whose anchors did not measure their targets, and TNF's own 207 A^3 anchor was one of the compromised ones (on TNF, but zero residue overlap with its only drug-anchored pocket). Nothing in this dossier ranks TNF's pocket against another target's. The reconciliation is mechanistic, not statistical: the site is a cavity on the trimer 3-fold axis reached by displacing a subunit, so it is invisible to any preparation that takes one chain, it is occluded rather than cryptic, and its one co-crystallised ligand (307 in 2AZ5) is a known promiscuous frequent hitter. Do not average these. The live fact that settles the direction without settling the magnitude: balinatunfib (SAR441566) is an oral small molecule in clinical development that stabilises a receptor-incompetent trimer. So 'zero approved small molecules' is true and 'no small molecule can work' is false.",
+            "TNF: SUBJECT MISMATCH: this dossier measures TNF (P01375), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target.",
+            "TNF: computed axis not emitted — the pocket run reported no volume (structure.pdb_id 2AZ5); the dossier's own caveat: No mechanism_hypothesis was supplied. The pocket is reported for the biological assembly because the site does not exist on one chain, and no pocket is asserted to be the relevant one. The interface classification is NOT destabiliser_candidate despite the mechanism being known from the literature, because no partner complex was analysed and rule 2b requires that classification be measured. WHY NO POCKET GEOMETRY IS REPORTED, despite a run that completed with every stage ok. Of the 12 site pockets found, only 2 — both on the holo entry 2AZ5 — were selected by ligand_site_jaccard. The other 10, every measurement on every apo entry, fell back to site_signature_unreliable_homooligomer. Rule 4 says values on that basis must be reported per structure and never pooled, and here is what pooling them anyway produces: a volume range of 126.9 to 809.5 A^3 and a druggability fold-range of 651.0. Tha…[truncated; full text in the dossier]"
+          ],
+          "dataSources": [
+            {
+              "id": "CHEMBL2835",
+              "kind": "doi",
+              "role": "JAK1 dossier, database row at strength 0.6"
+            },
+            {
+              "id": "3EYG",
+              "kind": "structure",
+              "role": "JAK1 dossier, simulation row at strength 0.25"
+            },
+            {
+              "id": "CHEMBL1825",
+              "kind": "doi",
+              "role": "TNF dossier, database row at strength 0.2"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "NONE of the available dossiers is the thesis target. SUBJECT MISMATCH: this dossier measures JAK1 (P23458), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target. SUBJECT MISMATCH: this dossier measures TNF (P01375), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target. These 3 rows are therefore QUARANTINED: reported here, and NOT merged into the thesis that station 5 scores. Making this station real needs one thing — an IRAK4 (Q9NWZ3) dossier from the tractability node.",
+                "label": "SUBJECT_MISMATCH",
+                "scope": "every tractability row in this run"
+              },
+              {
+                "detail": "Computed-axis rows are pocket geometry from fpocket, capped at 0.5 strength and fixed at 0.25, because the tractability node stamps its own druggability `load_bearing: false` and has RETRACTED the calibration that used to interpret pocket volume.",
+                "label": "SIMULATED",
+                "scope": "any row with sourceType simulation"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "verdict \"small_molecule_tractable\", basis \"retrieved_precedent\"; 2 row(s) emitted, 0 axis/axes refused.",
+                "label": "JAK1 dossier rows",
+                "unit": "rows",
+                "value": 2
+              },
+              {
+                "basis": "verdict \"small_molecule_tractable\", basis \"both\"; 1 row(s) emitted, 1 axis/axes refused.",
+                "label": "TNF dossier rows",
+                "unit": "rows",
+                "value": 1
+              }
+            ],
+            "summary": "3 tractability evidence rows exist and NONE of them is about IRAK4 — both committed dossiers measure a different protein, so this station enriches nothing and says so."
+          },
+          "durationMs": 76,
+          "handoff": {
+            "adapter": "none — rows quarantined on purpose",
+            "payloadSummary": "Nothing crosses this boundary. A subject-mismatched row must never enter a thesis, so the forecaster below sees exactly the thesis station 2 produced.",
+            "toNode": "(nothing)"
+          },
+          "inputs": {
+            "digest": "sha256:f658053244a16316",
+            "humanSummary": "The two committed, validator-clean tractability dossiers — JAK1 and TNF. There is no IRAK4 dossier to run.",
+            "source": "managed/small-molecule-tractability-review/.claude/skills/assemble-dossier/examples"
+          },
+          "node": "adapter-c (dossier-bridge)",
+          "startedAt": "2026-08-16T03:28:57.037Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "bun managed/trial-recruitment-forecaster/dossier-bridge.ts \u003cdossier> --thesis-symbol IRAK4 --thesis-accession Q9NWZ3"
+          }
+        },
+        {
+          "caveats": [
+            "Known limitation (NEXT.md): per-site velocity measured on small precedent pools does not transfer cleanly to 100+ site programmes.",
+            "Cheapest modelled rescue: No biomarker relaxation works: even all-comers (100%) predicts 282 months at 85 sites. The binding constraints are elsewhere — N=340 against 189 competing trials; feasibility would need ~510 sites even without the biomarker. (reaches \"none\", 282 months). A what-if, not a plan.",
+            "Precedent pool: 10 completed trials, 189 currently-recruiting competitors.",
+            "MODEL LIMIT REACHED — READ THE MONTH COUNT AS A FAILURE SIGNAL, NOT A FORECAST. 189 trials are recruiting this population concurrently, and the competition model gives each one 8% of the patient pool, which divides per-site velocity by 16.1×. At this crowding the share model is extrapolating far past anything it was calibrated on (1512% of the pool \"claimed\" in total), so 470 months means \"this design does not close in a crowded indication\", not \"this trial will take 39 years\". Found by this pipeline run; the constant was deliberately NOT tuned to make the demo look better. Owner: the forecaster (Abhishek)."
+          ],
+          "dataSources": [
+            {
+              "id": "NCT01061736",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT00810836",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT01416493",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT01194414",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT00563849",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT03008590",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT00750880",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT00815906",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT01534884",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT02760316",
+              "kind": "nct",
+              "role": "Completed interventional precedent — supplied enrolment velocity, sample-size and site-count anchors"
+            },
+            {
+              "id": "NCT01061736",
+              "kind": "nct",
+              "role": "Eligibility prose Claude actually read to estimate the screen-failure rate"
+            },
+            {
+              "id": "NCT00810836",
+              "kind": "nct",
+              "role": "Eligibility prose Claude actually read to estimate the screen-failure rate"
+            },
+            {
+              "id": "NCT01194414",
+              "kind": "nct",
+              "role": "Eligibility prose Claude actually read to estimate the screen-failure rate"
+            },
+            {
+              "id": "NCT01416493",
+              "kind": "nct",
+              "role": "Eligibility prose Claude actually read to estimate the screen-failure rate"
+            },
+            {
+              "id": "NCT00563849",
+              "kind": "nct",
+              "role": "Eligibility prose Claude actually read to estimate the screen-failure rate"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "The field is literally named `simulatedMonthsToEnroll` in recruitability.ts — a model output, not an observed enrolment.",
+                "label": "SIMULATED",
+                "scope": "months to enrol, range, score and everything derived from them"
+              },
+              {
+                "detail": "The eligibility pass rate is Claude's judgement after reading real inclusion/exclusion prose (median of 3 samples). A calibrated estimate, not a measurement.",
+                "label": "ASSUMED",
+                "scope": "eligibility pass rate and the drivers list"
+              },
+              {
+                "detail": "The biomarker prevalence this forecast divides by is the analyst frame's assumed 0.6, not an epidemiological measurement (station 2's ASSUMED labels).",
+                "label": "ASSUMED",
+                "scope": "screening burden and therefore the month count itself"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "340 patients (effect size d=0.35) at 85 sites (p75 of at-scale precedents); precedent velocity 0.65 pt/site/mo across 196 completed trials (sampled from 2268 registered), narrowed by 60% biomarker prevalence and 35% eligibility pass rate, with ~189 interventional trials competing for the same patients.",
+                "label": "Simulated months to enrol",
+                "unit": "months",
+                "value": 470
+              },
+              {
+                "basis": "Same model at the 75th and 25th percentile of observed precedent velocity (interquartile band, not a confidence interval).",
+                "label": "Simulated range",
+                "unit": "months",
+                "value": "96–1211"
+              },
+              {
+                "basis": "Straight-line mapping of months: 1.0 at or under 18 months, 0 at or beyond 48. Here 470 months.",
+                "label": "Recruitability score",
+                "unit": "0–1",
+                "value": 0
+              },
+              {
+                "basis": "effect size d=0.35",
+                "label": "Required patients (N)",
+                "unit": "patients",
+                "value": 340
+              },
+              {
+                "basis": "Site count basis: precedent.",
+                "label": "Sites assumed open",
+                "unit": "sites",
+                "value": 85
+              },
+              {
+                "basis": "Across precedent RA trials, activity-level thresholds (tender/swollen joints, CRP/ESR), prior biologic exposure exclusions, and stable background therapy/steroid dose requirements are recurring filters that would exclude a sizable share of seropositive MTX-IR patients even after the biomarker requirement is met. Combining these compounding filters (each retaining roughly 60-85%) yields an overall pass-rate multiplier of about 0.35. Drivers: active disease thresholds (tender/swollen joint counts, CRP/ESR elevation) exclude many MTX-IR patients who are only mildly active; prior biologic/TNF exposure and non-response exclusions remove a substantial fraction of inadequate-responders; stable background therapy requirements (DMARD/steroid dose stability for 4-12 weeks) and steroid dose caps (≤10mg/day) exclude unstable or higher-dose patients; general eligibility restrictions (age limits, exclusion of other rheumatic disease, recent major surgery, active infection) remove additional patients. Cited: NCT01061736, NCT00810836, NCT01194414, NCT01416493, NCT00563849.",
+                "label": "Eligibility pass rate",
+                "unit": "fraction of marker-positive patients",
+                "value": 0.35
+              },
+              {
+                "basis": "1 / (biomarker prevalence × eligibility pass rate) — where low prevalence lands as cost rather than time.",
+                "label": "Patients screened per enrollee",
+                "unit": "screens",
+                "value": 5
+              }
+            ],
+            "summary": "Modelled at 470 months to enrol 340 patients across 85 sites — recruitability 0.00 of 1."
+          },
+          "durationMs": 6910,
+          "handoff": {
+            "adapter": "managed/trial-recruitment-forecaster/economics-bridge.ts",
+            "payloadSummary": "simulatedMonthsToEnroll=470, range=[96, 1211], score=0.00. Nothing else crosses — the NCT ids and eligibility drivers stay behind.",
+            "toNode": "adapter-b (economics-bridge)"
+          },
+          "inputs": {
+            "digest": "sha256:2bc902e9c01ca062",
+            "humanSummary": "IRAK4 inhibition (small_molecule) inhibiting IRAK4 in rheumatoid arthritis; enrolling seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate, assumed present in 60% of patients.",
+            "source": "station 2's thesis (managed/pipeline-observatory/fixtures/thesis-irak4-ra.json)"
+          },
+          "node": "trial-recruitment-forecaster",
+          "startedAt": "2026-08-16T03:28:57.115Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "assessRecruitability() in managed/trial-recruitment-forecaster/recruitability.ts"
+          }
+        },
+        {
+          "caveats": [
+            "Two obvious-looking wirings are refused on purpose (documented in economics-bridge.ts): a recruitability score is NOT a probability of approval, and stage durations do NOT move the launch year.",
+            "This adapter produces an INSTRUCTION, not an applied change: station 7 below is the untouched baseline, and the delay is priced by multiplying the engine's own per-year delay cost."
+          ],
+          "dataSources": [
+            {
+              "id": "SYNTHETIC-IRAK4-RA-001",
+              "kind": "synthetic",
+              "role": "The programme the delay is priced against — fictitious by construction"
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "Every field this adapter emits is named `simulated…`, because its only input is a simulated month count.",
+                "label": "SIMULATED",
+                "scope": "launch delay, its range, and the priced delay cost"
+              },
+              {
+                "detail": "managed/therapeutic-program-economics/fixtures/demo_program.json (seed 42, 200 simulations)",
+                "label": "SYNTHETIC",
+                "scope": "the dollar figures — priced against a fictitious programme"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "max(0, round((simulatedMonthsToEnroll 470 - plannedMonths 18) / 12)); whole years because engine rounds sampled delays to whole years.",
+                "label": "Simulated launch delay",
+                "unit": "whole years",
+                "value": 38
+              },
+              {
+                "basis": "The same delay BEFORE whole-year rounding. Above zero while the rounded figure is zero means the delay was rounded away — a convention, not a finding that the delay is free.",
+                "label": "Launch delay before rounding",
+                "unit": "years",
+                "value": 37.666666666666664
+              },
+              {
+                "basis": "Same transform applied to simulatedMonthsRange [96, 1211] (interquartile velocity band) for low/high, point estimate as mode; ordered low\u003c=mode\u003c=high as TriangularRange requires.",
+                "label": "Delay range (low / mode / high)",
+                "unit": "whole years",
+                "value": "7 / 38 / 99"
+              }
+            ],
+            "summary": "A 38-year launch delay is the only thing this adapter passes to the economics engine — the recruitment score itself is deliberately NOT passed on."
+          },
+          "durationMs": 437,
+          "handoff": {
+            "adapter": "an analyst applies the overlay; no code re-runs the engine with it",
+            "payloadSummary": "Probabilistic: set SimulationAssumptions.launch_delay_years = {low: 7, mode: 38, high: 99}. Deterministic: add 38 to the program's initial_indication.launch_year (convention to confirm with Vince).",
+            "toNode": "therapeutic-program-economics"
+          },
+          "inputs": {
+            "digest": "sha256:c1a20af714d31346",
+            "humanSummary": "Only the timing fields from station 5: 470 months against a planned 18-month window.",
+            "source": "managed/pipeline-observatory/fixtures/recruitability-H-g1.json"
+          },
+          "node": "adapter-b (economics-bridge)",
+          "startedAt": "2026-08-16T03:29:04.025Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "bun managed/trial-recruitment-forecaster/economics-bridge.ts --from-json \u003csaved> --planned-months 18"
+          }
+        },
+        {
+          "caveats": [
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.patent' is unsupported.",
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.development' is unsupported.",
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.syn-ra-mtx-ir.population' is unsupported.",
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.syn-ra-mtx-ir.access' is unsupported.",
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.syn-ra-mtx-ir.commercial' is unsupported.",
+            "UNSUPPORTED_CASHFLOW_INPUT: Critical cash-flow evidence group 'cashflow.syn-indication-b.population' is unsupported.",
+            "…and 52 more ERROR-severity warnings in the engine's own output (63 warnings in total).",
+            "Every figure here is priced on invented inputs. The purpose of running it is to show the chain reaching money at all, and to expose the per-year delay cost that station 6's delay multiplies."
+          ],
+          "dataSources": [
+            {
+              "id": "syn-ra-class-jaki-primary",
+              "kind": "price_observation",
+              "role": "SYNTHETIC oral JAK-inhibitor class comparator (primary match): 148,000 USD on a LIST basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "syn-ra-class-jaki-net-anchor",
+              "kind": "price_observation",
+              "role": "SYNTHETIC oral JAK-inhibitor class, modelled-net scenario: 115,000 USD on a ESTIMATED_NET basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "syn-ra-class-il6-net",
+              "kind": "price_observation",
+              "role": "SYNTHETIC IL-6 pathway biologic class, modelled-net scenario: 48,000 USD on a ESTIMATED_NET basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "syn-ra-class-antitnf",
+              "kind": "price_observation",
+              "role": "SYNTHETIC anti-TNF biologic class comparator: 121,500 USD on a PUBLIC_REIMBURSEMENT basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "syn-ra-class-context",
+              "kind": "price_observation",
+              "role": "SYNTHETIC RA context comparator (non-matching line of therapy): 76,000 USD on a ESTIMATED_NET basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "syn-ra-class-excluded",
+              "kind": "price_observation",
+              "role": "SYNTHETIC excluded comparator (kept so the exclusion stays visible): 92,000 USD on a LIST basis — SYNTHETIC, inherited from the demo catalogue"
+            },
+            {
+              "id": "SYNTHETIC-IRAK4-RA-001",
+              "kind": "synthetic",
+              "role": "The programme being valued. 49 of 49 evidence references are stamped SYNTHETIC by the engine itself."
+            }
+          ],
+          "decision": {
+            "honestyLabels": [
+              {
+                "detail": "The engine stamped this run NOT_DECISION_GRADE; its recommendation field reads NOT_DECISION_GRADE. That verdict is the engine's, not the glassbox's.",
+                "label": "NOT_DECISION_GRADE",
+                "scope": "every dollar figure in this panel"
+              },
+              {
+                "detail": "49 of 49 evidence references are graded SYNTHETIC. The programme, its population and its prices are fictitious; only their LABELS were changed to the IRAK4/RA subject.",
+                "label": "SYNTHETIC",
+                "scope": "the programme, its prices and its population"
+              },
+              {
+                "detail": "Percentiles come from a declared scenario model at a fixed seed. Same seed, same numbers; different assumptions, different numbers.",
+                "label": "SIMULATED",
+                "scope": "P10 / P50 / P90 and the delay cost"
+              }
+            ],
+            "keyNumbers": [
+              {
+                "basis": "Median risk-adjusted NPV across 200 draws. Engine 0.4.0, run run_fc484c5b5f4cf836bd17, digest sha256:fc484c5b5f4cf836bd175f1b658fe4ff73ae2d0be75e76c9b9cc47e7241ccb0e, seed 42 — reproducible by re-running the command.",
+                "label": "Median rNPV (P50)",
+                "unit": "USD",
+                "value": -23480448.09457437
+              },
+              {
+                "basis": "10th and 90th percentile of the same draws — percentiles of a declared scenario model, NOT confidence intervals.",
+                "label": "rNPV range (P10 / P90)",
+                "unit": "USD",
+                "value": "-88,048,653 / -7,793,149"
+              },
+              {
+                "basis": "The engine's own price of a one-year slip in launch — the rate station 6's delay multiplies.",
+                "label": "Value lost per year of launch delay",
+                "unit": "USD per year",
+                "value": 4783207.173016295
+              },
+              {
+                "basis": "Patent term from filing under the engine's simplified clock, after launch.",
+                "label": "Effective protected years",
+                "unit": "years",
+                "value": 14.5
+              },
+              {
+                "basis": "38 delay years (station 6) × 4,783,207 USD/yr (this engine). Arithmetic done here, on two numbers that are each already labelled — the engine was NOT re-run with the delay applied.",
+                "label": "Simulated cost of the recruitment delay",
+                "unit": "USD",
+                "value": 181761873
+              }
+            ],
+            "summary": "On fictitious inputs the programme's median simulated value is -23,480,448 USD, and the engine refuses to call the result decision-grade."
+          },
+          "durationMs": 178,
+          "handoff": null,
+          "inputs": {
+            "digest": "sha256:fc484c5b5f4cf836bd175f1b658fe4ff73ae2d0be75e76c9b9cc47e7241ccb0e",
+            "humanSummary": "A SYNTHETIC IRAK4/RA programme and a SYNTHETIC RA comparables catalogue. Identity fields were relabelled for subject coherence; every NUMBER is inherited verbatim from the economics node's own fictitious demo fixture.",
+            "source": "managed/pipeline-observatory/fixtures/irak4-ra.SYNTHETIC.program.json + managed/pipeline-observatory/fixtures/irak4-ra.SYNTHETIC.comparables.json"
+          },
+          "node": "therapeutic-program-economics",
+          "startedAt": "2026-08-16T03:29:04.466Z",
+          "status": "ok",
+          "version": {
+            "commit": "073fec7",
+            "dirty": true,
+            "runner": "uv run labrador analyze \u003cprogram> --comparables \u003ccomparables> --simulations 200 --seed 42 --compact"
+          }
+        }
+      ],
+      "generatedAt": "2026-08-16T03:29:04.644Z",
+      "run": {
+        "graph": "managed/research-evidence-mapper/runs/g_1a4f.json",
+        "hypothesis": "H-g1",
+        "plannedMonths": "18",
+        "profile": "default",
+        "seed": "42",
+        "simulations": "200",
+        "subject": "IRAK4 inhibitor in rheumatoid arthritis"
+      },
+      "traceVersion": "1.0",
+      "verdict": {
+        "ancestry": [
+          {
+            "node": "hypothesis-generator (hyp_gen)",
+            "status": "ok",
+            "summary": "The generator read graph g_1a4f (\"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\") and shortlisted 5 hypotheses without a single model call."
+          },
+          {
+            "node": "adapter-d (thesis-bridge)",
+            "status": "ok",
+            "summary": "The slate hypothesis is now a valid IndicationThesis: IRAK4 inhibition inhibiting IRAK4 in rheumatoid arthritis, carrying 6 sourced evidence rows and 7 analyst assumptions."
+          },
+          {
+            "node": "adapter-a (evidence-bridge)",
+            "status": "ok",
+            "summary": "The graph supports 11 actionable evidence rows in total; 6 of them sit on this thesis."
+          },
+          {
+            "node": "adapter-c (dossier-bridge)",
+            "status": "ok",
+            "summary": "3 tractability evidence rows exist and NONE of them is about IRAK4 — both committed dossiers measure a different protein, so this station enriches nothing and says so."
+          },
+          {
+            "node": "trial-recruitment-forecaster",
+            "status": "ok",
+            "summary": "Modelled at 470 months to enrol 340 patients across 85 sites — recruitability 0.00 of 1."
+          },
+          {
+            "node": "adapter-b (economics-bridge)",
+            "status": "ok",
+            "summary": "A 38-year launch delay is the only thing this adapter passes to the economics engine — the recruitment score itself is deliberately NOT passed on."
+          },
+          {
+            "node": "therapeutic-program-economics",
+            "status": "ok",
+            "summary": "On fictitious inputs the programme's median simulated value is -23,480,448 USD, and the engine refuses to call the result decision-grade."
+          }
+        ],
+        "headline": "All 7 stations ran: a real evidence graph became a hypothesis, the hypothesis became a validated IndicationThesis, the thesis was scored for recruitability against real ClinicalTrials.gov precedent, and the recruitment delay was priced. AND ONE STATION HIT ITS OWN MODEL LIMIT: the recruitment forecast fired its crowding alarm, so its month count is a failure signal about the design, not a schedule — the panel says why, and no constant was tuned to hide it. WHAT IS NOT REAL HERE, station by station: the thesis's population and endpoint are ASSUMED by an analyst frame (a literature graph has no epidemiology); the tractability station is SUBJECT-MISMATCHED — both committed dossiers measure JAK1 and TNF, not IRAK4, so its rows are quarantined and enrich nothing; the economics station is SYNTHETIC and the engine stamps its own run NOT_DECISION_GRADE. Labels present in this chain: ASSUMED, NOT_DECISION_GRADE, SIMULATED, SUBJECT_MISMATCH, SYNTHETIC. Last number: Median rNPV (P50) = -23,480,448 USD.",
+        "honestyLabels": [
+          {
+            "detail": "Support/novelty/testability are the generator's own scores over graph structure, not measurements of the world.",
+            "label": "SIMULATED",
+            "scope": "the ranking scores on every hypothesis"
+          },
+          {
+            "detail": "ASSUMED. The trial population an IRAK4-inhibitor RA program would realistically enrol, mirroring the entry criteria of the RA JAK-inhibitor and biologic trials this class competes with (seropositive, inadequate response to methotrexate). The graph contains no epidemiology of any kind — no prevalence, no assay availability — so all three fields are analyst decisions.",
+            "label": "ASSUMED",
+            "scope": "biomarkerPopulation = seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate @ prevalence 0.6, assay true"
+          },
+          {
+            "detail": "ASSUMED. The graph states no endpoint and no effect size. ACR20 at week 12 is the conventional registrational primary endpoint for RA trials, which makes it the honest choice for a forecast that will be compared against RA precedent trials.",
+            "label": "ASSUMED",
+            "scope": "endpoint = ACR20 response at week 12 (binary, d=0.35)"
+          },
+          {
+            "detail": "ASSUMED. REQUIRED for this slate: g_1a4f contains no `disease` entity at all (its 5 things are 2 small_molecule and 3 process nodes), so every hypothesis's object_name is a process, not an indication. Without this override the bridge would put 'MyD88 dimerization inhibition' in disease.name. The disease is named in the graph's own question string, which the bridge echoes verbatim in provenance.diseaseBasis so a reader can check the substitution. Slate question, verbatim: \"can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?\". object_name the override replaced: \"MyD88 dimerization inhibition\" (thing kind: small_molecule).",
+            "label": "ASSUMED",
+            "scope": "disease.name = rheumatoid arthritis"
+          },
+          {
+            "detail": "NO protein/gene node exists on this path (graph carries none), so the frame's targetSymbolOverride was used: ASSUMED-but-checkable. REQUIRED for this slate: g_1a4f carries no protein or gene entity (Rafal hit the same wall in graph-intake — COORDINATION §3), so no interior path node can supply a target symbol. IRAK4 is named inside the thing's own name ('IRAK4 inhibition', t1) and its aliases, so this is reading the graph's string rather than importing outside knowledge — but it is still the analyst asserting it, not the graph typing it.",
+            "label": "ASSUMED",
+            "scope": "target.symbol = IRAK4"
+          },
+          {
+            "detail": "ASSUMED-but-checkable. Q9NWZ3 is the human IRAK4 accession in UniProt. Supplied because thesis.ts §6 item 2 makes it the tractability node's join key and the graph has no accession on any thing.",
+            "label": "ASSUMED",
+            "scope": "target.uniprotAccession = Q9NWZ3"
+          },
+          {
+            "detail": "frame override (ASSUMED. The slate's path verb for this hypothesis is `suppresses`, which is NOT in the mapper's closed `how` enum (SCHEMA.md: inhibits|activates|binds|increases|decreases|drives|associated_with), so the bridge maps it to `modulate` rather than guessing. The analyst states `inhibit` because the asset IS an IRAK4 inhibitor. Delete this field to see the bridge's own conservative mapping instead.); the graph verb is \"suppresses\", which maps to \"modulate\"",
+            "label": "ASSUMED",
+            "scope": "target.direction = inhibit"
+          },
+          {
+            "detail": "the graph has no tissue field; this is the analyst's reading of where the findings were measured",
+            "label": "ASSUMED",
+            "scope": "tissue = synovium"
+          },
+          {
+            "detail": "Strength is not a measurement: clamp01(STUDY_QUALITY[study_type] * (is_preprint ? 0.8 : 1)); table mirrors assemble.py:199",
+            "label": "ASSUMED",
+            "scope": "the strength score on every evidence row"
+          },
+          {
+            "detail": "NONE of the available dossiers is the thesis target. SUBJECT MISMATCH: this dossier measures JAK1 (P23458), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target. SUBJECT MISMATCH: this dossier measures TNF (P01375), NOT the thesis target IRAK4 (Q9NWZ3). The rows below are about a DIFFERENT protein and are evidence about the tractability pipeline, not about this thesis's target. These 3 rows are therefore QUARANTINED: reported here, and NOT merged into the thesis that station 5 scores. Making this station real needs one thing — an IRAK4 (Q9NWZ3) dossier from the tractability node.",
+            "label": "SUBJECT_MISMATCH",
+            "scope": "every tractability row in this run"
+          },
+          {
+            "detail": "Computed-axis rows are pocket geometry from fpocket, capped at 0.5 strength and fixed at 0.25, because the tractability node stamps its own druggability `load_bearing: false` and has RETRACTED the calibration that used to interpret pocket volume.",
+            "label": "SIMULATED",
+            "scope": "any row with sourceType simulation"
+          },
+          {
+            "detail": "The field is literally named `simulatedMonthsToEnroll` in recruitability.ts — a model output, not an observed enrolment.",
+            "label": "SIMULATED",
+            "scope": "months to enrol, range, score and everything derived from them"
+          },
+          {
+            "detail": "The eligibility pass rate is Claude's judgement after reading real inclusion/exclusion prose (median of 3 samples). A calibrated estimate, not a measurement.",
+            "label": "ASSUMED",
+            "scope": "eligibility pass rate and the drivers list"
+          },
+          {
+            "detail": "The biomarker prevalence this forecast divides by is the analyst frame's assumed 0.6, not an epidemiological measurement (station 2's ASSUMED labels).",
+            "label": "ASSUMED",
+            "scope": "screening burden and therefore the month count itself"
+          },
+          {
+            "detail": "Every field this adapter emits is named `simulated…`, because its only input is a simulated month count.",
+            "label": "SIMULATED",
+            "scope": "launch delay, its range, and the priced delay cost"
+          },
+          {
+            "detail": "managed/therapeutic-program-economics/fixtures/demo_program.json (seed 42, 200 simulations)",
+            "label": "SYNTHETIC",
+            "scope": "the dollar figures — priced against a fictitious programme"
+          },
+          {
+            "detail": "The engine stamped this run NOT_DECISION_GRADE; its recommendation field reads NOT_DECISION_GRADE. That verdict is the engine's, not the glassbox's.",
+            "label": "NOT_DECISION_GRADE",
+            "scope": "every dollar figure in this panel"
+          },
+          {
+            "detail": "49 of 49 evidence references are graded SYNTHETIC. The programme, its population and its prices are fictitious; only their LABELS were changed to the IRAK4/RA subject.",
+            "label": "SYNTHETIC",
+            "scope": "the programme, its prices and its population"
+          },
+          {
+            "detail": "Percentiles come from a declared scenario model at a fixed seed. Same seed, same numbers; different assumptions, different numbers.",
+            "label": "SIMULATED",
+            "scope": "P10 / P50 / P90 and the delay cost"
+          }
+        ],
+        "status": "complete"
+      }
+    }
+    </script>
+    <!-- TRACE-JSON:END -->
+
+    <!--
+      HEADER. Identifies which run this is: the fixture, the seed, the commit.
+      A skeptic's first question is "which run am I looking at, and can I get
+      this same one back?" — so it is answered before anything else.
+    -->
+    <header>
+      <div class="kicker">LABrador · workflow observability layer</div>
+      <h1>The Glassbox — Pipeline Observatory</h1>
+      <p class="lede">
+        One run of the drug-discovery pipeline, opened up. For each step:
+        <strong>what data went in</strong>
+        (with identifiers you can look up yourself),
+        <strong>what number came out and why</strong>,
+        <strong>what was handed to the next step</strong>, and
+        <strong>which parts are simulated rather than observed</strong>. This
+        page explains a single run. It does not compare runs and it does not
+        recommend anything.
+      </p>
+      <dl class="runmeta" id="runmeta"></dl>
+    </header>
+
+    <main>
+      <!-- READ THIS FIRST: the end statement, up top, before the detail. -->
+      <div class="verdict-top">
+        <h2>Read this first</h2>
+        <p id="verdict-headline"></p>
+      </div>
+
+      <!-- The chain, in one glance: who ran, in what order, feeding whom. -->
+      <div class="rail" id="rail"></div>
+
+      <!-- One panel per node, rendered from the trace. -->
+      <div id="nodes"></div>
+
+      <!-- The terminal verdict and the full ancestry behind it. -->
+      <div class="terminal" id="terminal"></div>
+
+      <footer>
+        <p>
+          Regenerate this page and its underlying artifact with
+          <code>bun managed/pipeline-observatory/trace-demo.ts</code>. The saved
+          trace is <code>fixtures/trace-demo-output.json</code>; the raw
+          recruitment result it was built from is
+          <code>fixtures/recruitability-&lt;fixture&gt;.json</code>. The design
+          and the per-node instrumentation gaps are in
+          <code>DESIGN.md</code>.
+        </p>
+        <p>
+          Honesty rule: this page never upgrades a number's status. Every flag
+          shown here was emitted by the node that produced the number.
+        </p>
+      </footer>
+    </main>
+
+    <script>
+    "use strict";
+    // =====================================================================
+    // RENDERER. Reads the embedded trace and builds the page.
+    //
+    // Every value is inserted with textContent, never innerHTML. Some of the
+    // strings in a trace are written by a language model; treating them as
+    // text and not as markup is a safety property, and it also guarantees
+    // the page shows the basis string exactly as the node emitted it.
+    // =====================================================================
+
+    /** Make an element with optional class and text, in one call. */
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) {
+        node.className = className;
+      }
+      if (text !== undefined && text !== null) {
+        node.textContent = String(text);
+      }
+      return node;
+    }
+
+    /**
+     * Where a reader can go to check an identifier for themselves.
+     * Returns null when no public record exists — which is itself a finding,
+     * and is shown as a NO PUBLIC RECORD marker rather than being hidden.
+     */
+    const NCT_RE = /NCT\d{8}/;
+    const DOI_RE = /10\.\d{4,9}\/\S+/;
+    const PDB_RE = /[0-9][A-Za-z0-9]{3}/;
+    function externalUrl(kind, id) {
+      if (kind === "nct") {
+        const m = NCT_RE.exec(id);
+        return m ? `https://clinicaltrials.gov/study/${m[0]}` : null;
+      }
+      if (kind === "doi") {
+        const m = DOI_RE.exec(id);
+        return m ? `https://doi.org/${m[0]}` : null;
+      }
+      if (kind === "structure") {
+        const m = PDB_RE.exec(id);
+        return m ? `https://www.rcsb.org/structure/${m[0]}` : null;
+      }
+      // price_observation and synthetic ids are internal to a fixture. There
+      // is nothing to click, and pretending otherwise would be the exact
+      // dishonesty this page exists to prevent.
+      return null;
+    }
+
+    /** Human labels for the identifier kinds. */
+    const KIND_LABEL = {
+      doi: "Published papers (DOI)",
+      nct: "Clinical trial registry records (ClinicalTrials.gov)",
+      price_observation: "Price observations",
+      structure: "Protein structures (PDB)",
+      synthetic: "Made-up inputs (synthetic fixtures)",
+    };
+
+    /** Numbers are shown as the node emitted them, only thousand-separated. */
+    function showValue(value, unit) {
+      let text;
+      if (typeof value === "number") {
+        text =
+          Math.abs(value) >= 1000
+            ? value.toLocaleString("en-US", { maximumFractionDigits: 0 })
+            : String(Math.round(value * 10_000) / 10_000);
+      } else {
+        text = String(value);
+      }
+      return unit ? `${text} ${unit}` : text;
+    }
+
+    // --- SECTION: "WHAT WENT IN" ----------------------------------------
+    function inputsBlock(env) {
+      const s = el("section", "block");
+      s.append(el("h3", null, "What went in"));
+      s.append(el("p", "plain", env.inputs.humanSummary));
+      s.append(el("p", "muted", `Source: ${env.inputs.source}`));
+      s.append(
+        el(
+          "p",
+          "muted",
+          "Input fingerprint: " +
+            env.inputs.digest +
+            " — re-run with the same inputs and this string is identical."
+        )
+      );
+      return s;
+    }
+
+    // --- SECTION: "DATA USED" -------------------------------------------
+    function sourcesBlock(env) {
+      const s = el("section", "block");
+      s.append(el("h3", null, "Data used — go and check it"));
+      if (env.dataSources.length === 0) {
+        s.append(el("p", "muted", "No data sources recorded for this step."));
+        return s;
+      }
+      // Group by kind so "real registry record" and "made-up fixture" can
+      // never sit in the same undifferentiated list.
+      const byKind = new Map();
+      for (const src of env.dataSources) {
+        if (!byKind.has(src.kind)) {
+          byKind.set(src.kind, []);
+        }
+        byKind.get(src.kind).push(src);
+      }
+      for (const [kind, rows] of byKind) {
+        const group = el("div", "srcgroup");
+        group.append(
+          el("h4", null, `${KIND_LABEL[kind] || kind} (${rows.length})`)
+        );
+        const list = el("ul", "ids");
+        for (const row of rows) {
+          const li = el("li");
+          const url = externalUrl(kind, row.id);
+          if (url) {
+            const a = el("a", "id-link", row.id);
+            a.href = url;
+            a.rel = "noreferrer";
+            a.target = "_blank";
+            li.append(a);
+          } else {
+            li.append(el("span", "id-dead", row.id));
+            li.append(el("span", "nocheck", "no public record"));
+          }
+          li.append(el("span", "id-role", row.role));
+          list.append(li);
+        }
+        group.append(list);
+        s.append(group);
+      }
+      return s;
+    }
+
+    // --- SECTION: "DECISION + WHY" --------------------------------------
+    function decisionBlock(env) {
+      const s = el("section", "block");
+      s.append(el("h3", null, "Decision and why"));
+      s.append(el("p", "plain", env.decision.summary));
+      for (const num of env.decision.keyNumbers) {
+        const box = el("div", "num");
+        box.append(el("div", "l", num.label));
+        box.append(el("div", "v", showValue(num.value, num.unit)));
+        box.append(el("div", "b", num.basis));
+        s.append(box);
+      }
+      return s;
+    }
+
+    // --- SECTION: "HONESTY FLAGS" — the point of the whole page ---------
+    function flagsBlock(env) {
+      const s = el("section", "block");
+      const box = el("div", "flags");
+      box.append(el("h3", null, "Honesty flags — what is NOT observed fact"));
+      if (env.decision.honestyLabels.length === 0) {
+        box.append(
+          el(
+            "div",
+            "flag",
+            "This node emitted no honesty labels. That is itself worth questioning."
+          )
+        );
+      }
+      for (const flag of env.decision.honestyLabels) {
+        const row = el("div", "flag");
+        row.append(el("span", "tag", flag.label));
+        const txt = el("div", "txt");
+        txt.append(el("div", "scope", `Applies to: ${flag.scope}`));
+        txt.append(el("div", "detail", flag.detail));
+        row.append(txt);
+        box.append(row);
+      }
+      s.append(box);
+      return s;
+    }
+
+    // --- SECTION: "WHAT WAS PASSED ON" ----------------------------------
+    function handoffBlock(env) {
+      const s = el("section", "block");
+      s.append(el("h3", null, "What was passed on"));
+      const box = el("div", "handoff");
+      if (env.handoff) {
+        box.append(el("div", "to", `Next step: ${env.handoff.toNode}`));
+        box.append(el("p", "plain", env.handoff.payloadSummary));
+        box.append(el("p", "muted", `Translated by: ${env.handoff.adapter}`));
+      } else {
+        box.append(el("div", "to", "Terminal step"));
+        box.append(
+          el(
+            "p",
+            "plain",
+            "Nothing was handed on. This is where the chain ends."
+          )
+        );
+      }
+      s.append(box);
+      return s;
+    }
+
+    // --- SECTION: "CAVEATS" ---------------------------------------------
+    function caveatsBlock(env) {
+      const s = el("section", "block");
+      s.append(el("h3", null, "Known limits carried forward"));
+      const list = el("ul", "caveats");
+      for (const caveat of env.caveats) {
+        list.append(el("li", null, caveat));
+      }
+      s.append(list);
+      return s;
+    }
+
+    // --- One whole node panel -------------------------------------------
+    function nodePanel(env, index) {
+      const panel = el("article", "node");
+      const head = el("div", "node-head");
+      head.append(el("span", "idx", String(index + 1)));
+      head.append(el("span", "name", env.node));
+      head.append(
+        el("span", `pill${env.status === "ok" ? "" : " bad"}`, env.status)
+      );
+      const meta = el(
+        "span",
+        "meta",
+        (env.durationMs / 1000).toFixed(1) +
+          "s · commit " +
+          env.version.commit +
+          (env.version.dirty ? " (uncommitted edits present)" : "")
+      );
+      head.append(meta);
+      panel.append(head);
+      panel.append(el("p", "muted plain-pad"), inputsBlock(env));
+      panel.lastElementChild.prepend();
+      panel.append(sourcesBlock(env));
+      panel.append(decisionBlock(env));
+      panel.append(flagsBlock(env));
+      panel.append(handoffBlock(env));
+      panel.append(caveatsBlock(env));
+      // The exact command that produced this panel's numbers, so a reader
+      // can re-run the single step rather than trusting the whole chain.
+      const run = el("section", "block");
+      run.append(el("h3", null, "How this step was run"));
+      run.append(el("p", "muted", env.version.runner));
+      run.append(el("p", "muted", `Started at ${env.startedAt}`));
+      panel.append(run);
+      return panel;
+    }
+
+    // --- The chain rail --------------------------------------------------
+    function renderRail(trace, mount) {
+      trace.envelopes.forEach((env, i) => {
+        const box = el("div", "rail-node");
+        box.append(el("div", "kicker", `Step ${i + 1}`));
+        box.append(el("div", "n", env.node));
+        box.append(
+          el(
+            "div",
+            "muted",
+            env.handoff
+              ? `hands on: ${env.handoff.toNode}`
+              : "terminal — nothing handed on"
+          )
+        );
+        mount.append(box);
+        if (i < trace.envelopes.length - 1) {
+          mount.append(el("div", "rail-arrow", "→"));
+        }
+      });
+    }
+
+    // --- Run metadata strip ----------------------------------------------
+    function renderRunMeta(trace, mount) {
+      const [first] = trace.envelopes;
+      const rows = [
+        ["Thesis fixture", trace.run.fixtureId],
+        ["Generated", trace.generatedAt],
+        ["Commit", first ? first.version.commit : "unknown"],
+        [
+          "Economics seed",
+          `${trace.run.seed} / ${trace.run.simulations} draws`,
+        ],
+        ["Planned enrolment window", `${trace.run.plannedMonths} months`],
+        ["Chain status", trace.verdict.status],
+      ];
+      for (const [label, value] of rows) {
+        const cell = el("div");
+        cell.append(el("dt", null, label));
+        cell.append(el("dd", null, value));
+        mount.append(cell);
+      }
+    }
+
+    // --- Terminal verdict + ancestry -------------------------------------
+    function renderTerminal(trace, mount) {
+      mount.append(el("h2", null, "The end verdict, and everything behind it"));
+      const body = el("section", "block");
+      body.append(el("p", "plain", trace.verdict.headline));
+      body.append(
+        el(
+          "p",
+          "muted",
+          "Ancestry, oldest first. Each line is the step's own one-sentence summary; nothing here is a re-interpretation."
+        )
+      );
+      const list = el("ol", "ancestry");
+      for (const step of trace.verdict.ancestry) {
+        const li = el("li");
+        li.append(el("div", "who", `${step.node} — ${step.status}`));
+        li.append(el("div", null, step.summary));
+        list.append(li);
+      }
+      body.append(list);
+      mount.append(body);
+
+      // Every honesty label in the chain, collected in one place, so the
+      // final number can never be quoted without the flags that qualify it.
+      const flags = el("section", "block");
+      const box = el("div", "flags");
+      box.append(
+        el("h3", null, "Every honesty flag in this chain, in one place")
+      );
+      for (const flag of trace.verdict.honestyLabels) {
+        const row = el("div", "flag");
+        row.append(el("span", "tag", flag.label));
+        const txt = el("div", "txt");
+        txt.append(el("div", "scope", `Applies to: ${flag.scope}`));
+        txt.append(el("div", "detail", flag.detail));
+        row.append(txt);
+        box.append(row);
+      }
+      flags.append(box);
+      mount.append(flags);
+    }
+
+    // --- Boot -------------------------------------------------------------
+    (function main() {
+      const raw = document.getElementById("trace-data").textContent;
+      let trace;
+      try {
+        trace = JSON.parse(raw);
+      } catch {
+        trace = null;
+      }
+      if (!trace?.envelopes || trace.envelopes.length === 0) {
+        // An empty page is better than an invented one.
+        const warn = el("div", "fallback");
+        warn.append(
+          el(
+            "p",
+            null,
+            "No trace is embedded in this page yet. Run: bun managed/pipeline-observatory/trace-demo.ts"
+          )
+        );
+        document.querySelector("main").prepend(warn);
+        return;
+      }
+      renderRunMeta(trace, document.getElementById("runmeta"));
+      document.getElementById("verdict-headline").textContent =
+        trace.verdict.headline;
+      renderRail(trace, document.getElementById("rail"));
+      const nodes = document.getElementById("nodes");
+      trace.envelopes.forEach((env, i) => {
+        nodes.append(nodePanel(env, i));
+      });
+      renderTerminal(trace, document.getElementById("terminal"));
+    })();
+    </script>
+  </body>
+</html>

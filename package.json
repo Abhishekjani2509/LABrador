@@ -23,6 +23,8 @@
     "hyp-gen:setup": "cd managed/hypothesis-generator && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'",
     "hyp-gen:smoke": "bun managed/hypothesis-generator/fixtures/smoke.ts",
     "hyp-gen:test": "cd managed/hypothesis-generator && .venv/bin/python -m pytest -q",
+    "pipeline": "bun managed/pipeline-observatory/pipeline.ts",
+    "pipeline:health": "bun scripts/pipeline-health.ts",
     "typecheck": "tsc --noEmit"
   },
   "type": "module",

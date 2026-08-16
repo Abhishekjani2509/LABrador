@@ -54,14 +54,14 @@
     "uncertainty": "1 − scores.support (0.423)"
   },
   "provenance": {
-    "frame": "managed/trial-recruitment-forecaster/fixtures/irak4-ra.frame.json",
+    "frame": "/Users/abhishekjani/Hacks/reagent/claude-agent-starter/.claude/worktrees/agent-abdf3a75681570460/managed/trial-recruitment-forecaster/fixtures/irak4-ra.frame.json",
     "generatedAt": "2026-08-15T17:30:00Z",
     "graphId": "g_1a4f",
     "hypothesisId": "H-g1",
     "motif": "gap_closure",
     "question": "can a small-molecule IRAK4 inhibitor suppress synovial fibroblast-driven inflammation in rheumatoid arthritis, or is its effect confined to the myeloid compartment?",
     "round": 2,
-    "slate": "managed/pipeline-observatory/fixtures/hypgen-irak4-ra.slate.json",
+    "slate": "/Users/abhishekjani/Hacks/reagent/claude-agent-starter/.claude/worktrees/agent-abdf3a75681570460/managed/pipeline-observatory/fixtures/hypgen-irak4-ra.slate.json",
     "slateCaveats": [
       "The search is a sample, not the literature: 6 of 49 results were read. Absence of a link is weak evidence of absence.",
       "This chain traverses at least one link against its stated direction. Do not assert the reverse relation as established.",
