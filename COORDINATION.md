@@ -769,3 +769,5 @@ key, no network, 7/7 PASS) and runs in CI on every push to main.
 - **2026-08-16 04:00 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fix the round-local id collision that was destroying stored evidence — typecheck+check green.
 
 - **2026-08-16 04:05 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: add a derived `delta` block; keep the reply a full graph — typecheck+check green.
+
+- **2026-08-16 04:09 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: commit a typed reference graph, delete the misleading one — typecheck+check green.
