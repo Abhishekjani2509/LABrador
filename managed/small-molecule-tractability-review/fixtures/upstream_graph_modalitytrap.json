@@ -1,0 +1,118 @@
+{
+  "_fixture": true,
+  "_fixture_note": "SYNTHETIC FIXTURE, HAND-WRITTEN. Not a real graph. Every quote, paper, author, journal and DOI below is invented and no row here may ever be cited. What is real is the SHAPE of the error: two review papers were found asserting that obefazimod (ABX464) is 'a prototype of TL1A'. That is false — obefazimod is a miR-124 upregulator acting through RNA splicing modulation, and the real TL1A agents are antibodies. This fixture reproduces the false claim exactly as it would arrive from Stage 1: two reviews, a direct-action verb, high finding confidence, and basis 'background_only'. Never cite it.",
+  "_exercises": {
+    "modality_trap": "L1 asserts a small_molecule targets TL1A. The verb is direct-action and t1 is kind 'protein', so the edge DOES nominate — mechanically, correctly, and on evidence that cannot carry it. targets.json records TL1A as having ZERO ChEMBL targets, so ingesting this claim manufactures small-molecule precedent for a target that has none. It is the IL-17A modality trap in a new costume, arriving one stage earlier.",
+    "two_reviews_are_not_two_sources": "f1 and f2 sit in different papers, by different first authors, in different journals, two years apart, and both say yes. `state` is therefore 'agreed'. But both are is_own_result: false, so SCHEMA.md excludes them from agreement and independence — hence agreement 0.5, independence 0.0, basis 'background_only'. A run that reads 'agreed' plus two DOIs as independent corroboration has failed this fixture. That is the single named way to fail it.",
+    "confidence_is_not_basis": "f1 and f2 carry finding confidences of 0.82 and 0.79 — higher than the primary splicing finding f5 would suggest is safe to ignore. The tier comes from the LINK's basis, never the finding's own number. SKILL.md failure mode 4.",
+    "the_strong_evidence_nominates_nothing": "The graph's well-supported biology — two independent primary papers that obefazimod raises miR-124 (L2), one primary cell-free result that it modulates splicing (L3) — nominates nothing, because 'increases' is a downstream verb and RNA splicing is kind 'process'. The only thing in this graph that nominates is the error. A run that returns a target here has returned the wrong one.",
+    "antibody_precedent_is_present_but_disconnected": "t6 tulisokibart is in the graph with a primary phase III result (L4), and it is deliberately NOT linked to t1. Its subject kind is 'protein', so even if it were linked the edge would classify as biological_relation and could never nominate. This is what the dossier would actually find on TL1A: antibody precedent, no small molecules."
+  },
+
+  "schema_version": "1.1",
+  "graph_id": "g_mt1",
+  "question": "does obefazimod act through TL1A in ulcerative colitis?",
+  "round": 2,
+  "status": "ok",
+  "generated_at": "2026-08-15T18:00:00Z",
+
+  "rounds": [
+    { "n": 1, "ask": "new_question", "target": null, "depth": "standard", "papers_added": 4, "outcome": "new_evidence" },
+    { "n": 2, "ask": "expand_node", "target": "t2", "depth": "deep", "papers_added": 2, "outcome": "new_evidence" }
+  ],
+
+  "coverage": {
+    "depth": "deep",
+    "found": 318,
+    "read": 50,
+    "used": 6,
+    "truncated": true,
+    "no_quote_discarded": 3,
+    "limits": { "max_papers": 50, "max_queries": 6 },
+    "stop_reason": "max_papers"
+  },
+
+  "things": [
+    { "id": "t1", "name": "TL1A", "kind": "protein", "aliases": ["TNFSF15", "TNF ligand superfamily member 15", "VEGI"], "mentions": 11 },
+    { "id": "t2", "name": "obefazimod", "kind": "small_molecule", "aliases": ["ABX464"], "mentions": 14 },
+    { "id": "t3", "name": "miR-124", "kind": "gene", "aliases": ["MIR124", "microRNA-124"], "mentions": 8 },
+    { "id": "t4", "name": "RNA splicing", "kind": "process", "aliases": ["pre-mRNA splicing"], "mentions": 6 },
+    { "id": "t5", "name": "ulcerative colitis", "kind": "disease", "aliases": ["UC"], "mentions": 12 },
+    { "id": "t6", "name": "tulisokibart", "kind": "protein", "aliases": ["anti-TL1A monoclonal antibody"], "mentions": 5 }
+  ],
+
+  "papers": [
+    { "id": "p1", "title": "Emerging small-molecule targets in inflammatory bowel disease: a narrative review", "year": 2024, "journal": "Fixture Rev. Gastroenterol.", "doi": "10.0000/fixture.mt1", "first_author": "Okonkwo", "study_type": "review", "is_preprint": false, "retracted": false, "round": 1 },
+    { "id": "p2", "title": "Oral agents for ulcerative colitis: mechanisms and pipeline", "year": 2026, "journal": "Fixture Ther. Adv.", "doi": "10.0000/fixture.mt2", "first_author": "Vasquez", "study_type": "review", "is_preprint": false, "retracted": false, "round": 1 },
+    { "id": "p3", "title": "Splicing modulation raises miR-124 in primary human monocytes", "year": 2023, "journal": "Fixture J. Mol. Med.", "doi": "10.0000/fixture.mt3", "first_author": "Haruna", "study_type": "test_tube", "is_preprint": false, "retracted": false, "round": 1 },
+    { "id": "p4", "title": "Paired mucosal biopsies from a phase II induction study", "year": 2024, "journal": "Fixture Clin. Gastroenterol.", "doi": "10.0000/fixture.mt4", "first_author": "Lindqvist", "study_type": "clinical_trial", "is_preprint": false, "retracted": false, "round": 2 },
+    { "id": "p5", "title": "A phase III induction result in moderate-to-severe ulcerative colitis", "year": 2026, "journal": "Fixture N. Engl. J. Fixt.", "doi": "10.0000/fixture.mt5", "first_author": "Almeida", "study_type": "clinical_trial", "is_preprint": false, "retracted": false, "round": 2 },
+    { "id": "p6", "title": "Cap-binding complex engagement by an oral splicing modulator", "year": 2024, "journal": "Fixture J. Biol. Chem.", "doi": "10.0000/fixture.mt6", "first_author": "Berhane", "study_type": "test_tube", "is_preprint": false, "retracted": false, "round": 1 }
+  ],
+
+  "findings": [
+    { "id": "f1", "from": "t2", "how": "targets", "to": "t1", "says": "yes",
+      "quote": "Obefazimod (ABX464) is a prototype of TL1A, and oral agents of this class are expected to follow the antibody programmes into registrational study.",
+      "paper": "p1", "where": null, "section": "discussion",
+      "is_own_result": false, "hedged": false, "confidence": 0.82, "flags": ["background"], "round": 1 },
+
+    { "id": "f2", "from": "t2", "how": "targets", "to": "t1", "says": "yes",
+      "quote": "Among the TL1A-directed agents now in development, obefazimod represents the small-molecule prototype of this target class.",
+      "paper": "p2", "where": null, "section": "discussion",
+      "is_own_result": false, "hedged": false, "confidence": 0.79, "flags": ["background"], "round": 1 },
+
+    { "id": "f3", "from": "t2", "how": "increases", "to": "t3", "says": "yes",
+      "quote": "miR-124 transcript levels rose 4.8-fold in treated monocytes relative to vehicle.",
+      "paper": "p3", "where": "primary human monocytes, 24 h", "section": "results",
+      "is_own_result": true, "hedged": false, "confidence": 0.90, "flags": [], "round": 1 },
+
+    { "id": "f4", "from": "t2", "how": "increases", "to": "t3", "says": "yes",
+      "quote": "miR-124 was elevated in paired mucosal biopsies at week 8 in 21 of 27 responders.",
+      "paper": "p4", "where": "mucosal biopsy, week 8", "section": "results",
+      "is_own_result": true, "hedged": false, "confidence": 0.85, "flags": [], "round": 2 },
+
+    { "id": "f5", "from": "t2", "how": "modulates", "to": "t4", "says": "yes",
+      "quote": "The compound bound the cap-binding complex in a cell-free assay and shifted the splicing pattern of the long non-coding transcript.",
+      "paper": "p6", "where": "cell-free binding assay", "section": "results",
+      "is_own_result": true, "hedged": false, "confidence": 0.88, "flags": [], "round": 1 },
+
+    { "id": "f6", "from": "t6", "how": "improves", "to": "t5", "says": "yes",
+      "quote": "Clinical remission at week 12 was 26.5% with tulisokibart versus 1.5% with placebo.",
+      "paper": "p5", "where": "phase III induction, week 12", "section": "results",
+      "is_own_result": true, "hedged": false, "confidence": 0.92, "flags": [], "round": 2 }
+  ],
+
+  "links": [
+    { "id": "L1", "from": "t2", "how": "targets", "to": "t1",
+      "yes": ["f1", "f2"], "no": [], "no_effect": [], "state": "agreed", "why": null, "basis": "background_only",
+      "confidence": { "overall": 0.33, "label": "low", "evidence_quality": 0.2, "agreement": 0.5, "independence": 0.0 },
+      "changed_in_round": null },
+
+    { "id": "L2", "from": "t2", "how": "increases", "to": "t3",
+      "yes": ["f3", "f4"], "no": [], "no_effect": [], "state": "agreed", "why": null, "basis": "primary",
+      "confidence": { "overall": 0.78, "label": "high", "evidence_quality": 0.75, "agreement": 1.0, "independence": 1.0 },
+      "changed_in_round": 2 },
+
+    { "id": "L3", "from": "t2", "how": "modulates", "to": "t4",
+      "yes": ["f5"], "no": [], "no_effect": [], "state": "single_source", "why": null, "basis": "primary",
+      "confidence": { "overall": 0.55, "label": "medium", "evidence_quality": 0.6, "agreement": 0.5, "independence": 0.0 },
+      "changed_in_round": null },
+
+    { "id": "L4", "from": "t6", "how": "improves", "to": "t5",
+      "yes": ["f6"], "no": [], "no_effect": [], "state": "single_source", "why": null, "basis": "primary",
+      "confidence": { "overall": 0.62, "label": "medium", "evidence_quality": 0.85, "agreement": 0.5, "independence": 0.0 },
+      "changed_in_round": 2 }
+  ],
+
+  "gaps": [
+    { "id": "g1", "missing": ["t1", "t4"],
+      "implied_by": ["L1", "L3"],
+      "note": "no retrieved paper connects TL1A to the splicing mechanism the compound is actually shown to act through",
+      "confidence": 0.29, "searched_in_round": null },
+
+    { "id": "g2", "missing": ["t1", "t5"],
+      "implied_by": ["L1", "L4"],
+      "note": "no retrieved primary result connects TL1A to a clinical outcome for the oral agent; the connection exists only in review framing",
+      "confidence": 0.31, "searched_in_round": null }
+  ]
+}

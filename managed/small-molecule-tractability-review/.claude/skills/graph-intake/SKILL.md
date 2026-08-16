@@ -294,6 +294,54 @@ unresolved target is a correct output, and a confidently wrong one poisons every
 number downstream of it. A refused edge costs one round. A wrong one costs the
 whole dossier.
 
+## Reading the evidence floor
+
+Every nomination carries an `evidence_floor` computed from the links and gaps
+that justified it. Three tiers:
+
+| tier | means | do |
+| --- | --- | --- |
+| `actionable` | at least one nominating edge is `primary` or `mixed` | proceed |
+| `non_actionable` | every nominating edge is `background_only` or `hedged_only` | issue the `resolve_link` it names, first |
+| `gap_only` | nominated solely because a gap named it | a proposal, same standing as the 0.6 gap cap |
+
+The nomination still happens in all three cases — a review-only target may well
+be worth running. What changes is that you can see which it is.
+
+`non_actionable` is the tier that catches a modality trap. Two review papers
+asserting that a small molecule "is a prototype of" some target manufacture
+small-molecule precedent that does not exist; review-sourced means
+`is_own_result: false`, which surfaces as `background_only`. The dossier would
+eventually return `insufficient_evidence` and fail safe, but only after a full
+run, and the nomination's provenance would rest on an error nobody looked at.
+One `resolve_link` costs a round and settles it.
+
+## Calibrating before you trust a batch
+
+```bash
+python3 calibrate.py <graph.json> [...]      # or --store <dir>
+```
+
+This skill is two things wearing one coat. The parts derived from `SCHEMA.md` —
+the `kind` and `basis` enums, orphan and dangling-reference checks, findings
+dedup, drift detection — are as correct on the five-hundredth graph as the
+first. The word lists are not: the relation verbs, quote terms, assay contexts
+and symbol stop-list were hand-written against one real graph and three fixtures
+we wrote ourselves, and they cannot be complete.
+
+The design makes that safe rather than correct. An unrecognised verb goes to
+`needs_adjudication`, an unverified symbol is never nominated, a multi-symbol
+phrase stays ambiguous, a failed lookup is recorded as a failed retrieval and
+not as absence. So an under-tuned list costs **recall, not accuracy** — the
+intake refuses more and asserts less.
+
+`calibrate.py` counts that. Read `unseen_verbs` first: relation words the corpus
+used that neither list knows, each one an adjudication somebody had to resolve
+by hand. It also separates synthetic fixtures from real graphs, because a rate
+computed over fixtures we authored measures our own assumptions, and flags
+graphs with zero nominations — which look identical whether the graph names no
+target or the heuristics simply failed to reach it, and mean opposite things.
+
 ## Failure modes
 
 Longest section on purpose. The procedure above is the easy half.
