@@ -9,7 +9,7 @@ nodes, evidence, scored relationships, and the places where the literature has
 a hole in it.
 
 **Status: deployed, and its own acceptance test passes.**
-`agent_015feTqKz3Bmtec2RaWaE2sW` **v10** runs on the Claude Developer Platform
+`agent_015feTqKz3Bmtec2RaWaE2sW` **v11** runs on the Claude Developer Platform
 with three skills, a memory store and the Paperclip MCP attached. All four ask
 types have executed against it, and all six of `BUILD.md`'s blocking facts are
 verified — including the one it calls out as *"zero is a failure, not a clean
@@ -68,6 +68,8 @@ code, that is said; where it is reported rather than enforced, that is said too.
 | **Entities merge on identity, not similarity** | UniProt accession first, name second. Exact, auditable, species-safe (`Q9NWZ3` ≠ `Q8R4K2`), and a node with non-empty `ambiguity` is never a merge key. Every merge records `merged_from`. |
 | **A dead corpus never reads as "no evidence"** | A canary query runs before any real search; a missing or failing Paperclip tool returns `status: "failed"`, `stop_reason: "search_unavailable"` and an `error` prefixed `PAPERCLIP UNAVAILABLE:`. |
 | **The reply is machine-readable** | The first character is `{`, the last is `}`. No preamble, no fence — a downstream `JSON.parse` is the consumer. |
+| **Facts append, derivations recompute** | `findings/r<N>.json` holds only that round's findings. `links` and `gaps` are recomputed every round, because a link's confidence legitimately moves when new evidence arrives — appending a derived score would store one already known to be wrong. |
+| **Round ids are local, and never reach stored rows** | A round numbers its own papers `p1, p2…`; the assembler translates them. Stored findings take only the entity-coalesce remap, never the incoming round's map. |
 | **Gaps are ranked, not just counted** | Basis of both supporting links, paper-independence, a hub penalty, and a bonus when several intermediates imply the same missing pair. |
 
 Reported rather than enforced, so a shortfall is visible instead of silent:
@@ -172,6 +174,25 @@ Non-JSON input is treated as `{"ask":"new_question","target":"<the text>","depth
                   "confidence": 0.34, "searched_in_round": null } ]
 }
 ```
+
+**`delta` — what this round changed.** Derived from the graph, never stored
+separately:
+
+```jsonc
+"delta": { "round": 2, "things_added": ["t34"], "papers_added": ["p9"],
+           "findings_added": ["f40","f41"], "links_added": ["L36"],
+           "links_changed": ["L12"], "gaps_added": ["g7"], "gaps_resolved": ["g3"] }
+```
+
+The reply is still the **full graph**, deliberately: one parser, no reassembly,
+and a consumer that misses a round is not left holding a graph it cannot
+complete. `delta` just saves every consumer recomputing the same diff. It is not
+written to a separate file — a delta file is a second source of truth that can
+disagree with the graph.
+
+`links_changed` is scores **moving**, which is correct behaviour rather than
+drift: a link at 0.81 dropping to 0.44 when a contradicting paper arrives is the
+system working.
 
 `confidence.overall = 0.4·agreement + 0.4·evidence_quality + 0.2·independence`,
 computed in code and recomputable from `findings` + `papers`. **Scores are valid

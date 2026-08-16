@@ -337,6 +337,18 @@ are dead — do not create files under them.
       carry `flags`.
 - [x] **`suppresses` in the enum** and **committed session id scrubbed** — both
       were already shipped before the feedback arrived.
+- [x] **`delta` block added to the reply** — round, things/papers/findings/links
+      added, links changed, gaps added and resolved. Derived from the graph and
+      **never stored separately**: a delta file would be a second source of truth
+      that can disagree with the graph, and a consumer would have to decide which
+      is right. The reply stays the FULL graph on purpose — one parser, no
+      reassembly, and a consumer that misses a round is not left holding a graph
+      it cannot complete.
+      Team note on the underlying request: storage is already delta where it
+      should be. Facts append (`findings/r<N>.json` holds one round), derivations
+      recompute (`links`/`gaps`), because a link's confidence legitimately moves
+      when new evidence arrives — `links_changed` reports that movement, and
+      appending a derived score would persist one already known to be wrong.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
