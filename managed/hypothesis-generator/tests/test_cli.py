@@ -53,13 +53,39 @@ def test_the_full_report_is_recoverable_from_a_saved_slate(
 
     slate = tmp_path / "slate.json"
     later = tmp_path / "later"
-    assert main(["--report-from", str(slate), "--full-report", "--out", str(later)]) == 0
+    assert main(["--report-from", str(slate), "--report-mode", "full", "--out", str(later)]) == 0
 
     full = (later / "report-full.md").read_text()
     assert full.startswith("# Hypotheses")
     # The audit trail is what distinguishes it, and it is back.
     assert "**Scores**" in full
     assert len(full) > len((tmp_path / "report.md").read_text())
+
+
+def test_every_mode_can_be_written_in_one_pass(tmp_path: Path, monkeypatch) -> None:
+    """Asking for several views should not mean several runs of the pipeline."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    code = main(
+        [
+            "--graph", str(GRAPH), "--dry-run", "--out", str(tmp_path),
+            "--report-mode", "prose",
+            "--report-mode", "table",
+            "--report-mode", "trace",
+            "--report-mode", "full",
+        ]
+    )
+    assert code == 0
+    for name in ("report.md", "report-table.md", "report-trace.md", "report-full.md"):
+        assert (tmp_path / name).read_text().startswith("# Hypotheses"), name
+    # The record is written whatever views were asked for.
+    assert (tmp_path / "slate.json").exists()
+
+
+def test_an_unknown_report_mode_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(SystemExit):
+        main(["--graph", str(GRAPH), "--dry-run", "--out", str(tmp_path),
+              "--report-mode", "verbose"])
 
 
 def test_missing_credentials_fail_clearly(tmp_path: Path, capsys, monkeypatch) -> None:

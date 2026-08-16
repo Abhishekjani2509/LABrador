@@ -239,20 +239,36 @@ evidence packs, staged six-gate verification with halting, articulation,
 multi-lens critique, Elo tournament, evolution rounds, Stage 1 asks, markdown
 and JSON output, CLI, 212 offline tests.
 
-**Two report lengths.** `report.md` is the short read — statement, chain,
-scores, what would kill it, the decisive experiment, the strongest objection,
-and every warning. The claims tables, gate tables and verbatim source sentences
-live in `report-full.md`, written by `--full-report`. Rendering is a pure
-function of the slate, so either can be recovered later without re-running the
-model stages:
+**Four report modes, one record.** `slate.json` is the record; every report is
+a pure function of it, so any view can be produced — or reproduced from a saved
+run — without re-running the pipeline.
+
+| Mode | File | Answers |
+|---|---|---|
+| `prose` (default) | `report.md` | What is this idea, is it any good, what would kill it, what next |
+| `table` | `report-table.md` | Which of these should I look at first |
+| `trace` | `report-trace.md` | Where did this come from |
+| `full` | `report-full.md` | Is the work correct |
+
+`trace` is the observability view: it walks the graph node by node, and each
+edge carries its link id, the support recomputed from findings, the conditions
+the result was measured under, how far the recomputed support drifted from the
+graph's stated confidence, and the verbatim sentence behind every finding —
+including the ones that *contradict* the edge.
 
 ```bash
-hypgen --report-from runs/my-run/slate.json --full-report --out runs/my-run
+hypgen --graph fixtures/example_graph.json --out runs/my-run \
+       --report-mode prose --report-mode trace
+
+hypgen --report-from runs/my-run/slate.json --report-mode table --out runs/my-run
 ```
 
-Brief drops corroboration, never a warning: failure badges, halted
+**A mode changes the form, never the safety.** Failure badges, halted
 verifications, error-level validation issues and the absence-of-evidence notice
-render at both lengths.
+render in all four — in `table` the flagged rows are restated at full width
+under the table, because a flag in a cell is easy to skim past.
+`test_every_mode_keeps_the_signals_a_reader_must_not_miss` is what stops a
+fifth mode from quietly becoming a softer one.
 
 Verification carries a gate table and one of four verdicts (`verified` /
 `qualified` / `unverified` / `rejected`) in `slate.json` and in the full report:
