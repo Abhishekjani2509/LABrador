@@ -70,6 +70,14 @@ function trySh(cmd: string, cwd: string): { ok: boolean; out: string } {
   }
 }
 
+/**
+ * Branch-name opt-out: a branch containing any of these tokens is NEVER
+ * auto-merged — it's someone's checkpoint/WIP, not an integration request.
+ * (Convention added after rafwiewiora/checkpoint-do-not-auto-merge appeared;
+ * documented in COORDINATION.md §7.)
+ */
+const OPT_OUT_RE = /checkpoint|do-not-(auto-)?merge|\bwip\b|draft/i;
+
 function listBranches(cwd: string): { name: string; sha: string }[] {
   return sh('git ls-remote origin "refs/heads/*"', cwd)
     .split("\n")
@@ -78,7 +86,16 @@ function listBranches(cwd: string): { name: string; sha: string }[] {
       const [sha, ref] = line.split("\t");
       return { name: (ref ?? "").replace("refs/heads/", ""), sha: sha ?? "" };
     })
-    .filter((b) => b.name && b.name !== "main");
+    .filter((b) => {
+      if (!b.name || b.name === "main") {
+        return false;
+      }
+      if (OPT_OUT_RE.test(b.name)) {
+        log(`SKIPPED-BY-NAME (opt-out): ${b.name}`);
+        return false;
+      }
+      return true;
+    });
 }
 
 function isAncestor(sha: string, cwd: string): boolean {

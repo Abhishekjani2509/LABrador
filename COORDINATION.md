@@ -40,7 +40,7 @@ adapters A and B are both built (§5) and await their upstream owners' review.
 | Moamen | `moamen` | ~~`sandbox-capability-probe`~~ — **deleted from repo** ("delete useless spike", 2026-08-15 late): throwaway that served its purpose; findings preserved in research-evidence-mapper's CONTRACT.md | ✅ (then removed) |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
 | Vince | `vaalessi/hypothesis-highlander` | `hypothesis-highlander` (meta-search ABOVE the pipeline) | ✅ |
-| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | hypothesis node — **no code pushed yet**; note Vince's highlander now covers hypothesis *enumeration* — coordinate to avoid building the same thing twice | (nothing to merge) |
+| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | `managed/hypothesis-generator/` — hypothesis node: graph-in → candidate programs out, own valuation adapter, managed-agent scaffolding | ✅ (2026-08-16) |
 | Cyrus | works on `main` | infra, merges, renames, README | — |
 
 Note: Cyrus renamed all node dirs on 2026-08-15 (`d6b8451`). Old names
@@ -139,6 +139,17 @@ are dead — do not create files under them.
   on merged main. Interop with the real node contracts not yet verified —
   see §5.
 
+**Abraham (+ Sean, Weichi) — hyp_gen** *(landed 2026-08-16, first drop)*
+- Python package at `managed/hypothesis-generator/` (moved from top-level 2026-08-16): mapper-style graph in → candidate
+  program briefs out (graph/candidates/evidence/reason/pipeline modules, LLM
+  step, CLI). 212 tests pass. Ships its OWN adapter to economics
+  (`valuation.py` + VALUATION_HANDOFF.md) and an eve wrapper
+  (`agent/tools/hypothesis-generator.ts`).
+- ⚠️ Integration notes: joins hypothesis → economics DIRECTLY, bypassing
+  `IndicationThesis` (no thesis emission yet — §6 sign-off question is now
+  concrete); handoff doc references the dead `program-strategy-valuation`
+  path; lives outside `managed/` convention.
+
 **Cyrus — infra**
 - Merged all branches into `main`, renamed nodes for clarity, rewrote README
   with honest capability boundaries, Managed-Agents harness + deploy/console
@@ -176,14 +187,29 @@ are dead — do not create files under them.
 - [x] Implementation drop, deploy, router wrapper, `acl.ts` (`{public: true}`),
       manifest. Agent live and verified end to end.
 - [x] Committed session id in CONTRACT.md — scrubbed 2026-08-16.
-- [ ] **`fixtures/` still missing** (BUILD.md step 1). One question each:
-      well-studied, sparse, genuinely disputed. The well-studied candidate is
-      validated (EGFR mutations → TKI response, >=2000 corpus papers, six
-      first authors on five continents); the other two are not written.
-- [ ] **`expand_node` and `resolve_link` have never executed.** Only
-      `new_question` and `test_gap` have run. `resolve_link` is the likeliest
-      to break first — it is the ask that biases queries toward the
-      under-represented side AND reads figures, and neither path has run.
+- [x] **`fixtures/` written** — three questions, each corpus-validated and
+      each grading something specific: EGFR/TKI (`deep`, dense consensus),
+      antioxidants-and-metastasis (`standard`, real conflict where one paper
+      challenges the other in its own text), microbiome-and-FOP (`deep`, one
+      primary study appearing as three corpus records). See fixtures/README.md.
+- [x] **`resolve_link` verified in production** (g_5cb6 round 2): prior state
+      loaded from memory, `rounds[]` records both asks, a new link stamped
+      `changed_in_round: 2`, raw-JSON contract held, duplicates 0.
+- [ ] **`expand_node` still never executed** — last unexercised ask type.
+- [ ] **The figure path (`ask-image`) has never fired, and the gate may be why.**
+      `resolve_link` is exactly where policy permits figures, yet the run made
+      21 MCP calls and zero `ask-image` calls. CLAUDE.md only permits a figure
+      read "for a paper that already gave you a finding from its text", and
+      with `used: 1` there was barely a candidate. Either loosen the gate or
+      the capability is dead code. Deciding this matters because dose and
+      timepoint conditions — the `where` field `explain_disagreement` runs on —
+      are often stated only in figure axes.
+- [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64`,
+      `changed_in_round: 1`; the round added a neighbouring link instead. For
+      an ask whose purpose is "more evidence on this exact relationship", not
+      touching the target is a miss worth investigating.
+- [ ] **Over-fetch / under-extract ratio is widening**: `found: 96, read: 3,
+      used: 1` at `standard`. Search is cheap, extraction is the bottleneck.
 - [ ] **Findings are not idempotent across a retried round.** `main()` appends
       without deduping on id, so a retried round double-counts findings and
       inflates `agreement` and `independence` for every affected link. Real
@@ -208,9 +234,13 @@ are dead — do not create files under them.
 - [ ] Component README says "no license selected"; root repo says MIT — align.
 
 **Abraham / Sean / Weichi**
-- [ ] Hypothesis node: nothing is pushed. The pipeline's entry point does not
-      exist. If it emits `IndicationThesis` (§6), everything downstream is
-      already runnable against it.
+- [x] Hypothesis node landed (`hyp_gen/`, 2026-08-16, 212 tests).
+- [ ] Emit `IndicationThesis` (or an adapter to it) so the thesis-based chain
+      (mapper evidence → forecaster → economics) gets an entry point — today
+      hyp_gen joins economics directly and skips recruitability entirely.
+- [x] Moved under `managed/hypothesis-generator/` with agent scaffolding (2026-08-16).
+- [ ] Fix stale path in VALUATION_HANDOFF.md (`program-strategy-valuation` →
+      `therapeutic-program-economics`).
 
 **Cyrus**
 - [x] Rafal's `f84bfff` rename-aware merge (done by the integrator flow).
@@ -300,7 +330,10 @@ Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
    cross-node needs to §5.
 
 **Landing work:**
-7. Push to **your own branch**. The **auto-integrator** merges it to `main`:
+7. Push to **your own branch**. The **auto-integrator** merges it to `main`
+   — UNLESS the branch name contains `checkpoint`, `do-not-merge` /
+   `do-not-auto-merge`, `wip`, or `draft`: those are never touched (opt-out
+   convention, added when Rafal's checkpoint branch appeared).
    `bun scripts/integrate.ts` sweeps every branch, `merge --no-ff`s anything
    new, auto-fixes resurrected pre-rename paths, runs typecheck + check, and
    only pushes if green — a merge-log entry lands in §9 each time. It runs
@@ -427,3 +460,66 @@ EFFORT: S (once the node exists).
 - **2026-08-16 00:59 UTC** — merged `msoliman6/literature-graph-mcp` (36a27a2, tier-2: criss-cross lib conflict → main's union kept; his authoritative §3 rewrite taken — mapper end-to-end verified on deployed agent, graph g_9d3c, no_quote_discarded: 0) — typecheck+check green.
 
 - **2026-08-16 01:02 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: a retried round is now a no-op, not a silent double-count; merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: gate nominations by evidence, emit the asks, measure the drift — typecheck+check green.
+
+## 11. Integration wiring map — how the whole thing connects
+
+*(Requested by Abhishek 2026-08-16: the full map + workflow lives HERE so
+anyone pulling main knows how nodes connect and what is left. Update the edge
+table whenever an edge changes state — same rule as §2–§5.)*
+
+### The edges, with live status
+
+```
+                       ┌────────────────────────────┐
+        ❌ no thesis   │  hyp_gen (Abraham+)        │──✅ own adapter──> economics
+        emission yet   │  graph → program briefs    │    (valuation.py — bypasses thesis)
+                       └────────────┬───────────────┘
+                                    │ consumes mapper-style graphs
+                                    ▼
+   ┌────────────────┐   ✅ Adapter A (evidence-bridge.ts, real-graph verified)
+   │ research-      │──────────────────────────────────> IndicationThesis.evidence[]
+   │ evidence-mapper│   ✅⇄ graph-intake (bidirectional: nominations + asks back)
+   │ (DEPLOYED)     │<─────────────────────────────────┐
+   └────────────────┘                                   │
+                       ┌────────────────────────────────┴──┐
+                       │ small-molecule-tractability-review│ ❌ no adapter out; node not
+                       └───────────────────────────────────┘   end-to-end runnable (Modal $)
+                                    IndicationThesis (thesis.ts — §6 sign-offs pending)
+                                    │
+                                    ▼
+   ┌──────────────────────────┐  ✅ Adapter B (economics-bridge.ts:
+   │ trial-recruitment-       │  months → launch-delay overlay,
+   │ forecaster               │──────────────────────> therapeutic-program-economics
+   └──────────────────────────┘  convention confirm pending (Vince)
+                                    │
+   hypothesis-highlander ──⚠️ consumes everything; 2 hard breaks + stub-only
+                              interop tests (INTEROP-highlander.md; fixes = Vince)
+   pipeline-observatory  ──✅ glassbox traces the composing chain (§10)
+   orchestrator          ──❌ nobody owns one command; trace-demo.ts is the seed
+```
+
+### The workflow to full integration (dependency order, owners)
+
+| # | Work | Owner | Done means |
+|---|---|---|---|
+| 1 | thesis.ts sign-offs (§6 checklist) | Rafal, Soliman, Vince, hyp trio | 4 boxes ticked |
+| 2 | Mapper schema: `how` enum + typed protein/gene entities, round/flags, r2.json chunk contract | Soliman | intake + evidence-bridge run a new real graph with no workarounds |
+| 3 | Highlander repairs: accept `no_effect`, read `target.uniprotAccession`, align score curve, adopt canonical bridges, real-contract tests | Vince | interop tests import real shapes and pass |
+| 4 | Adapter B launch_year convention | Vince + Abhishek | one sentence in the economics README |
+| 5 | Tractability end-to-end run + dossier→thesis adapter (adapter UNOWNED) | Rafal + team ($ for Modal GPU) | one real dossier JSON lands in a thesis |
+| 6 | hyp_gen emits IndicationThesis (or adapter) so the thesis chain has an entry point | Abraham+ | a thesis produced by code reaches the forecaster |
+| 7 | Orchestrator decision: highlander on top vs simple runner (extend trace-demo.ts) | Cyrus + Vince | `one command → traced verdict` |
+| 8 | Glassbox envelopes per node (§10) + runtime envelopes for deployed agents | all / Cyrus | every node call traced |
+
+### Demoable TODAY without waiting on anyone
+
+Real mapper graph → evidence-bridge → enriched thesis → forecaster →
+economics-bridge → economics engine, traced by the glassbox
+(5 of 7 stations). Missing from the full chain: tractability (item 5) and a
+thesis-emitting hypothesis step (item 6). Both have owners above.
+- **2026-08-16 01:15 UTC** — merged `AbrehamT/Hypothesis_Generator` (9bf1682, tier-2: biome format fix on his JSON fixtures) — hyp_gen lands, 212 tests pass; §11 wiring map added per Abhishek — typecheck+check green.
+
+- **2026-08-16 01:15 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: one command from graph_id to dossier inputs — typecheck+check green.
+- **2026-08-16 01:18 UTC** — merged `AbrehamT/Hypothesis_Generator` (09e03cd, tier-2: modify/delete on his dir move — move wins, formatting reapplied) — hyp_gen now managed/hypothesis-generator with agent scaffolding; 212 tests green.
+
+- **2026-08-16 01:19 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fixtures (BUILD.md step 1), and what resolve_link revealed in production — typecheck+check green.
