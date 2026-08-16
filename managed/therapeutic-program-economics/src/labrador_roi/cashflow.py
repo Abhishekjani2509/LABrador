@@ -184,6 +184,8 @@ class ProgramCashFlowInputs(_FrozenModel):
     def _validate_contract(self) -> ProgramCashFlowInputs:
         if self.forecast_end_year < self.valuation_year:
             raise ValueError("forecast_end_year must be on or after valuation_year")
+        if not self.loe_price_retention or not self.loe_volume_retention:
+            raise ValueError("LOE retention paths cannot be empty")
         if len(self.loe_price_retention) != len(self.loe_volume_retention):
             raise ValueError("LOE price and volume retention paths must have equal length")
         if any(not 0 <= value <= 1 for value in self.loe_price_retention):

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from labrador_roi.cashflow import ProgramCashFlowInputs
 from labrador_roi.comparables import ComparableSet
-from labrador_roi.engine import ENGINE_VERSION, AnalysisResult, analyze_program
+from labrador_roi.engine import ENGINE_VERSION, SCHEMA_VERSION, AnalysisResult, analyze_program
 from labrador_roi.models import ProgramInput
 from labrador_roi.provenance import canonical_json
 from labrador_roi.simulation import SimulationAssumptions
@@ -59,6 +59,12 @@ def replay_analysis(
     if artifact_version != ENGINE_VERSION:
         raise ReplayVerificationError(
             f"engine version mismatch: artifact={artifact_version!r}, current={ENGINE_VERSION!r}"
+        )
+    artifact_schema_version = payload.get("schema_version")
+    if artifact_schema_version != SCHEMA_VERSION:
+        raise ReplayVerificationError(
+            "schema version mismatch: "
+            f"artifact={artifact_schema_version!r}, current={SCHEMA_VERSION!r}"
         )
 
     snapshot = payload.get("input_snapshot")

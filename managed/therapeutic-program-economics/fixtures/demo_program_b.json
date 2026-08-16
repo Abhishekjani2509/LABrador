@@ -142,7 +142,7 @@
       "phase_3": 0.65,
       "filing": 0.84
     },
-    "program_probability_of_approval": 0.12,
+    "program_probability_of_approval": 0.1203384,
     "evidence": {
       "development_inputs": {
         "source_id": "SYNTHETIC-DEMO-B-DEVELOPMENT",

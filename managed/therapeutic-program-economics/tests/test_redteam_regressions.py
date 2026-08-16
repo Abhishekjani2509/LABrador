@@ -195,8 +195,8 @@ def test_peak_revenue_is_derived_from_the_annual_ledger_and_exposed_with_rng_met
     )
     ledger_peak = max(result.cash_flow.annual_cash_flows, key=lambda row: row.net_revenue)
 
-    assert result.schema_version == "1.2.0"
-    assert result.engine_version == "0.3.0"
+    assert result.schema_version == "1.3.0"
+    assert result.engine_version == "0.4.0"
     assert result.cash_flow.peak_annual_net_revenue == ledger_peak.net_revenue
     assert result.cash_flow.peak_annual_net_revenue_year == ledger_peak.year
     assert result.summary.peak_annual_net_revenue == ledger_peak.net_revenue

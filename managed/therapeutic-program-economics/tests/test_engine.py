@@ -20,6 +20,7 @@ from labrador_roi.models import (
     EvidenceGrade,
     EvidenceMetadata,
     EvidenceType,
+    Modality,
     ProgramInput,
 )
 from labrador_roi.simulation import SimulationAssumptions, TriangularRange
@@ -198,6 +199,433 @@ def test_zero_oop_public_coverage_maps_to_full_affordability() -> None:
     result = analyze_program(program, comparables, simulations=5, seed=3)
 
     assert result.access[0].patient_affordability_rate == 1.0
+
+
+@pytest.mark.parametrize("fixture_name", ["demo_program.json", "demo_program_b.json"])
+def test_demo_fixture_approval_probability_reconciles_with_stage_path(
+    fixture_name: str,
+) -> None:
+    program = ProgramInput.model_validate_json((FIXTURE_ROOT / fixture_name).read_text())
+    comparable_payload = json.loads((FIXTURE_ROOT / "demo_comparables.json").read_text())
+    comparables = ComparableSet.model_validate({"comparables": comparable_payload["comparables"]})
+
+    stage_product = prod(program.development.stage_success_probabilities.values())
+    assert program.development.program_probability_of_approval == pytest.approx(
+        stage_product,
+        rel=1e-6,
+        abs=1e-9,
+    )
+
+    result = analyze_program(
+        program,
+        comparables,
+        simulations=2,
+        seed=1,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.critical_evidence_status["cashflow.development_probability_reconciliation"]
+    assert not any(
+        warning.code == "INCONSISTENT_PROGRAM_APPROVAL_PROBABILITY" for warning in result.warnings
+    )
+
+
+@pytest.mark.parametrize(
+    ("serialized_modality", "expected"),
+    [
+        ("SMALL_MOLECULE", Modality.SMALL_MOLECULE),
+        ("PEPTIDE", Modality.PEPTIDE),
+        ("ANTIBODY", Modality.ANTIBODY),
+        ("antibody", Modality.ANTIBODY),
+    ],
+)
+def test_program_input_supports_antibody_and_existing_modalities(
+    serialized_modality: str,
+    expected: Modality,
+) -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["modality"] = serialized_modality
+
+    program = ProgramInput.model_validate(raw_program)
+
+    assert program.modality is expected
+
+
+def test_antibody_program_runs_without_hidden_modality_adjustments() -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    antibody_payload = {**raw_program, "modality": "antibody"}
+    peptide = ProgramInput.model_validate(raw_program)
+    antibody = ProgramInput.model_validate(antibody_payload)
+    comparable_payload = json.loads((FIXTURE_ROOT / "demo_comparables.json").read_text())
+    comparables = ComparableSet.model_validate({"comparables": comparable_payload["comparables"]})
+
+    peptide_result = analyze_program(
+        peptide,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+    antibody_result = analyze_program(
+        antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert antibody_result.input_snapshot["program"]["modality"] == "ANTIBODY"
+    assert antibody_result.cash_flow == peptide_result.cash_flow
+    assert antibody_result.uncertainty == peptide_result.uncertainty
+
+
+def test_antibody_loe_retention_requires_supported_evidence_for_decision_grade() -> None:
+    program, comparables = _decision_ready_fixture()
+    antibody = program.model_copy(update={"modality": Modality.ANTIBODY})
+
+    unsupported = analyze_program(
+        antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert unsupported.critical_evidence_status["cashflow.antibody_loe_retention"] is False
+    assert unsupported.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+    assert any(
+        warning.field == "cashflow.antibody_loe_retention" for warning in unsupported.warnings
+    )
+
+    loe_evidence = EvidenceMetadata(
+        source_id="antibody-loe-source",
+        evidence_type=EvidenceType.REAL_WORLD,
+        grade=EvidenceGrade.MODERATE,
+    )
+    supported_antibody = antibody.model_copy(
+        update={
+            "assumptions": {
+                **antibody.assumptions,
+                "loe_price_retention": [0.55, 0.35, 0.25, 0.18, 0.12, 0.12],
+                "loe_volume_retention": [0.75, 0.55, 0.4, 0.3, 0.2, 0.2],
+            },
+            "evidence": {**antibody.evidence, "loe_retention": loe_evidence},
+        }
+    )
+    supported = analyze_program(
+        supported_antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert supported.critical_evidence_status["cashflow.antibody_loe_retention"] is True
+    assert supported.decision_grade == DecisionGrade.DECISION_GRADE
+    assert not any(
+        warning.field == "cashflow.antibody_loe_retention" for warning in supported.warnings
+    )
+
+
+@pytest.mark.parametrize(
+    ("mapping_name", "stage_name"),
+    [
+        ("stage_costs", "phase_2"),
+        ("stage_durations_years", "phase_2"),
+        ("stage_success_probabilities", "phase_2"),
+    ],
+)
+@pytest.mark.parametrize("invalid_value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_development_inputs_are_rejected(
+    mapping_name: str,
+    stage_name: str,
+    invalid_value: float,
+) -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["development"][mapping_name][stage_name] = invalid_value
+
+    with pytest.raises(ValueError, match="finite"):
+        ProgramInput.model_validate(raw_program)
+
+
+@pytest.mark.parametrize(
+    ("mapping_name", "stage_name"),
+    [
+        ("stage_costs", "phase_2"),
+        ("stage_durations_years", "phase_2"),
+        ("stage_success_probabilities", "phase_2"),
+    ],
+)
+def test_boolean_development_mapping_inputs_are_rejected(
+    mapping_name: str,
+    stage_name: str,
+) -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["development"][mapping_name][stage_name] = True
+
+    with pytest.raises(ValueError, match="boolean"):
+        ProgramInput.model_validate(raw_program)
+
+
+def test_boolean_aggregate_approval_probability_is_rejected() -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["development"]["program_probability_of_approval"] = True
+
+    with pytest.raises(ValueError, match="boolean"):
+        ProgramInput.model_validate(raw_program)
+
+
+def test_antibody_requires_explicit_comparator_allowlists_for_decision_grade() -> None:
+    program, comparables = _decision_ready_fixture()
+    loe_evidence = EvidenceMetadata(
+        source_id="antibody-loe-source",
+        evidence_type=EvidenceType.REAL_WORLD,
+        grade=EvidenceGrade.MODERATE,
+    )
+    initial = program.initial_indication.model_copy(update={"comparator_ids": []})
+    expansions = [
+        indication.model_copy(update={"comparator_ids": []})
+        for indication in program.expansion_indications
+    ]
+    antibody = program.model_copy(
+        update={
+            "modality": Modality.ANTIBODY,
+            "initial_indication": initial,
+            "expansion_indications": expansions,
+            "evidence": {**program.evidence, "loe_retention": loe_evidence},
+        }
+    )
+
+    result = analyze_program(
+        antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.critical_evidence_status["cashflow.antibody_comparator_selection"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+    assert any(
+        warning.field == "cashflow.antibody_comparator_selection" for warning in result.warnings
+    )
+
+
+def test_antibody_comparator_allowlists_cannot_silently_reference_unknown_ids() -> None:
+    program, comparables = _decision_ready_fixture()
+    loe_evidence = EvidenceMetadata(
+        source_id="antibody-loe-source",
+        evidence_type=EvidenceType.REAL_WORLD,
+        grade=EvidenceGrade.MODERATE,
+    )
+    initial = program.initial_indication.model_copy(
+        update={
+            "comparator_ids": [
+                *program.initial_indication.comparator_ids,
+                "DOES_NOT_EXIST",
+            ]
+        }
+    )
+    antibody = program.model_copy(
+        update={
+            "modality": Modality.ANTIBODY,
+            "initial_indication": initial,
+            "evidence": {**program.evidence, "loe_retention": loe_evidence},
+        }
+    )
+
+    result = analyze_program(
+        antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.critical_evidence_status["cashflow.antibody_comparator_selection"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+
+
+def test_analysis_boundary_revalidates_unchecked_modality_updates() -> None:
+    program, comparables = _decision_ready_fixture()
+    unchecked_antibody = program.model_copy(update={"modality": "antibody"})
+
+    result = analyze_program(
+        unchecked_antibody,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.input_snapshot["program"]["modality"] == "ANTIBODY"
+    assert result.critical_evidence_status["cashflow.antibody_loe_retention"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+
+    unchecked_biologic = program.model_copy(update={"modality": "BIOLOGIC"})
+    with pytest.raises(ValueError, match=r"SMALL_MOLECULE.*PEPTIDE.*ANTIBODY"):
+        analyze_program(
+            unchecked_biologic,
+            comparables,
+            simulations=2,
+            seed=3,
+            simulation_assumptions=FIXED_ASSUMPTIONS,
+        )
+
+
+@pytest.mark.parametrize(
+    ("price_retention", "volume_retention"),
+    [
+        ((), ()),
+        ((2.0,), (1.0,)),
+    ],
+)
+def test_analysis_boundary_revalidates_unchecked_low_level_cashflow_inputs(
+    price_retention: tuple[float, ...],
+    volume_retention: tuple[float, ...],
+) -> None:
+    unchecked = program_inputs().model_copy(
+        update={
+            "loe_price_retention": price_retention,
+            "loe_volume_retention": volume_retention,
+        }
+    )
+
+    with pytest.raises(ValueError):
+        analyze_program(
+            unchecked,
+            simulations=2,
+            seed=3,
+            simulation_assumptions=FIXED_ASSUMPTIONS,
+        )
+
+
+def test_low_level_decision_grade_requires_evidence_references() -> None:
+    unsupported = program_inputs().model_copy(update={"evidence_references": ()})
+
+    result = analyze_program(
+        unsupported,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.critical_evidence_status["cashflow_inputs"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+    assert result.recommendation == Recommendation.NOT_DECISION_GRADE
+    assert any(warning.code == "MISSING_LOW_LEVEL_EVIDENCE" for warning in result.warnings)
+
+
+def test_empty_antibody_loe_paths_are_rejected() -> None:
+    program, comparables = _decision_ready_fixture()
+    loe_evidence = EvidenceMetadata(
+        source_id="antibody-loe-source",
+        evidence_type=EvidenceType.REAL_WORLD,
+        grade=EvidenceGrade.MODERATE,
+    )
+    antibody = program.model_copy(
+        update={
+            "modality": Modality.ANTIBODY,
+            "assumptions": {
+                **program.assumptions,
+                "loe_price_retention": [],
+                "loe_volume_retention": [],
+            },
+            "evidence": {**program.evidence, "loe_retention": loe_evidence},
+        }
+    )
+
+    with pytest.raises(ValueError, match="LOE retention paths cannot be empty"):
+        analyze_program(
+            antibody,
+            comparables,
+            simulations=2,
+            seed=3,
+            simulation_assumptions=FIXED_ASSUMPTIONS,
+        )
+
+
+def test_antibody_loe_paths_must_cover_the_modeled_post_loe_horizon() -> None:
+    program, comparables = _decision_ready_fixture()
+    loe_evidence = EvidenceMetadata(
+        source_id="antibody-loe-source",
+        evidence_type=EvidenceType.REAL_WORLD,
+        grade=EvidenceGrade.MODERATE,
+    )
+    short_path = program.model_copy(
+        update={
+            "modality": Modality.ANTIBODY,
+            "assumptions": {
+                **program.assumptions,
+                "loe_price_retention": [0.99],
+                "loe_volume_retention": [0.99],
+            },
+            "evidence": {**program.evidence, "loe_retention": loe_evidence},
+        }
+    )
+
+    result = analyze_program(
+        short_path,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.critical_evidence_status["cashflow.antibody_loe_horizon"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+    assert any(warning.field == "cashflow.antibody_loe_horizon" for warning in result.warnings)
+
+
+def test_aggregate_only_approval_probability_cannot_clear_development_cost_gate() -> None:
+    program, comparables = _decision_ready_fixture()
+    development = program.development.model_copy(
+        update={
+            "stage_costs": {},
+            "stage_durations_years": {},
+            "stage_success_probabilities": {},
+            "stage_order": [],
+            "program_probability_of_approval": 1.0,
+        }
+    )
+    aggregate_only = program.model_copy(
+        update={"development": development, "expansion_indications": []}
+    )
+
+    result = analyze_program(
+        aggregate_only,
+        comparables,
+        simulations=2,
+        seed=3,
+        simulation_assumptions=FIXED_ASSUMPTIONS,
+    )
+
+    assert result.cash_flow.initial_approval_probability == 1.0
+    assert result.critical_evidence_status["cashflow.development_cost_path"] is False
+    assert result.decision_grade == DecisionGrade.NOT_DECISION_GRADE
+    assert result.recommendation == Recommendation.NOT_DECISION_GRADE
+
+
+def test_current_stage_must_match_first_modeled_remaining_stage() -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["development"]["current_stage"] = "filing"
+
+    with pytest.raises(ValueError, match="current_stage must match the first modeled stage"):
+        ProgramInput.model_validate(raw_program)
+
+
+def test_explicit_known_stage_order_must_follow_lifecycle_order() -> None:
+    raw_program = json.loads((FIXTURE_ROOT / "demo_program.json").read_text())
+    raw_program["development"]["stage_order"] = [
+        "preclinical",
+        "filing",
+        "phase_3",
+        "phase_2",
+        "phase_1",
+    ]
+
+    with pytest.raises(ValueError, match="known lifecycle stages must be chronological"):
+        ProgramInput.model_validate(raw_program)
 
 
 def test_mapping_order_cannot_change_results_behind_the_same_run_id() -> None:

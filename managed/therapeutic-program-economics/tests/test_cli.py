@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
+import tomllib
 from pathlib import Path
 
 from typer.testing import CliRunner
 
+from labrador_roi import __version__
 from labrador_roi.cli import (
     DEMO_COMPARABLES_CSV,
     DEMO_COMPARABLES_JSON,
@@ -16,8 +18,10 @@ from labrador_roi.cli import (
     load_comparables,
     validate_comparables_payload,
 )
+from labrador_roi.engine import ENGINE_VERSION, SCHEMA_VERSION
 
 runner = CliRunner()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _payload(output: str) -> dict:
@@ -34,6 +38,21 @@ def test_example_manifest_is_explicitly_synthetic() -> None:
     assert payload["synthetic"] is True
     assert payload["decision_grade"] == "NOT_DECISION_GRADE"
     assert "synthetic" in payload["warning"].lower()
+
+
+def test_package_metadata_matches_the_engine_release() -> None:
+    project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert project["project"]["version"] == __version__ == ENGINE_VERSION
+
+
+def test_cli_version_reports_package_engine_and_schema_versions() -> None:
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert f"labrador {__version__}" in result.stdout
+    assert f"engine {ENGINE_VERSION}" in result.stdout
+    assert f"schema {SCHEMA_VERSION}" in result.stdout
 
 
 def test_example_can_copy_agent_starter_inputs(tmp_path: Path) -> None:
