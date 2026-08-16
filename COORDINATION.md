@@ -97,11 +97,21 @@ are dead — do not create files under them.
 
 **Abhishek**
 - [ ] Drive `thesis.ts` ratification (§6) — blocking all composition.
+      **Update 2026-08-15 late: the schema legwork is DONE** — all four §6
+      items implemented as additive optional fields on `abhishek-jani`
+      (old theses still parse; typecheck + check green). What remains is
+      sign-offs: checklist now in §6.
 - [ ] Wrap forecaster as a Managed Agent (fresh session: `/clear` →
       `/managed-agent-prototype`; engine becomes `tools.ts` handlers). Do
       after ratification.
-- [ ] Known model limitation: per-site velocity doesn't transfer to 100+ site
-      scale (backtest isolates it; candidate √-dilution fix documented in NEXT.md).
+- [x] ~~Known model limitation: per-site velocity doesn't transfer to 100+
+      site scale.~~ **Decided 2026-08-15 late on 22 fresh backtest rows
+      across two conditions**: √-dilution REJECTED as a blanket engine term —
+      the pool-median anchor degenerates to 1 site and blows predictions
+      3–17x; an at-scale anchor helps EoE but wrecks already-calibrated
+      atopic dermatitis. Both variants now print as EXPERIMENT columns in
+      `backtest.ts` on every run; the remaining open problem (a mismatch
+      gate) is documented in NEXT.md and stays in its Known limitations.
 
 **Rafal**
 - [x] `f84bfff` merged (2026-08-15 late, rename-aware).
@@ -156,25 +166,46 @@ are dead — do not create files under them.
 
 `IndicationThesis` is declared the shared contract in the README but no other
 node consumes it yet. Concrete items, each discovered by reading the other
-nodes' actual contracts:
+nodes' actual contracts. **Status 2026-08-15 late: items 1–4 are IMPLEMENTED
+in `thesis.ts` on `abhishek-jani` as additive, optional, backward-compatible
+changes — every pre-change fixture still parses, typecheck + check green.
+Ratification is now a sign-off, not a design session.**
 
 1. Add optional `mechanismHypothesis: "orthosteric" | "allosteric" |
    "oligomer_destabilisation" | "unknown"` — Rafal's node needs the enum
    (load-bearing for chain selection); free-text `mechanism` can't feed it.
+   **Implemented** (optional top-level field).
 2. Add optional `uniprotAccession` — Rafal's join key (gene symbol requires a
    resolution step he'd rather record than perform).
+   **Implemented** (optional `target.uniprotAccession`).
 3. `Evidence.direction` has `supports | contradicts`; Soliman's findings also
    emit `no_effect`. Pick a convention (third value, or map to contradicts
-   with a note).
+   with a note). **Implemented as a third value** — a null result and
+   evidence-against are different facts; collapsing them destroys
+   information. Consumers may treat `no_effect` as neutral.
 4. Modality vocabulary: thesis has 6 values, economics accepts 2. Align or
-   declare the boundary.
+   declare the boundary. **Boundary declared** in a comment on `Modality`:
+   the wide vocabulary stays (upstream must not misdescribe an antibody to
+   get a valuation); non-priceable modalities are the economics node's
+   documented gap until its owner extends his enum (his §4 item).
 5. Confirm the adapters in §5 and their owners (B is built; Vince to
-   confirm the `launch_year` application convention).
+   confirm the `launch_year` application convention; A still unowned,
+   suggested Soliman + Abhishek).
 6. **SCHEMA.md: `how` needs an enum** (raised by Rafal's graph-intake,
    2026-08-15 late): every other categorical field is enumerated, but `how`
    is open vocabulary — so "drug inhibits IRAK4" (a target) and "drug
    reduces IL-6" (a downstream effect) are structurally identical. Soliman
    to enumerate at least the target-nominating verbs.
+
+Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
+
+- [ ] **Rafal** — items 1–2: enum values + accession placement under `target`.
+- [ ] **Soliman** — item 3: `no_effect` as a third `direction` value; and
+      item 6: the `how` enum in SCHEMA.md.
+- [ ] **Vince** — item 4: boundary declared vs extend his modality enum;
+      plus the Adapter B `launch_year` application convention (§5).
+- [ ] **Abraham / Sean / Weichi** — as emitters: can the hypothesis node
+      populate the required fields (all new fields are optional)?
 
 ## 7. The process (what you actually do)
 

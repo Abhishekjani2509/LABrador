@@ -14,6 +14,15 @@
  */
 import { z } from "zod";
 
+/**
+ * §6 item 4 — DECLARED BOUNDARY, not alignment: the economics node
+ * (managed/therapeutic-program-economics) prices only SMALL_MOLECULE |
+ * PEPTIDE today. Theses with any other modality flow through the pipeline
+ * but cannot be priced by that node until its owner extends his enum (his
+ * §4 item in COORDINATION.md). This vocabulary stays wide on purpose —
+ * upstream nodes must not be forced to misdescribe an antibody as a
+ * small molecule to get a valuation.
+ */
 export const Modality = z.enum([
   "antibody",
   "small_molecule",
@@ -21,6 +30,19 @@ export const Modality = z.enum([
   "oligonucleotide",
   "cell_therapy",
   "other",
+]);
+
+/**
+ * §6 item 1 — mechanism class for the tractability node's chain selection
+ * (load-bearing for structure-select; the free-text `mechanism` prose
+ * cannot feed an enum). Optional: emitters that don't know say "unknown"
+ * or omit it.
+ */
+export const MechanismHypothesis = z.enum([
+  "orthosteric",
+  "allosteric",
+  "oligomer_destabilisation",
+  "unknown",
 ]);
 
 export const Direction = z.enum([
@@ -41,7 +63,13 @@ export const EndpointType = z.enum(["continuous", "binary", "time_to_event"]);
  */
 export const Evidence = z.object({
   claim: z.string(),
-  direction: z.enum(["supports", "contradicts"]),
+  /**
+   * §6 item 3 — "no_effect" is a third value, NOT mapped to "contradicts":
+   * a null result and evidence against are different facts, and collapsing
+   * them destroys information the evidence mapper actually emits. Consumers
+   * that only weigh supports/contradicts may treat no_effect as neutral.
+   */
+  direction: z.enum(["supports", "contradicts", "no_effect"]),
   source: z.string(),
   sourceType: z.enum(["trial", "publication", "database", "simulation"]),
   /** 0 = anecdote, 1 = randomised human outcome data. */
@@ -87,9 +115,18 @@ export const IndicationThesis = z.object({
   /** Free-text causal story: target → pathway → cell type → phenotype. */
   mechanism: z.string(),
 
+  /** §6 item 1 — see MechanismHypothesis. */
+  mechanismHypothesis: MechanismHypothesis.optional(),
+
   target: z.object({
     direction: Direction,
     symbol: z.string(),
+    /**
+     * §6 item 2 — the tractability node's join key. Gene symbol requires a
+     * resolution step its owner would rather record than perform; emitters
+     * that know the accession (e.g. IL4R → P24394) should set it.
+     */
+    uniprotAccession: z.string().optional(),
   }),
 
   tissue: z.string().optional(),

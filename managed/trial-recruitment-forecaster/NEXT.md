@@ -10,7 +10,7 @@ Answers: *given an indication thesis, could this trial actually be enrolled?*
 | `thesis.ts` | **The team-wide contract.** Zod schema for an indication thesis. Upstream (hypothesis node) emits it, ROI consumes the result. Not yet agreed with the team — see waiting-on-team. |
 | `ctgov.ts` | ClinicalTrials.gov API v2 client. Free, no key. `asOf` horizons, `getTrial(nctId)`, endpoint-window parsing (`enrollmentMonths`). |
 | `recruitability.ts` | The engine. Empirical velocity → biomarker narrowing (floored) → eligibility burden (median of 3 Claude reads of real I/E prose) → competition → powering (phase-3 floored) → sites from precedent → counterfactual search. |
-| `backtest.ts` | Validation harness: predicted vs actual enrolment for completed trials, horizon rolled back to each trial's start. |
+| `backtest.ts` | Validation harness: predicted vs actual enrolment for completed trials, horizon rolled back to each trial's start. Since 2026-08-15 late also reports two √-dilution EXPERIMENT columns (pool-median + at-scale anchors) — evidence-only, not in the engine. |
 | `fixtures/theses.json` | 4 fixtures, one per mode, each with a `whyInSet` rationale. |
 | `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
 | `economics-bridge.ts` | **Adapter B** (COORDINATION §5): RecruitabilityResult → launch-delay overlay for Vince's economics node, with best-effort pricing. See section below. |
@@ -105,11 +105,26 @@ window minus each trial's own endpoint window.
 - **Known, isolated limitation: per-site velocity does not transfer across
   site-count scales.** The three registrational efficacy trials predict
   0.24–0.39x (too fast): precedent pools are 5–40-site trials at
-  0.4–0.6 pt/site/mo; real 95–212-site machines ran 0.07–0.13. A √-dilution
-  experiment (velocity × √(medianPrecedentSites/targetSites)) lands all three
-  at 1.09–1.13x on paper but needs a scale-consistent anchor before engine
-  adoption (naively applied it wrecks the hero fixture) — candidate next
-  model change, decide with more than 6 backtest trials.
+  0.4–0.6 pt/site/mo; real 95–212-site machines ran 0.07–0.13.
+- **√-dilution DECIDED against engine adoption (2026-08-15 late, 22 fresh
+  backtest rows across two conditions).** The earlier on-paper claim that
+  velocity × √(medianPrecedentSites/targetSites) "lands all three at
+  1.09–1.13x" is VOID: run live, the pool-median anchor degenerates to **1**
+  on every EoE and AD row (single-site academic studies dominate any
+  condition's completed pool), blowing predictions to 3–17x actual (EoE-12
+  panel: median |error| 270% vs base 62%). An at-scale anchor (median sites
+  among precedents with enrollment ≥ N/2 — the same population
+  `sitesFromPrecedent` trusts) does help EoE, where the scale mismatch is
+  real: within-2x 7/10 vs base 6/12, and the three registrational trials move
+  from 0.24–0.39x to 0.56–0.62x. But it wrecks atopic dermatitis, whose base
+  model is already well-calibrated (8/10 within 2x, 53% median error → 3/10,
+  329% diluted): when the precedent pool already contains at-scale trials,
+  any dilution double-counts. Conclusion: √-dilution is a correction for
+  measured pool-vs-target scale mismatch, not a universal term — adopting it
+  unconditionally degrades well-calibrated conditions. It stays OUT of the
+  engine; backtest.ts now prints both variants as EXPERIMENT columns on
+  every run, so future panels keep accumulating evidence for a gated form
+  (apply only when the pool is measurably small-site relative to the target).
 - Panel hygiene: NCT04991935 is a rollover study (enrolls pre-consented
   parent-trial patients) — an unfair backtest target; consider excluding
   extension/rollover designs from discovery.
@@ -150,6 +165,10 @@ one bad NCT id killing whole demo/backtest runs (allSettled + one retry on
 ## Known limitations (ranked)
 
 1. Velocity scale-transfer (above) — the big one, isolated by the backtest.
+   √-dilution as a blanket fix is now REJECTED on 22-row/two-condition
+   evidence (see backtest section); the open problem is narrower: a gate
+   that detects when the precedent pool's scale actually mismatches the
+   target before applying any correction.
 2. **The Claude eligibility multiplier is an unclosed post-horizon channel
    in asOf runs**: the model has 2025-era knowledge of the asset, and the
    criteria text is the registry's CURRENT version. The prompt now pins the
@@ -167,7 +186,12 @@ one bad NCT id killing whole demo/backtest runs (allSettled + one retry on
 ## Waiting on team input (not blocked on code)
 
 - **Ratify `thesis.ts`** with Sean / Abraham / Weichi and Vince before the
-  integration hour, or nothing composes.
+  integration hour, or nothing composes. Update 2026-08-15 late: all four
+  §6 schema items are now IMPLEMENTED in `thesis.ts` as additive, optional,
+  backward-compatible changes (`mechanismHypothesis` enum, `target.uniprotAccession`,
+  `Evidence.direction` gains `no_effect`, modality boundary declared in a
+  comment); every pre-change fixture still parses. What remains is the
+  human step: sign-offs per the checklist in COORDINATION.md §6.
 - **Team fixture asset** — dupilumab/EoE was a unilateral pick to unblock.
 - **`/managed-agent-setup` Phase 2** (full un-ignore + auth wiring) — team
   decision; this node is already narrowly un-ignored.

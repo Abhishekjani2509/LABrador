@@ -48,11 +48,33 @@ type BacktestRow = {
   actualN: number;
   competitorsAtStart: number;
   nctId: string;
+  /**
+   * √-dilution anchor variant B: median sites among AT-SCALE precedents
+   * (enrollment ≥ half the target's N — the population sitesFromPrecedent
+   * already trusts for site counts).
+   */
+  precedentAtScaleMedianSites?: number;
   precedentCount: number;
+  /** √-dilution anchor variant A: median site count of the whole pool. */
+  precedentMedianSites?: number;
   primaryCompletionDate: string;
   siteCount: number;
   simulatedPredictedMonths: number;
   simulatedPredictedRange: [number, number];
+  /**
+   * EXPERIMENT (NEXT.md "velocity scale-transfer"), anchor variant B:
+   * velocity × √(precedentAtScaleMedianSites / siteCount). Reported for
+   * evidence-gathering only; the engine does NOT use either variant.
+   */
+  simulatedSqrtDilutedAtScaleMonths?: number;
+  /**
+   * EXPERIMENT anchor variant A: velocity × √(precedentMedianSites /
+   * siteCount) — the raw formula as written in NEXT.md. First live run
+   * (2026-08-15) showed the pool-median anchor DEGENERATES TO 1 on EoE
+   * panels (single-site academic studies dominate), blowing predictions to
+   * 3–17× actual — the run-verified reason this is not in the engine.
+   */
+  simulatedSqrtDilutedMonths?: number;
   startDate: string;
   title: string;
 };
@@ -143,6 +165,25 @@ async function backtestTrial(
   const lowVelocity = percentile(vs, 0.25) ?? baseVelocity * 0.5;
   const highVelocity = percentile(vs, 0.75) ?? baseVelocity * 2;
 
+  // Same pool velocities() accepted, so the anchor describes the trials
+  // that actually contributed velocity samples.
+  const usableSitePool = precedents.filter(
+    (t) =>
+      t.siteCount > 0 &&
+      t.enrollment &&
+      monthsBetween(t.startDate, t.primaryCompletionDate) !== undefined
+  );
+  const precedentMedianSites = median(usableSitePool.map((t) => t.siteCount));
+  const precedentAtScaleMedianSites = median(
+    usableSitePool
+      .filter((t) => (t.enrollment ?? 0) >= enrollment / 2)
+      .map((t) => t.siteCount)
+  );
+  const dilute = (anchor: number | undefined) =>
+    anchor === undefined
+      ? undefined
+      : predict(baseVelocity * Math.sqrt(anchor / siteCount));
+
   return {
     actualEnrollMonths: Math.round(
       enrollmentMonths(actualWindowMonths, trial.primaryTimeFrames)
@@ -151,10 +192,14 @@ async function backtestTrial(
     actualWindowMonths,
     competitorsAtStart,
     nctId: trial.nctId,
+    precedentAtScaleMedianSites,
     precedentCount: vs.length,
+    precedentMedianSites,
     primaryCompletionDate,
     simulatedPredictedMonths: predict(baseVelocity),
     simulatedPredictedRange: [predict(highVelocity), predict(lowVelocity)],
+    simulatedSqrtDilutedAtScaleMonths: dilute(precedentAtScaleMedianSites),
+    simulatedSqrtDilutedMonths: dilute(precedentMedianSites),
     siteCount,
     startDate,
     title: trial.title,
@@ -276,30 +321,115 @@ for (const r of rows) {
     `  SIMULATED predicted  ${r.simulatedPredictedMonths} mo to enrol  (range ${r.simulatedPredictedRange[0]}-${r.simulatedPredictedRange[1]})  [${r.precedentCount} precedent velocities, ${r.competitorsAtStart} active competitors at start]`,
     `  predicted/actual     ${ratio.toFixed(2)}x  (vs est. enrolling months)`
   );
+  pushExperimentLine(
+    lines,
+    r,
+    "pool-median anchor  ",
+    r.simulatedSqrtDilutedMonths,
+    r.precedentMedianSites
+  );
+  pushExperimentLine(
+    lines,
+    r,
+    "at-scale anchor     ",
+    r.simulatedSqrtDilutedAtScaleMonths,
+    r.precedentAtScaleMedianSites
+  );
 }
 
 for (const s of skips) {
   lines.push("", `${s.nctId}  SKIPPED — ${s.skipped}`);
 }
 
-if (rows.length > 0) {
-  const errors = rows.map(
-    (r) =>
-      Math.abs(r.simulatedPredictedMonths - r.actualEnrollMonths) /
-      r.actualEnrollMonths
+function pushExperimentLine(
+  out: string[],
+  r: BacktestRow,
+  label: string,
+  months: number | undefined,
+  anchor: number | undefined
+): void {
+  if (months === undefined || anchor === undefined) {
+    return;
+  }
+  const ratio = months / r.actualEnrollMonths;
+  out.push(
+    `  EXPERIMENT sqrt-dilution, ${label}${months} mo  (velocity x sqrt(${anchor} anchor sites / ${r.siteCount} target sites))  ${ratio.toFixed(2)}x — reported only, NOT in the engine`
   );
+}
+
+function pushExperimentAggregate(
+  out: string[],
+  label: string,
+  pairs: { actual: number; predicted: number }[]
+): void {
+  if (pairs.length === 0) {
+    return;
+  }
+  const agg = aggregate(pairs);
+  out.push(
+    `  EXPERIMENT sqrt-dilution aggregate, ${label} (${pairs.length} trials with an anchor; reported only):`,
+    `    median |error|     ${agg.medianErrorPct}%`,
+    `    within 1.5x        ${agg.within15}/${pairs.length}`,
+    `    within 2x          ${agg.within2}/${pairs.length}`
+  );
+}
+
+function aggregate(pairs: { actual: number; predicted: number }[]) {
+  const errors = pairs.map((p) => Math.abs(p.predicted - p.actual) / p.actual);
   const within = (k: number) =>
-    rows.filter((r) => {
-      const ratio = r.simulatedPredictedMonths / r.actualEnrollMonths;
+    pairs.filter((p) => {
+      const ratio = p.predicted / p.actual;
       return ratio <= k && ratio >= 1 / k;
     }).length;
+  return {
+    medianErrorPct: ((median(errors) ?? 0) * 100).toFixed(0),
+    within2: within(2),
+    within15: within(1.5),
+  };
+}
+
+if (rows.length > 0) {
+  const base = aggregate(
+    rows.map((r) => ({
+      actual: r.actualEnrollMonths,
+      predicted: r.simulatedPredictedMonths,
+    }))
+  );
   lines.push(
     "",
     "-".repeat(78),
     `aggregate over ${rows.length} trials (${skips.length} skipped)`,
-    `  median |error|       ${((median(errors) ?? 0) * 100).toFixed(0)}%`,
-    `  within 1.5x          ${within(1.5)}/${rows.length}`,
-    `  within 2x            ${within(2)}/${rows.length}`
+    `  median |error|       ${base.medianErrorPct}%`,
+    `  within 1.5x          ${base.within15}/${rows.length}`,
+    `  within 2x            ${base.within2}/${rows.length}`
+  );
+  pushExperimentAggregate(
+    lines,
+    "pool-median anchor",
+    rows.flatMap((r) =>
+      r.simulatedSqrtDilutedMonths === undefined
+        ? []
+        : [
+            {
+              actual: r.actualEnrollMonths,
+              predicted: r.simulatedSqrtDilutedMonths,
+            },
+          ]
+    )
+  );
+  pushExperimentAggregate(
+    lines,
+    "at-scale anchor",
+    rows.flatMap((r) =>
+      r.simulatedSqrtDilutedAtScaleMonths === undefined
+        ? []
+        : [
+            {
+              actual: r.actualEnrollMonths,
+              predicted: r.simulatedSqrtDilutedAtScaleMonths,
+            },
+          ]
+    )
   );
 }
 
