@@ -284,9 +284,15 @@ predicted interface in **all six** seeds, UniProt O95150 numbering:
 ```
 
 31 residues, against the 28-residue DcR3 epitope on TL1A measured from 3K51;
-20 shared, Jaccard 0.513, covering 71% of the DcR3 epitope. On the DR3 side the
-predicted contacts map onto the DcR3 residues that contact TL1A at coverage
-0.82-0.89 across seeds, through a 26%-identity global alignment.
+20 shared, Jaccard 0.513, covering **71%** of the DcR3 epitope. Note this is the
+coverage of the six-seed **intersection**; the per-seed median in the table above
+is 0.857, because a single seed predicts a larger epitope than the six seeds
+agree on. Quote the one you mean.
+
+On the DR3 side the predicted contacts map onto the DcR3 residues that contact
+TL1A at coverage 0.82-0.89 across seeds, through a 26%-identity global
+alignment — and TL1A/TNFR2, which does not bind, gives 0.83-0.90 on the same
+measurement (failure mode 3).
 
 **And it is not a hypothesis anyone needed.** The graph already carries
 `L4: TL1A binds DR3` at `basis: primary`. Every immunology review says the same.
