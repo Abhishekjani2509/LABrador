@@ -221,10 +221,10 @@ are dead — do not create files under them.
       against a **copy** of memory before the real `--save`. That last one is
       the agent protecting live state from a bad write — good judgement, not
       waste, and worth keeping.
-- [ ] **Ship an `example-round.json` beside assemble.py.** The avoidable part
-      of the overhead is the agent reverse-engineering the bundle schema from
-      source every round; an example to copy removes it. SKILL.md documents the
-      shape already, which was evidently not enough.
+- [x] **`example-round.json` shipped** beside assemble.py — a complete working
+      round with every field annotated and the vocabularies inline, verified by
+      running it through the script rather than only reading well. SKILL.md now
+      says copy it rather than re-derive the shape from source.
 - [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
       the MCP; which header it accepts for a **long-lived API key** is still
       untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth

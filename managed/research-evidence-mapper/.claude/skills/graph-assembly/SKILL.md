@@ -41,6 +41,16 @@ python3 <path>/assemble.py \
 `round.json` is everything this round produced. Write it once, then run the
 command; the full graph comes back on stdout (or use `--out FILE`).
 
+**Copy `example-round.json` from this skill's directory and fill it in.** It is
+a complete, working round with every field annotated and the vocabularies
+listed inline. Do not re-derive the shape by reading `assemble.py` — the example
+is the contract, it is kept next to the script, and reading source to rebuild it
+costs calls that belong to reading papers.
+
+```bash
+cp <skill-dir>/example-round.json /tmp/round.json   # then edit
+```
+
 ```jsonc
 {
   "graph_id": "g_7f2a",        // omit for new_question — a stable id is minted
