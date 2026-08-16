@@ -246,6 +246,37 @@ sentence.
 
 ---
 
+## Calibrate `confidence` — use the whole scale, especially the bottom
+
+`findings.confidence` is your own estimate of how firmly the paper states the
+claim. **It is never used to filter anything** — nothing is dropped for scoring
+low. Its entire job is to let Stage 2 tell a hard result from a speculation,
+and low-confidence findings are the ones Stage 2 explores for novel directions.
+A finding you score 0.35 is not a worse finding; it is a different kind of lead.
+
+Measured on a real run: 38 findings scored 0.75, 0.8, 0.85 or 0.9 and **nothing
+lower**. A 0.15-wide band at the top of the scale carries no information, and
+the speculative paths Stage 2 wants were invisible.
+
+| score | the paper is | typical language |
+|---|---|---|
+| 0.9–1.0 | stating a quantified primary result unambiguously | "reduced X by 47% (p<0.001)" |
+| 0.7–0.85 | stating a clear primary result without numbers | "abolished the response" |
+| 0.5–0.65 | **hedging**, or measuring indirectly | "may contribute", "suggests", "is consistent with" |
+| 0.3–0.45 | speculating — discussion-section conjecture, a mechanism proposed but not tested | "we speculate", "could explain", "warrants investigation" |
+| < 0.3 | mentioning a possibility in passing | "it remains possible that" |
+
+**A hedged finding is not a confident one.** If you set `hedged: true`, the
+confidence belongs at **0.65 or below** — that is what hedging means. The two
+fields contradicting each other is the single most common calibration error, and
+assembly reports it in `coverage.hedged_but_confident`.
+
+Two things this is NOT. It is not a quality judgement — a careful paper hedging
+appropriately still scores low, because the score describes the *claim's
+firmness*, not the authors' competence. And it is not evidence strength — that
+is computed later from study type, agreement and independence, and lives in
+`links.confidence`. Yours is only: how hard did this sentence commit?
+
 ## The graph must be self-describing: a disease node and an accession
 
 Downstream nodes consume these graphs directly. They must not have to recover

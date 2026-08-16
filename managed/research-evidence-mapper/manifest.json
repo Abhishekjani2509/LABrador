@@ -10,13 +10,13 @@
   },
   "deployment": {
     "agent_id": "agent_015feTqKz3Bmtec2RaWaE2sW",
-    "agent_version": 9,
+    "agent_version": 10,
     "memory_store_id": "memstore_01NGZC8ti7PMqpqzUKcxuiaY",
     "skills": {
       "graph-assembly": {
-        "hash": "0f583a053070b23827ff193d7fcfdfebbff6103e418705ccf36b0865490d3b2a",
+        "hash": "95840e83c0aa58415aa0a5e6562f78df6a519ffff83b7b1bcf37ff52f197450a",
         "skill_id": "skill_01BnhBZtKmt8G1Wj7f5ZFGaW",
-        "version": "1786850983281967"
+        "version": "1786851260664392"
       },
       "literature-search": {
         "hash": "ef7187e6e2af34b77bee905b01c806032c1a11bd51ece6dbc9b60cad8eba3cb4",
@@ -24,12 +24,12 @@
         "version": "1786838400565238"
       },
       "claim-extraction": {
-        "hash": "3b791c46b72d57589f13a04745b5e832fa424be304877319a2a00e7889845d17",
+        "hash": "bb0f96277b6c0420bbe070eb3c3c139c44a824e8679039f2cce663cdeb683428",
         "skill_id": "skill_01CNo7tvxKqrnT2wCFWWvSSF",
-        "version": "1786850983320080"
+        "version": "1786851260672737"
       }
     },
-    "system_hash": "4d961ecc942494e3bd005b1e379aa0ae75309897500f8407f9e56e505a6b6573",
+    "system_hash": "cff1001287d0a9db99f62233bc94d0c89309b116d389e3f917ee326dd3da3959",
     "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d"
   },
   "description": "Turns one question about the scientific literature into a machine-readable knowledge graph of things, quoted findings, scored links and gaps, and grows it across rounds.",

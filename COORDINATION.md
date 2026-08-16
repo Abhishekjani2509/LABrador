@@ -143,6 +143,16 @@ are dead — do not create files under them.
   is one command instead of a hand-authored driver. Confirmed materialized in
   the sandbox and `cat`-ed by the agent. Call ratio moved from 16 MCP / 41
   local to 42 MCP / 36 local.
+- **BUILD.md's blocking acceptance test run, and `explain_disagreement` fired
+  in production for the first time.** `fixtures/q-disputed.txt`, graph g_e087:
+  22 things, 11 papers, 38 findings, 32 links, 43KB of raw JSON. Fact 3 — the
+  one BUILD.md calls out as "zero is a failure, not a clean result" — passed
+  with a real boundary condition:
+  `L26 Vitamin C --increases--> melanoma metastasis`, `state: "disagreed"`,
+  *why: "conditions differ: {braf v600e-driven melanoma, mouse} vs {b16f0
+  melanoma, gulo ko mice}"*. It did not just flag the conflict, it identified
+  that one camp used Gulo-knockout mice — the model that cannot synthesise
+  vitamin C, which is the whole reason the two labs disagree.
 - **`how` enum verified on a fresh graph** (g_8ada): 10/10 intervention→target
   edges came back `inhibits`, against 1/8 before. No verb outside the enum. The
   remaining `decreases` uses are correct ones — measured quantities, not
@@ -292,7 +302,8 @@ are dead — do not create files under them.
 
 *§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
-- [ ] **BUILD.md's own blocking acceptance test has never been run.** It says
+- [~] **BUILD.md's blocking acceptance test: 4 of 6 facts now verified.**
+      Fact 3 PASSED — see §3. Facts 4 and 6 below. It says
       run `fixtures/q-disputed.txt` and check six facts independently. No run
       has ever used a fixture question — everything was verified against ad-hoc
       queries instead. Three of the six are unverified:
@@ -333,6 +344,27 @@ are dead — do not create files under them.
       phenotype vs measured quantity); assembly now reports
       `proteins_without_accession` and `has_disease_node` in coverage.
       Deployed v9; template re-verified by executing it.
+- [x] **`findings.confidence` collapsed to a 0.15-wide band; fixed.** Fact 4 of
+      BUILD.md's acceptance test could not be evaluated: all 38 findings scored
+      0.75-0.9 and nothing lower. Confirmed from the code that **nothing filters
+      on confidence** — the only removals are a failed quote match and a content
+      duplicate, so the "nothing is filtered by score" guarantee holds. The
+      problem is generation, not filtering: the model never uses the bottom of
+      its own scale, so Stage 2 had no speculative leads to explore, which is
+      precisely what Stage 2 wants the low end for.
+      The tell: exactly one `hedged: true` finding, scored 0.8. Hedging and
+      confidence were not connected at all.
+      Fix: a calibration rubric in claim-extraction (0.9-1.0 quantified primary
+      result · 0.7-0.85 clear result without numbers · 0.5-0.65 hedged or
+      indirect · 0.3-0.45 discussion-section speculation · <0.3 passing
+      mention), the rule that `hedged: true` means confidence ≤ 0.65, and
+      `coverage.confidence_profile` reporting min/max/below_0_65 plus
+      `hedged_but_confident` — findings whose two fields contradict each other.
+      Reported, never silently corrected. Deployed v10.
+- [ ] **Acceptance fact 6 — three quotes spot-checked verbatim against their
+      DOIs — is the one genuinely human check still outstanding.** The
+      mechanical string match runs every round; this is the one that confirms
+      the fetched text matches the real paper.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block

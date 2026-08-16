@@ -532,6 +532,37 @@ def interventions_without_target(things, links):
                   and t.get("id") not in linked)
 
 
+def confidence_profile(findings):
+    """Report the spread of self-reported confidence, and the contradictions.
+
+    findings.confidence is never used to filter -- the only removals are a
+    failed quote match and a content duplicate. But a scale nobody uses is a
+    scale that carries nothing: one real run produced 38 findings spanning
+    0.75-0.9 and nothing lower, so Stage 2 had no speculative leads to explore
+    and no way to tell a quantified result from a hedge.
+
+    `hedged_but_confident` is the mechanically checkable half: a finding marked
+    hedged while scoring above 0.65 has two fields disagreeing about the same
+    sentence. Reported, never silently corrected -- the model's own judgement
+    stays in the graph.
+    """
+    vals = [f.get("confidence") for f in findings
+            if isinstance(f.get("confidence"), (int, float))]
+    contradictions = sorted(
+        f.get("id") for f in findings
+        if f.get("hedged") and isinstance(f.get("confidence"), (int, float))
+        and f["confidence"] > 0.65
+    )
+    profile = {
+        "n": len(vals),
+        "min": round(min(vals), 4) if vals else None,
+        "max": round(max(vals), 4) if vals else None,
+        "below_0_65": len([v for v in vals if v < 0.65]),
+        "hedged_but_confident": contradictions,
+    }
+    return profile
+
+
 def proteins_without_accession(things):
     """Protein/gene nodes carrying no UniProt accession.
 
@@ -889,6 +920,7 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
     cov["proteins_without_accession"] = unresolved
     cov["proteins_without_accession_count"] = len(unresolved)
     cov["has_disease_node"] = has_disease_node(things)
+    cov["confidence_profile"] = confidence_profile(kept)
     if duplicates:
         cov["duplicates_dropped"] = cov.get("duplicates_dropped", 0) + duplicates
 
