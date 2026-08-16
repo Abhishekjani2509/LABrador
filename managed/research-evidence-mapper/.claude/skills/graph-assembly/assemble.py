@@ -816,32 +816,40 @@ def save_state(graph, dir_path):
     with open(os.path.join(dir_path, "meta.json"), "w", encoding="utf8") as fh:
         fh.write(_dump(meta))
     rnd = graph.get("round", 1)
-    # SCHEMA.md promises findings/r<N>.json is APPENDED per round. Writing the
-    # whole graph's findings into every round's file made each file a full
-    # snapshot, so a reload read every prior finding once per round and the
-    # dedupe reported fictitious duplicates_dropped counts. Write only the
-    # findings this round is responsible for; earlier rounds keep their files.
-    findings = [f for f in graph.get("findings", [])
-                if f.get("round", rnd) == rnd]
-    blob = _dump(findings)
-    if len(blob.encode("utf8")) <= _CHUNK:
-        parts = [findings]
-    else:                       # chunk, never rewrite an earlier round
-        parts, cur, size = [], [], 0
-        for f in findings:
-            s = len(_dump(f).encode("utf8"))
-            if cur and size + s > _CHUNK:
+    # SCHEMA.md promises findings/r<N>.json is APPENDED per round. Writing every
+    # finding into every round's file made each file a full snapshot, so a
+    # reload counted prior findings once per round and produced fictitious
+    # duplicates_dropped figures.
+    #
+    # But filing only the CURRENT round's findings silently drops the rest when
+    # the earlier files are not already on disk -- saving a whole graph in one
+    # call loses every prior round. Caught by a regression test that constructed
+    # exactly that state. So each finding is filed under ITS OWN round: correct
+    # incrementally AND when a complete graph is written in one go.
+    by_round = {}
+    for f in graph.get("findings", []):
+        by_round.setdefault(f.get("round", rnd), []).append(f)
+    for r_n in sorted(by_round, key=lambda x: (str(type(x)), x)):
+        findings = by_round[r_n]
+        blob = _dump(findings)
+        if len(blob.encode("utf8")) <= _CHUNK:
+            parts = [findings]
+        else:                   # chunk; a single memory file caps at 100KB
+            parts, cur, size = [], [], 0
+            for f in findings:
+                sz = len(_dump(f).encode("utf8"))
+                if cur and size + sz > _CHUNK:
+                    parts.append(cur)
+                    cur, size = [], 0
+                cur.append(f)
+                size += sz
+            if cur:
                 parts.append(cur)
-                cur, size = [], 0
-            cur.append(f)
-            size += s
-        if cur:
-            parts.append(cur)
-    for i, part in enumerate(parts):
-        suffix = "" if i == 0 else "_%d" % (i + 1)
-        path = os.path.join(dir_path, "findings", "r%s%s.json" % (rnd, suffix))
-        with open(path, "w", encoding="utf8") as fh:
-            fh.write(_dump(part))
+        for i, part in enumerate(parts):
+            suffix = "" if i == 0 else "_%d" % (i + 1)
+            path = os.path.join(dir_path, "findings", "r%s%s.json" % (r_n, suffix))
+            with open(path, "w", encoding="utf8") as fh:
+                fh.write(_dump(part))
     return dir_path
 
 
@@ -1081,10 +1089,31 @@ def cli(argv=None):
     ap.add_argument("--save", action="store_true",
                     help="write state back and update index.json")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--show", metavar="GRAPH_ID",
+                    help="print a stored graph and exit. Read-only: never "
+                         "assembles, never writes. Use this instead of "
+                         "re-issuing a question to see its graph.")
+    ap.add_argument("--list", action="store_true",
+                    help="list stored graph ids and exit")
     a = ap.parse_args(argv)
 
     if a.selftest:
         return selftest()
+    if a.list:
+        idx = os.path.join(a.memory_dir or "", "index.json")
+        _emit(json.load(open(idx, encoding="utf8")) if os.path.isfile(idx) else {}, a.out)
+        return 0
+    if a.show:
+        if not a.memory_dir:
+            raise SystemExit("--show needs --memory-dir")
+        d = os.path.join(a.memory_dir, a.show)
+        if not os.path.isdir(d):
+            _emit({"error": "graph %r not found" % a.show, "status": "failed"}, a.out)
+            return 1
+        g = load_state(d)
+        g["graph_id"] = a.show
+        _emit(g, a.out)
+        return 0
     if not a.input:
         ap.error("--input is required (or --selftest)")
 
@@ -1095,7 +1124,25 @@ def cli(argv=None):
     gid = r.get("graph_id")
     if ask == "new_question" or not gid:
         gid = gid or _mint_graph_id(a.memory_dir, r.get("question"))
-        prior_dir = None
+        # _mint_graph_id is deliberately stable for a given question, so a
+        # retried new_question rejoins its graph instead of forking one. That
+        # only holds if the round also LOADS what is there: with prior_dir None
+        # the round assembles from empty and --save writes that over a graph
+        # that may already have several rounds of evidence in it. The stable id
+        # then points at a graph that just lost its history.
+        #
+        # Reproduced: round 1, round 2 extending it, then the same question
+        # re-issued -> 2 findings back to 1, on disk. So a new_question against
+        # an EXISTING graph loads it like any other round; only a genuinely new
+        # graph starts empty.
+        candidate = os.path.join(a.memory_dir, gid) if a.memory_dir else None
+        prior_dir = candidate if candidate and os.path.isdir(candidate) else None
+        if prior_dir:
+            # Round numbering must continue from what is stored, or the round
+            # would overwrite an existing findings/r<N>.json.
+            stored_round = load_state(prior_dir).get("round") or 0
+            if r.get("round", 1) <= stored_round:
+                r["round"] = stored_round + 1
     else:
         prior_dir = os.path.join(a.memory_dir, gid) if a.memory_dir else None
         if prior_dir and not os.path.isdir(prior_dir):
@@ -1249,6 +1296,24 @@ def selftest():
     check("stored finding still points at its own paper",
           any(_by.get(f["paper"]) == "10.1/A" and "Alpha" in f["quote"]
               for f in gc["findings"]))
+
+    # Regression: a retried new_question must REJOIN its graph, not overwrite it.
+    # _mint_graph_id is stable per question, so without loading prior state the
+    # stable id pointed at a graph that had just lost its history.
+    _d2 = _tf.mkdtemp()
+    save_state({"schema_version": "1.1", "graph_id": "g_r", "question": "q",
+                "round": 2, "status": "ok", "generated_at": "T", "error": None,
+                "things": [{"id": "t1", "name": "X", "kind": "gene"}],
+                "papers": [{"id": "p1", "doi": "10.1/A", "title": "A",
+                            "source_text": "X drives Y."}],
+                "findings": [{"id": "f1", "paper": "p1", "from": "t1",
+                              "how": "drives", "to": "t2", "says": "yes",
+                              "is_own_result": True, "round": 1,
+                              "quote": "X drives Y."}],
+                "links": [], "gaps": [], "coverage": {}, "rounds": []}, _d2)
+    gr = main(_d2, [], [], 3, "new_question", graph_id="g_r", question="q",
+              generated_at="T")
+    check("retried new_question keeps prior findings", len(gr["findings"]) == 1)
 
     a1 = _dump(main(None, finds, papers, 1, "new_question", question="q",
                     graph_id="g_test", generated_at="T", new_things=things))

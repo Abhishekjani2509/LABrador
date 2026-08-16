@@ -79,10 +79,15 @@ are dead — do not create files under them.
   runs the CLI server-side. Stateless, no shell loops, one command per call.
   An earlier revision of this node's docs wrongly concluded no MCP existed;
   that is retracted in BUILD.md/CONTRACT.md rather than silently rewritten.
-- **End-to-end verified on the deployed agent**: graph `g_9d3c` — 28 things,
-  6 papers, 23 findings *every one carrying a verbatim quote,
-  `no_quote_discarded: 0`*, 22 links, honest `coverage`
-  (`found: 46, used: 6, truncated: true`).
+- **End-to-end verified on the deployed agent**: reference artifact is
+  **`g_e087`**, committed at `managed/research-evidence-mapper/runs/` — 31
+  things, 19 papers, 42 findings all quote-verified, 37 links, one
+  `state: "disagreed"` with its boundary condition.
+  Correction: this row previously cited `g_9d3c`. That graph is **not lost and
+  not overwritten** — it lives in the pre-rename memory store
+  (`memstore_018xqMb…`, still named `literature-graph`), which was detached when
+  the node was renamed, because a store's NAME sets its `/mnt/memory/<slug>`
+  mount path. The running agent cannot see it, so citing it was misleading.
 - **Liveness**: a canary query runs before any real search; if it fails the
   agent stops and returns `status: "failed"` with `stop_reason:
   "search_unavailable"` and an `error` prefixed `PAPERCLIP UNAVAILABLE:`.
@@ -314,6 +319,26 @@ are dead — do not create files under them.
       `runs/README.md` documents what the artifact is and its one caveat: it
       predates the `delta` block, which for a round-1 graph is just "everything
       added", so a round-2 artifact would be needed to exercise `links_changed`.
+- [x] **Second data-loss path fixed: a retried `new_question` overwrote its own
+      graph.** `cli()` set `prior_dir = None` for every `new_question`, so a
+      round assembled from empty while `_mint_graph_id` handed back the SAME
+      stable id — and `--save` wrote that empty assembly over a graph with
+      several rounds in it. Reproduced: round 1, round 2 extending it, question
+      re-issued → 2 findings back to 1, on disk. Worse than the id-collision bug
+      because it needs no collision, only re-asking a question, and both
+      SKILL.md ("rejoins the same graph") and CLAUDE.md ("a retried round is a
+      no-op") promised the opposite.
+      Fix: a `new_question` against an EXISTING graph loads it and continues its
+      round numbering; only a genuinely new graph starts empty. Added `--show`
+      and `--list` so a graph can be read without assembling or writing at all —
+      nobody should re-issue a question to see its graph.
+- [x] **A bug I introduced with the append-only fix, caught by its own
+      regression test.** `save_state` filed findings into `r<current>.json` but
+      filtered to that round's findings, so writing a whole graph in one call
+      silently dropped every prior round. Each finding is now filed under ITS
+      OWN round, which is correct incrementally and for a full-graph write.
+      Verified: three rounds accumulate, one file per round, re-issue rejoins at
+      round 4 with nothing lost.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
