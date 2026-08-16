@@ -523,3 +523,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:18 UTC** — merged `AbrehamT/Hypothesis_Generator` (09e03cd, tier-2: modify/delete on his dir move — move wins, formatting reapplied) — hyp_gen now managed/hypothesis-generator with agent scaffolding; 212 tests green.
 
 - **2026-08-16 01:19 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fixtures (BUILD.md step 1), and what resolve_link revealed in production — typecheck+check green.
+
+- **2026-08-16 01:21 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: drop an unused helper from run_intake — typecheck+check green.
