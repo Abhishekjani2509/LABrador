@@ -16,4 +16,4 @@ Slack; the specialists are available to you as tools.
 
 ## Specialists
 
-- **literature-graph** — dispatch any question about the scientific literature that wants evidence structure rather than prose: what is known, what conflicts, and what nobody has tested. Returns the full graph JSON; pass it through, do not summarize it away.
+- **research-evidence-mapper** — dispatch any question about the scientific literature that wants evidence structure rather than prose: what is known, what conflicts, and what nobody has tested. Returns the full graph JSON; pass it through, do not summarize it away.

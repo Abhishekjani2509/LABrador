@@ -1,9 +1,9 @@
-# literature-graph — deliverables contract
+# research-evidence-mapper — deliverables contract
 
 Nothing gets built until this is agreed. Every row below is a thing someone can
 pick up and own.
 
-Contract for the data itself is `managed/literature-graph/SCHEMA.md` (input JSON,
+Contract for the data itself is `managed/research-evidence-mapper/SCHEMA.md` (input JSON,
 output JSON, guarantees, memory layout). Not repeated here.
 
 ---
@@ -14,7 +14,7 @@ output JSON, guarantees, memory layout). Not repeated here.
 |---|---|
 | **In** | `{graph_id?, ask, target, depth, reason}` — `SCHEMA.md` §Request |
 | **Out** | full graph JSON — `SCHEMA.md` §Output |
-| **State** | `/mnt/memory/literature-graph/` — Stage 1 owns it, Stage 2 never sends a graph |
+| **State** | `/mnt/memory/research-evidence-mapper/` — Stage 1 owns it, Stage 2 never sends a graph |
 | **Invocation** | `message` mode, `session_policy: "fresh"` |
 
 Request arrives as the task string. One ask per request, one round per request.
@@ -213,7 +213,7 @@ output. Non-determinism here silently corrupts every score.
 | `fixtures/` ×3 | source — well-studied, sparse, genuinely disputed |
 | `manifest.json` | compiled — sonnet-5, message, fresh, Paperclip, `memory` block |
 | `acl.ts` | compiled — `{ public: true }` |
-| `agent/tools/literature-graph.ts` | compiled — eve wrapper |
+| `agent/tools/research-evidence-mapper.ts` | compiled — eve wrapper |
 | `render.html` | deferred until real data exists |
 
 ---
@@ -226,7 +226,7 @@ output. Non-determinism here silently corrupts every score.
 | 1 | fixtures | 3 questions, each with a stated reason it's in the set |
 | 2 | `CLAUDE.md` + 3 skills + `assemble.py` | `assemble.py` twice-run byte-identical on a fixture |
 | 3 | hand-run in session on largest fixture | output validates against `SCHEMA.md` |
-| 4 | `/managed-agent-deploy literature-graph` | deploy succeeds |
+| 4 | `/managed-agent-deploy research-evidence-mapper` | deploy succeeds |
 | 5 | smoke, blocking | six facts below |
 | 6 | render | deferred |
 
@@ -253,7 +253,7 @@ API key. `Authorization: Bearer <token>` is proven; `X-API-Key` is what the CLI
 uses against the REST API and may or may not be accepted by the MCP. Needs a real
 key to settle. Everything else is green, so steps 1–3 are no longer gated.
 
-**Smoke facts** (`bun run console literature-graph -- --once "$(cat fixtures/q-disputed.txt)"`):
+**Smoke facts** (`bun run console research-evidence-mapper -- --once "$(cat fixtures/q-disputed.txt)"`):
 1. Paperclip called at event level, not claimed in prose
 2. reply carries full graph JSON, not a summary
 3. disputed fixture yields ≥1 `state: "disagreed"` — zero is failure, not cleanliness

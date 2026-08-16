@@ -1,4 +1,4 @@
-# literature-graph
+# research-evidence-mapper
 
 A Claude Managed Agent that turns one question about the scientific literature
 into one machine-readable knowledge graph, and grows that graph across rounds.
@@ -150,11 +150,11 @@ it. Which header the MCP accepts for a **long-lived API key** is still untested;
 
 ### Memory
 
-One memory store, mounted at `/mnt/memory/literature-graph/`, provisioned by
+One memory store, mounted at `/mnt/memory/research-evidence-mapper/`, provisioned by
 `bun run deploy`. State survives across sessions and rounds.
 
 ```
-/mnt/memory/literature-graph/
+/mnt/memory/research-evidence-mapper/
   index.json          graph_id -> question, round, updated_at
   g_7f2a/
     meta.json  things.json  papers.json  links.json  gaps.json
@@ -195,7 +195,7 @@ From the repo root, in a Claude Code session:
 
 ```bash
 bun install                                   # once per machine
-/managed-agent-deploy literature-graph        # compiles + deploys + smoke tests
+/managed-agent-deploy research-evidence-mapper        # compiles + deploys + smoke tests
 ```
 
 That compiles `manifest.json`, `acl.ts` and the router wrapper, uploads the
@@ -208,7 +208,7 @@ Requirements:
 - `ANTHROPIC_API_KEY` in `.env` at the repo root
 - a Paperclip credential in a platform vault, id in `manifest.vault_ids`
 
-Re-deploy any time with `bun run deploy literature-graph` — idempotent, and a
+Re-deploy any time with `bun run deploy research-evidence-mapper` — idempotent, and a
 no-op when nothing changed.
 
 ### B. Call the deployed agent (what everyone else does)
@@ -216,8 +216,8 @@ no-op when nothing changed.
 Nothing to install. It is a server-side agent with an HTTP endpoint.
 
 ```bash
-bun run console literature-graph              # opens it in the Claude Console
-bun run console literature-graph -- --once "$(cat fixtures/q-disputed.txt)"
+bun run console research-evidence-mapper              # opens it in the Claude Console
+bun run console research-evidence-mapper -- --once "$(cat fixtures/q-disputed.txt)"
 ```
 
 Any backend can drive it with three HTTP calls — create a session, send the
@@ -254,7 +254,7 @@ downloading; `pip install gxl-paperclip` fails because the PyPI index returns
 so on Python 3.13+ it tries a Rust source build and fails.
 
 The agent's own skills are **not loadable** while prototyping — the session's
-cwd is the repo root, so `managed/literature-graph/.claude/skills/` is outside
+cwd is the repo root, so `managed/research-evidence-mapper/.claude/skills/` is outside
 what the Skill tool discovers. Read the SKILL.md files and follow them by hand;
 the deploy smoke test is what proves real skill loading.
 

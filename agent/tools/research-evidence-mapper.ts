@@ -1,11 +1,11 @@
 import { defineDynamic, defineTool } from "eve/tools";
 import { defineState } from "eve/context";
 import { allowed } from "@/lib/access.ts";
-import { acl } from "@/managed/literature-graph/acl.ts";
+import { acl } from "@/managed/research-evidence-mapper/acl.ts";
 import { loadManagedAgent, runTask } from "@/lib/claude-managed-agent.ts";
 
 const sessionIdState = defineState<string | undefined>(
-  "literature-graph-session",
+  "research-evidence-mapper-session",
   () => undefined,
 );
 
@@ -33,7 +33,7 @@ export default defineDynamic({
               required: ["task"],
             },
             async execute(input) {
-              const { manifest, rubric } = await loadManagedAgent("literature-graph", {
+              const { manifest, rubric } = await loadManagedAgent("research-evidence-mapper", {
                 skipToolImport: true,
               });
               const previous =

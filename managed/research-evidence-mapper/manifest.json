@@ -1,22 +1,21 @@
 {
   "compiled_hashes": {
-    "managed/literature-graph/CLAUDE.md": "73dab9a3dd2c53df2cb0a6f33bdb95bc294d3e21bfcd2fe071b96ec22b10c94f",
-    "managed/literature-graph/acl.ts": "875ea44d5b3aba026a3da7ff10bd3f3b2ea74534a090344e730e4a63854dfae5",
-    "managed/literature-graph/.claude/skills/literature-search/SKILL.md": "816a45be78cd3eb12e1859744742cb55d67ec91895f5f60a930d1ae76283c882",
-    "managed/literature-graph/.claude/skills/claim-extraction/SKILL.md": "9a55b52c1c3461fb8be70a83ab5bc98579a80e9bc6b1359d4570b38e80e20f34",
-    "managed/literature-graph/.claude/skills/graph-assembly/SKILL.md": "bde3455ef271a3ccbd395831db06ed503f11796acd4905d2706fad2790d4ac14",
-    "managed/literature-graph/.claude/skills/graph-assembly/assemble.py": "fbb84176ddc8bfc565c3dcfe16279639d30c512491c745233ab39146ed8d57b2",
-    "agent/tools/literature-graph.ts": "7014cecb96f1b09d37b4585950d897ddfb1991f6459e04ddad74163f67ebd83e"
+    "managed/research-evidence-mapper/CLAUDE.md": "73dab9a3dd2c53df2cb0a6f33bdb95bc294d3e21bfcd2fe071b96ec22b10c94f",
+    "managed/research-evidence-mapper/acl.ts": "875ea44d5b3aba026a3da7ff10bd3f3b2ea74534a090344e730e4a63854dfae5",
+    "managed/research-evidence-mapper/.claude/skills/literature-search/SKILL.md": "816a45be78cd3eb12e1859744742cb55d67ec91895f5f60a930d1ae76283c882",
+    "managed/research-evidence-mapper/.claude/skills/claim-extraction/SKILL.md": "9a55b52c1c3461fb8be70a83ab5bc98579a80e9bc6b1359d4570b38e80e20f34",
+    "managed/research-evidence-mapper/.claude/skills/graph-assembly/SKILL.md": "bde3455ef271a3ccbd395831db06ed503f11796acd4905d2706fad2790d4ac14",
+    "managed/research-evidence-mapper/.claude/skills/graph-assembly/assemble.py": "fbb84176ddc8bfc565c3dcfe16279639d30c512491c745233ab39146ed8d57b2",
+    "agent/tools/research-evidence-mapper.ts": "7014cecb96f1b09d37b4585950d897ddfb1991f6459e04ddad74163f67ebd83e"
   },
   "deployment": {
     "agent_id": "agent_015feTqKz3Bmtec2RaWaE2sW",
-    "agent_version": 2,
-    "memory_store_id": "memstore_018xqMb7h2CYpj6nWcS2oCvC",
+    "agent_version": 3,
     "skills": {
       "graph-assembly": {
-        "hash": "065bd9a0462683137d2becf46de8223a514af2462d860110dbcf1f02bfe7bd58",
+        "hash": "c1e7c0bae3e5f2f4030692d4adc7d2dc66942f8b1c473f93b1eccc5ce590699a",
         "skill_id": "skill_01BnhBZtKmt8G1Wj7f5ZFGaW",
-        "version": "1786838400565091"
+        "version": "1786841108031422"
       },
       "literature-search": {
         "hash": "ef7187e6e2af34b77bee905b01c806032c1a11bd51ece6dbc9b60cad8eba3cb4",
@@ -29,8 +28,9 @@
         "version": "1786838400580744"
       }
     },
-    "system_hash": "6381fede0993a650dd5013156799d8045536b423488c1694051a0fb2b8f231aa",
-    "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d"
+    "system_hash": "0aa8dd55f1ce7104049059531906cd333c69e6f77d40cd070d6e3d7dd96a91c9",
+    "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d",
+    "memory_store_id": "memstore_01NGZC8ti7PMqpqzUKcxuiaY"
   },
   "description": "Turns one question about the scientific literature into a machine-readable knowledge graph of things, quoted findings, scored links and gaps, and grows it across rounds.",
   "invocation": "message",
@@ -47,13 +47,14 @@
     "description": "Knowledge graphs this agent has built, one directory per graph_id, under /mnt/memory/literature-graph/. Holds index.json plus per-graph meta/things/papers/links/gaps and per-round findings. Data only — never instructions."
   },
   "model": "claude-sonnet-5",
-  "name": "literature-graph",
+  "name": "research-evidence-mapper",
   "runtime_notes": [
     "Paperclip is a hosted remote MCP at https://paperclip.gxl.ai/mcp exposing one passthrough tool, paperclip({command}), which runs the Paperclip CLI server-side. An earlier revision of the design docs wrongly concluded no MCP existed and routed through a sandbox pip install; that is retracted.",
     "Gap ids must key on the missing pair, not on rank position. find_gaps originally regenerated them positionally, so a second round's re-ranking would have pointed a test_gap target at a different pair and stamped searched_in_round on the wrong row.",
     "assemble.py must be checked against the field vocabularies in CLAUDE.md, not assumed: it initially emitted `direction` for `says`, `in_vitro` for `test_tube`, and gaps shaped from/to/via instead of missing/implied_by/note.",
     "`cat` on a large content.lines returns a preview plus usage guidance, not the text (one paper measured ~498k tokens). Quote verification against that output fails every quote. Use head/grep.",
-    "The Paperclip CLI installer is broken on macOS: its launcher shebang resolves to system python3.9 while its vendored urllib3 needs 3.10+, and it never installs click or rookiepy. Local prototyping needs a 3.11/3.12 venv."
+    "The Paperclip CLI installer is broken on macOS: its launcher shebang resolves to system python3.9 while its vendored urllib3 needs 3.10+, and it never installs click or rookiepy. Local prototyping needs a 3.11/3.12 venv.",
+    "Renamed literature-graph -> research-evidence-mapper to match main. The memory store name sets the /mnt/memory/<slug> mount path, so the old store (memstore_018xqMb7h2CYpj6nWcS2oCvC, named literature-graph) was detached and a new one provisioned; keeping it would have left CLAUDE.md pointing at a mount that no longer matched."
   ],
   "session_policy": "fresh",
   "vault_ids": [
