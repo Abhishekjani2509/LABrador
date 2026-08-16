@@ -1,0 +1,32 @@
+{
+  "_README": "Thesis frame for thesis-bridge.ts — the fields an IndicationThesis requires that a hyp_gen slate CANNOT supply. EVERY value in this file is ASSUMED BY THE ANALYST. None of it is a graph finding, and thesis-bridge stamps each one as ASSUMED in its `assumed` block so the label survives into the trace. If you disagree with a number here, change it here: the bridge will never invent one.",
+  "_subject": "An IRAK4-inhibitor program in rheumatoid arthritis. Paired with a slate generated from managed/research-evidence-mapper/runs/g_1a4f.json, whose own question names rheumatoid arthritis. Do not pair this frame with a slate from a different disease graph.",
+  "biomarkerPopulation": {
+    "_why": "ASSUMED. The trial population an IRAK4-inhibitor RA program would realistically enrol, mirroring the entry criteria of the RA JAK-inhibitor and biologic trials this class competes with (seropositive, inadequate response to methotrexate). The graph contains no epidemiology of any kind — no prevalence, no assay availability — so all three fields are analyst decisions.",
+    "assayAvailable": true,
+    "assayAvailableWhy": "ASSUMED. Anti-CCP and rheumatoid-factor serology are routine standard-of-care assays in RA, so marker status is known before screening rather than measured for the trial.",
+    "marker": "seropositive RA (anti-CCP and/or RF positive) with inadequate response to methotrexate",
+    "prevalenceInDisease": 0.6,
+    "prevalenceInDisease_why": "ASSUMED ~0.6. Seropositivity covers roughly two thirds of RA patients and the MTX-IR requirement narrows that further; 0.6 is the analyst's single point estimate for the joint criterion, NOT a figure read off a registry."
+  },
+  "diseaseNameOverride": "rheumatoid arthritis",
+  "diseaseNameOverride_why": "ASSUMED. REQUIRED for this slate: g_1a4f contains no `disease` entity at all (its 5 things are 2 small_molecule and 3 process nodes), so every hypothesis's object_name is a process, not an indication. Without this override the bridge would put 'MyD88 dimerization inhibition' in disease.name. The disease is named in the graph's own question string, which the bridge echoes verbatim in provenance.diseaseBasis so a reader can check the substitution.",
+  "endpoint": {
+    "_why": "ASSUMED. The graph states no endpoint and no effect size. ACR20 at week 12 is the conventional registrational primary endpoint for RA trials, which makes it the honest choice for a forecast that will be compared against RA precedent trials.",
+    "expectedEffectSize": 0.35,
+    "expectedEffectSize_why": "ASSUMED 0.35 (Cohen's d, modest on purpose). An IRAK4 inhibitor added on background MTX is not assumed to beat an approved JAK inhibitor; a modest effect size raises the required N, which is the conservative direction for a recruitment forecast.",
+    "name": "ACR20 response at week 12",
+    "type": "binary"
+  },
+  "mechanismHypothesis": "orthosteric",
+  "mechanismHypothesis_why": "ASSUMED. IRAK4 inhibitors in the clinic (PF-06650833, KIC-0101 — both named as aliases of thing t1 in the graph) are ATP-competitive kinase inhibitors. Recorded so the tractability node's chain-selection enum has a value; the graph does not state it.",
+  "sponsor": "UNSPECIFIED (no sponsor in the graph or the frame)",
+  "targetDirectionOverride": "inhibit",
+  "targetDirectionOverride_why": "ASSUMED. The slate's path verb for this hypothesis is `suppresses`, which is NOT in the mapper's closed `how` enum (SCHEMA.md: inhibits|activates|binds|increases|decreases|drives|associated_with), so the bridge maps it to `modulate` rather than guessing. The analyst states `inhibit` because the asset IS an IRAK4 inhibitor. Delete this field to see the bridge's own conservative mapping instead.",
+  "targetSymbolOverride": "IRAK4",
+  "targetSymbolOverride_why": "ASSUMED-but-checkable. REQUIRED for this slate: g_1a4f carries no protein or gene entity (Rafal hit the same wall in graph-intake — COORDINATION §3), so no interior path node can supply a target symbol. IRAK4 is named inside the thing's own name ('IRAK4 inhibition', t1) and its aliases, so this is reading the graph's string rather than importing outside knowledge — but it is still the analyst asserting it, not the graph typing it.",
+  "tissue": "synovium",
+  "tissue_why": "ASSUMED. The graph's findings are measured in RA fibroblast-like synoviocytes and synovial fibroblasts (see the verbatim quotes on findings n_f1/n_f2/f3), so synovium is the tissue those results are about. Still an analyst label: the graph has no tissue field.",
+  "uniprotAccession": "Q9NWZ3",
+  "uniprotAccession_why": "ASSUMED-but-checkable. Q9NWZ3 is the human IRAK4 accession in UniProt. Supplied because thesis.ts §6 item 2 makes it the tractability node's join key and the graph has no accession on any thing."
+}
