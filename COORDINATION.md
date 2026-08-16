@@ -310,3 +310,66 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:42 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: survive the first real graph, and carry computation back — typecheck+check green.
 
 - **2026-08-16 00:47 UTC** — merged `abhishek-jani` (MERGED) — Verify highlander interop against the real forecaster contracts (read-only) · Adapter A: mapper findings -> IndicationThesis.Evidence[], on the real graph; merged `vaalessi/hypothesis-highlander` (MERGED) — Apply adversarially-verified review fixes (7 items, +11 regression tests) — typecheck+check green.
+
+## 10. Observability layer (glassbox) — plan + assignments
+
+**Why:** a skeptical non-programmer will not trust a number they cannot check.
+The glassbox wraps every node call in one identical **trace envelope** — data
+used (checkable NCT/DOI/price ids + what each was used for), the decision with
+its verbatim basis strings, what was handed to the next node, and honesty
+labels (SIMULATED / SYNTHETIC / ASSUMED / NOT_DECISION_GRADE) that nothing
+downstream may remove. It explains ONE run; `hypothesis-highlander` optimizes
+across MANY — different layers, deliberately.
+
+**Spec + working demo:** `managed/pipeline-observatory/` — DESIGN.md (envelope
+spec, per-node instrumentation table, portability runbook), trace-demo.ts (a
+REAL trace of forecaster → economics-bridge → economics, saved to
+fixtures/trace-demo-output.json), observatory.html (open in any browser, no
+server — the non-CS view). Every assignment below comes from the DESIGN.md §3
+gaps table — nothing invented.
+
+**Abhishek** — TASK: forecaster emits its own envelope pieces natively
+(version/commit stamp, dataSource roles, eligibility ASSUMED label as a field)
+instead of the demo deriving them. WHY: "which trials did you learn from, and
+what's a guess?" answered by the node itself, not a wrapper. ACCEPTANCE:
+trace-demo builds the forecaster envelope with zero derivation heuristics.
+EFFORT: S.
+
+**Soliman** — TASK: per-run quote-verification summary (assemble.py already
+verifies quotes; surface pass/fail counts + coverage in one run-level block),
+and fix the SCHEMA drift the bridge found (findings lack round/flags; r2.json
+is a snapshot, not the promised append-only chunk). WHY: "verbatim quotes" is
+only checkable if the checker's score is visible. ACCEPTANCE: a mapper run
+artifact carries {quotesVerified, quotesFailed, coverage} and matches
+SCHEMA.md. EFFORT: M.
+
+**Rafal** — TASK: when dossier assembly first runs end-to-end, emit the JSON
+with the falsification ledger + insufficient_evidence verdicts mapping into
+envelope caveats/honestyLabels (the rules in your CLAUDE.md already define
+them). Interim: pipeline.html stage statuses land as caveats. WHY: "is the
+target druggable?" is currently the skeptic's biggest unanswerable. ACCEPTANCE:
+one real dossier JSON wrapped by trace-demo. EFFORT: M (blocked on assembly).
+
+**Vince** — TASK (economics): emit a one-sentence plain-language headline in
+AnalysisResult (everything else already maps). EFFORT: S. TASK (highlander):
+store the trace of each evaluated run in the archive entry, and reconcile your
+built-in Adapter A/B with the canonical bridges (INTEROP-highlander.md lists
+the exact divergences — background_only rows kept, source "unknown" fallback,
+fractional delay years, hardcoded $/yr). WHY: an archive entry with a trace is
+evidence; without one it's a claim. ACCEPTANCE: highlander interop tests run
+against the real contracts, not inline stubs. EFFORT: M.
+
+**Cyrus** — TASK: emit envelopes from the Managed-Agents runtime (runTask
+already streams progress events — the natural hook), so DEPLOYED agents get
+traced the same as local scripts. WHY: the glassbox must survive the move to
+cloud agents or it dies at deployment. ACCEPTANCE: one deployed-agent call
+produces a trace envelope with version/commit + duration. EFFORT: M.
+
+**Moamen** — no assignment (probe node retired). Optional S: if any envelope
+needs a new egress host from the sandbox, re-run the probe pattern first.
+
+**Abraham / Sean / Weichi** — TASK (when the hypothesis node exists): emit an
+envelope alongside each IndicationThesis — dataSources = the papers/graph ids
+the hypothesis came from. WHY: the chain's FIRST link is otherwise invisible.
+ACCEPTANCE: a thesis arrives with its envelope; trace-demo prepends it.
+EFFORT: S (once the node exists).
