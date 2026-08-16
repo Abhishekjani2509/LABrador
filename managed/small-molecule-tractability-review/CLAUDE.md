@@ -363,30 +363,58 @@ happened to be detected in the same crystal cannot bear a verdict.
 4. **Do not substitute persistence.** See 4c. It is the obvious wrong fix.
 5. **PRANK rank is a site-finding aid, never a quality value.** See 4d.
 
-**4a — the volume guide is a PROPOSAL, NOT A CALIBRATED THRESHOLD.**
+**4a — THE VOLUME SEPARATION IS SUSPENDED. Do not use it. 2026-08-15.**
 
-Pocket volume at D=1.6 separated all 15 targets perfectly: **AUC 1.000**, CI
-[1.000, 1.000], stable under **all 15** leave-one-target-out refits. Every known-
-hard target at or below 207 Å³ (TL1A 137, CD20 154, IL-11 164, MYC 188, TNF 207);
-every known-druggable one at or above 242 Å³ (NLRP3 242, IL-17A 250, BCL-2 265,
-JAK1 286, EGFR 290, RORgt 386, TYK2 403, KRAS 400, S1PR1 478, IRAK4 574). It is
-not a size artifact: r(n_pockets, volume) = **−0.098**, and the hard targets have
-*more* pockets, median 17 against 12.
+This rule previously stated that pocket volume at D=1.6 separated all 15
+calibration targets perfectly at AUC 1.000, and gave a guide of 240 Å³ and above
+for druggable, 210 Å³ and below for hard. **That result is withdrawn pending
+re-measurement**, because the calibration anchors do not measure the proteins
+they are attributed to.
 
-So **240 Å³ and above fell entirely in the druggable group and 210 Å³ and below
-entirely in the hard group** — and that boundary is a **17% margin fitted post
-hoc on n=15**. Mark it as uncalibrated everywhere it appears, exactly the way the
-4 Å off-site distance in rule 4b is marked, and **do not let it gate anything**
-until it has out-of-sample validation. A target at 230 Å³ is not classified by
-this rule; it is unclassified by it.
+**What was found, by two agents independently:**
 
-**The evaluation's own stated limitation, which travels with the guide:** n = 5
-hard targets, all PPI / cytokine / membrane class, against a druggable set
-enriched in kinases, nuclear receptors and GPCRs. **Volume may partly be tracking
-target class rather than tractability.** The mitigation is that the two least
-classical druggable targets, NLRP3 at 242 and IL-17A at 250, still land above
-every hard target — but that is a mitigation, not a control, and a perfect AUC on
-15 points with a 17% margin is exactly the shape an overfit boundary has.
+- **MYC's 188 Å³ — one of only five hard anchors — is a pocket containing zero
+  MYC atoms.** Its lining residues in 6G6J and 6G6L are entirely **MAX
+  (P61244)**, a different protein; 1NKP's are MAX plus **DNA**; 5I4Z is **apo
+  OmoMYC**, an engineered miniprotein. Three of five MYC pockets contain no MYC
+  residue at all.
+- **IL-11's 164 Å³ came from 6O4P, which is not an IL-11 structure.** Its single
+  entity is **Q14626, interleukin-11 receptor alpha.** The entry does not appear
+  in `structures_by_accession` for P20809.
+- **KRAS's 400 Å³ is a median over two different pockets**, one of which is the
+  **GDP site** — P-loop, NKCD and SAK motifs — not switch-II. The site-anchored
+  value is 226 Å³.
+
+**And the corrected numbers are unstable across the boundary.** Re-measured on
+wild-type entries, MYC's median moves **187.9 → 325.7 Å³**, from below the hard
+bound to above the druggable bound, purely by changing which structures form the
+ensemble. IL-11's two genuine entries give **227.6 Å³ and 59.9 Å³**. Thresholded
+on volume, MYC would have come out druggable.
+
+**The cause is a gap that was only closed today:** `pocket_scan` could not
+restrict scoring to the target's chains, so every anchor scored whichever pocket
+ranked highest across the whole assembly — partners, receptors, fusions, nucleic
+acid. Every one of the fifteen was measured before `chains` and `site_residues`
+existed.
+
+**Until a re-anchored calibration set exists: report `pocket_volume_a3` as a
+measurement and let it carry no verdict.** Do not compare it to 210 or 240 Å³.
+Do not describe volume as separating druggable from hard. A volume is a number
+about a cavity in a structure you scored, and nothing more, until the set behind
+it has been rebuilt with chain selection asserted.
+
+**What is NOT affected.** The demotion of the druggability score in the rest of
+rule 4 stands on its own evidence and is, if anything, stronger: MYC's D=2.4
+median of 0.75 was independently reproduced and beats **7 of 10** druggable
+targets, not 5. Druggability remains `load_bearing: false`. The clustering sweep,
+rule 4b, rule 4c and rule 4d are unchanged.
+
+**One caution for whoever rebuilds this.** A filter that looks safe and is not:
+`polymer_entities.uniprot_accession` types a chimera as a single entity, so
+filtering MYC to "entries containing only P01106" returns 7 entries of which
+**6 are fusions** — four Cypovirus polyhedrin, two TBP/TAF1. Single-entity is not
+a purity filter. Verify at sequence level, which is how all three of these were
+caught.
 
 **The rest of rule 4, and rule 4b, are unchanged in substance and still
 mandatory** — the sweep is what *measures* the 0.229 median swing that demoted
@@ -1014,6 +1042,10 @@ Before reporting any actives count:
   not strong precedent. MYC: 1,079 compounds, 0 of 25 structures with any ligand
   above 120 Da.
 
+**And none of those figures may be a row-set length that was not reconciled
+against an independent `COUNT` — see rule 14.** The row cap moves, silently, and
+a capped count is about the cap and not about the target.
+
 ### 7. Clinical failure is not evidence against tractability
 
 They are different questions and other stations answer the second one. RORgt has
@@ -1191,6 +1223,90 @@ is not, the tool returns a `ModuleNotFoundError` rather than an empty result.
 Read that as unavailability, null the axis, and record it in `not_found` —
 never as "no structural neighbours found".
 
+### 14. Every count is reconciled against an independently issued `COUNT`. A mismatch is a hard failure.
+
+**Paperclip serves a *moving* row cap.** Measured 2026-08-15 while regenerating
+fixture counts: the same query returned **200 rows one moment and exactly 10 the
+next** — well-formed table, no error, no warning, no truncation marker, no
+change to the query. The first run recorded **KRAS as 10 PDB entries against a
+true 522**. Nothing in the output told the two runs apart. Only reconciling
+against a separately issued `COUNT` caught it.
+
+Read what that does to this station. The dossier's central claim is that it can
+tell *there is no evidence* from *we failed to retrieve the evidence*. A result
+set silently truncated to 5% of its rows, correctly formatted, defeats that
+claim completely: every count taken from a row set is a lower bound of unknown
+tightness and is indistinguishable from a real answer. **Every count anyone has
+produced against this source could be wrong this way.** It is also the leading
+explanation for several things we have been attributing elsewhere — a "degraded"
+table that came back in 7 ms on re-test, timings varying by two orders of
+magnitude, and two agents reading the same source and reporting different
+figures.
+
+So, binding:
+
+1. **Any number that enters the dossier as a count is reconciled against an
+   independently issued aggregate.** Issue a second call — `SELECT COUNT(*)` or
+   `COUNT(DISTINCT …)` over the same predicate — and compare it to the length of
+   the row set you counted. Not optional on well-studied targets, and not
+   optional on small results: **10 rows is exactly what the cap looked like.**
+2. **The same applies to any query whose result *length* is the answer** — a
+   list of structures, compounds, trials, approved drugs, clinical candidates,
+   terminated programs, ensemble entries, Foldseek neighbours. If `len(rows)` is
+   going to become a number in the JSON, it needs its own `COUNT`.
+3. **A mismatch is a hard failure, not a warning.** Do not report the larger of
+   the two, do not report the aggregate with a note beside it, do not pick.
+   The field is `null`, and `not_found` records the reason naming **both**
+   figures and **both** queries. A reconciled count and an unreconciled one must
+   never sit side by side in one dossier as plain numbers.
+4. **Prefer never needing it.** Aggregate server-side in the first place
+   (`COUNT`, `MAX`, `STRING_AGG … GROUP BY`) — a one-row result cannot be
+   capped. Reconciliation is what you do when you genuinely needed the rows.
+5. **A round number at a known cap is the tell, not the test.** 200 and 10 are
+   the two caps observed. Exactly 200 or exactly 10 rows is capped until an
+   aggregate says otherwise — but 47 rows is **not** thereby safe, because we do
+   not know what sets the cap or what other values it takes. Only the aggregate
+   clears a count.
+6. **Record that you did it.** There is no template field for a reconciliation
+   and this rule does not add one silently. Until one exists, put the pair in
+   the owning block's existing `sources` list — e.g. `"structure.total_pdb_structures:
+   522 rows reconciled against COUNT(*) = 522 (paperclip_sql -s proteins)"` —
+   and put any mismatch in `not_found`. The field this rule *would* want is a
+   per-block `count_reconciliation` object (`{"field", "rows", "count_aggregate",
+   "agrees"}`) on `target_precedent`, `structure` and `family_precedent`; it is
+   **proposed, not added**, because the template's 17 top-level keys and their
+   shapes are read by the validator and by consumers, and changing them is not
+   this rule's call to make.
+
+### 15. Four Paperclip failure signatures. Every one of them means the query did not run.
+
+A failed retrieval that reaches the JSON as `0` or `[]` is the one error this
+dossier cannot survive, and Paperclip fails in more ways than the documentation
+admits: **11 of 30 SQL calls in one dry run failed, across four distinct
+signatures, three of them undocumented.**
+
+| signature | what it actually is |
+| --- | --- |
+| `[error] Request timed out` | observed at 120 s on a **tableless `SELECT 1`**. It is therefore not a statement-cost signal and carries no information about your query. |
+| `[error] Something went wrong. Please try again.` | undocumented. No code, no detail, no way to tell transient from permanent. |
+| `vsh: cd: /papers/: Permission denied` | returned by `paperclip sql` **for a SQL query** — a shell error from another subsystem, naming a path you never queried. |
+| a silently capped row set | rule 14. Well-formed table, correct columns, **no error text at all** — the only one of the four that does not announce itself. |
+
+**Any of these means the query did not run.** The value is `null`, the reason is
+recorded in `not_found` quoting the signature verbatim, and the retry is
+short-then-long, never long-twice. Never `0`. Never `[]`. Never "no approved
+small molecules", "no holo structures", "no terminated programs" or "no
+precedent found". A timeout is not a zero, a shell error is not a zero, and a
+capped table is not a count.
+
+**Only auth failures are guarded today, and that guard catches none of the
+four.** The tool layer throws on `401`/`403`/`unauthorized`/`forbidden`/`invalid
+api key` and friends, and only when the process also exits non-zero. Timeouts,
+"Something went wrong", `Permission denied` and a capped-but-well-formed table
+match none of those patterns — and the fourth is not even a failed run. **Do not
+expect the tool layer to stop any of them.** The guard is these rules, the
+reconciliation in rule 14, and nothing else.
+
 ## Falsification pass
 
 Before returning, actively try to break your own precedent claim. Record what
@@ -1335,13 +1451,13 @@ omit a key, never invent a value.
   },
 
   "tractability": {
-    "_primary": "pocket_volume_a3.primary_d1_6_a3 is THE computed-axis number (AUC 1.000 over 15 targets). druggability is reported and load-bearing on nothing.",
+    "_primary": "pocket_volume_a3.primary_d1_6_a3 is the computed-axis number REPORTED, but it carries no verdict: the AUC 1.000 separation is SUSPENDED (rule 4a, 2026-08-15) because three of five hard anchors measured the wrong protein. Do not compare it to 210 or 240 A^3. druggability remains load-bearing on nothing.",
     "pocket_volume_a3": {
       "min": null, "max": null, "spread_pct": null,
       "clustering_d": null,
       "primary_d1_6_a3": null,
       "site_pocket_selected_by": null,
-      "_primary_note": "primary_d1_6_a3 is the site volume at D=1.6 ONLY, not the pooled min/max. D=1.6 specifically: at D=2.4 volumes exceed 1000 A^3 and sites merge with neighbouring cavities. UNCALIBRATED GUIDE, A PROPOSAL NOT A THRESHOLD: >=240 A^3 fell entirely in the druggable group and <=210 A^3 entirely in the hard group, but that is a 17% margin fitted post hoc on n=15 and it gates nothing. Limitation: n=5 hard targets, all PPI/cytokine/membrane, against a druggable set enriched in kinases/nuclear receptors/GPCRs, so volume may partly track target class."
+      "_primary_note": "primary_d1_6_a3 is the site volume at D=1.6 ONLY, not the pooled min/max. D=1.6 specifically: at D=2.4 volumes exceed 1000 A^3 and sites merge with neighbouring cavities. THE 210/240 A^3 GUIDE IS WITHDRAWN, NOT MERELY UNCALIBRATED - see rule 4a. It was fitted on 15 anchors of which at least three (MYC, IL-11, KRAS) did not measure the target protein, and correcting MYC moves it 187.9 -> 325.7 A^3, across the whole band. Report the volume; do not classify with it."
     },
     "pocket_druggability": {
       "min": null, "max": null, "fold_range": null,

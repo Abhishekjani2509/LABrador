@@ -49,6 +49,14 @@ VERDICT_BASES = frozenset(
 )
 
 REQUIRED_TOP_LEVEL = (
+    # The verbatim echo of the request. Added 2026-08-15, after a downstream
+    # team was told to key a cache on (accession, mechanism_hypothesis,
+    # as_of_date) and discovered none of the three survived into the output, so
+    # the promise was unsupportable. It is an echo and nothing else: never
+    # inferred, never back-filled. `input.uniprot_accession` is what the CALLER
+    # said and `target.uniprot_accession` is the RESOLVED accession, and the
+    # top-level `as_of_date` stays authoritative.
+    "input",
     "target",
     "as_of_date",
     "verdict",
@@ -69,7 +77,7 @@ REQUIRED_TOP_LEVEL = (
 
 # The interface-classification vocabulary, and it is the TOOL's vocabulary, not
 # a shorter one invented here. `interface_analysis.classify_pocket` and
-# `modal_app`'s aggregation step between them emit all six of these, and a
+# `modal_app`'s aggregation step between them emit all seven of these, and a
 # validator that accepts fewer than the tool emits forces the agent to launder
 # a real value through `not_found` — which is what happened before `mixed` and
 # `no_pocket_to_classify` were admitted.
@@ -90,6 +98,12 @@ INTERFACE_CLASSES = frozenset(
         "no_partner_structure",
         "mixed",
         "no_pocket_to_classify",
+        # The seventh, and the aggregation step emits it too: every
+        # classification on the structure was excluded because the numbering
+        # could not be reconciled. An abstention, so it demands nothing — but
+        # rejecting it applies the same laundering pressure `mixed` had, on a
+        # rarer path where nobody would notice.
+        "numbering_mismatch_not_interpretable",
     }
 )
 
@@ -122,6 +136,16 @@ ENUMS: dict[str, frozenset[str]] = {
         {"nanomolar", "micromolar_at_best", "unknown"}
     ),
     "tractability.pocket_vs_interface.classification": INTERFACE_CLASSES,
+    # Rule 4b's off-site guard in `check_site_consistency` reads this with an
+    # exact `== "site_from_density"`. It was in no ENUMS entry, so any other
+    # string passed and the guard silently stopped running — with the geometry
+    # still reported. That guard exists because `site_from_density`'s centroid
+    # sat 29.57 A from the TNF-alpha ligand, which is nearly four times the
+    # 7.73 A error that forced the original retraction. Same dead-guard shape as
+    # the `isinstance(ev, dict)` checks documented in SKILL.md.
+    "tractability.mdpocket_site_definition_used": frozenset(
+        {"site_from_ligand", "site_from_density", "none"}
+    ),
 }
 
 # A key whose value is a source. Presence of any one of these, with a non-empty
@@ -155,11 +179,15 @@ PROVENANCE_KEYS = frozenset(
     }
 )
 
-# fpocket site-selection bases, from pocket-scan/modal_app.py. The two forbidden
-# ones do not identify a site: one is "the most druggable pocket anywhere in the
-# chain", the other is a residue-number match that a homo-oligomer's protomers
-# make ambiguous in principle. Pooling either across an ensemble compares
-# different pockets in different places.
+# fpocket site-selection bases, from pocket-scan/modal_app.py. SIX, and this
+# list was transcribed with five for long enough that three other artifacts
+# copied the wrong count — `no_pocket_overlapped_ligand_site` was missing, which
+# is the basis emitted when a holo ligand site EXISTS and no pocket touches it
+# at that clustering value. That is the exact false negative rule 4 was written
+# around: TNF-alpha scores 0.002 at D=1.6 at a co-crystallised 570 Da ligand,
+# because the channel fragments and the 12-sphere cluster falls below fpocket's
+# `-i 15` floor and is discarded silently. Rejecting the basis forces the case
+# to be laundered rather than reported.
 SELECTION_BASES = frozenset(
     {
         "ligand_site_jaccard",
@@ -167,13 +195,28 @@ SELECTION_BASES = frozenset(
         "site_signature_unreliable_homooligomer",
         "max_druggability_no_ligand_site",
         "no_pocket_matched_site_signature",
+        "no_pocket_overlapped_ligand_site",
     }
 )
+# FOUR of the six do not identify a site. This comment said "two" while the set
+# below held three, which is where `assemble-dossier/SKILL.md`'s "two of its five
+# possible values" came from — a miscount that propagated into three artifacts.
+#
+# Legal to report is not the same as legal to pool.
+# `max_druggability_no_ligand_site` is "the most druggable pocket anywhere in the
+# chain"; `site_signature_unreliable_homooligomer` is a residue-number match a
+# homo-oligomer's protomers make ambiguous in principle;
+# `no_pocket_matched_site_signature` matched nothing; and
+# `no_pocket_overlapped_ligand_site` is the strongest case of all — a ligand site
+# was known and no pocket reached it, so the measurement is anchored to nothing.
+# Pooling any of them across an ensemble compares different pockets in different
+# places.
 NOT_A_SAME_SITE_BASIS = frozenset(
     {
         "max_druggability_no_ligand_site",
         "site_signature_unreliable_homooligomer",
         "no_pocket_matched_site_signature",
+        "no_pocket_overlapped_ligand_site",
     }
 )
 
@@ -281,16 +324,40 @@ DRUGGABILITY_FALSE_NEGATIVE_FLOOR = 0.1
 PRIMARY_VOLUME_CLUSTERING_D = 1.6
 MERGED_VOLUME_A3 = 1000.0
 
-# A PROPOSAL, NOT A CALIBRATED THRESHOLD — marked the same way as the 4 A
-# off-site distance above, and for the same reason. Volume at D=1.6 gave AUC
-# 1.000 stable under all 15 leave-one-target-out refits, with >=242 A^3 entirely
-# druggable and <=207 A^3 entirely hard. That is a 17% margin fitted post hoc on
-# n=15 and it needs out-of-sample validation before it gates anything, so
-# NOTHING in this file classifies on it. It is used only to decide when a low
-# druggability and a large volume disagree loudly enough that the disagreement
-# must be written down. Stated limitation: n=5 hard targets, all
-# PPI/cytokine/membrane, against a druggable set enriched in kinases, nuclear
-# receptors and GPCRs — volume may partly track target class.
+# A DISCLOSURE TRIGGER. NOT A THRESHOLD, NOT A PROPOSAL, NOT A CLASSIFIER.
+#
+# These two numbers used to be documented here as an uncalibrated proposal
+# resting on a measured separation: volume at D=1.6 giving AUC 1.000 stable under
+# all 15 leave-one-target-out refits, with >=242 A^3 entirely druggable and
+# <=207 A^3 entirely hard. THAT SEPARATION IS RETRACTED (2026-08-15; CLAUDE.md
+# rule 4a, rubric.md, OUTPUT_NOTES.md). It is not merely uncalibrated — it is
+# withdrawn, and it may not be revived from this file.
+#
+# What the audit found, in one line each:
+#   - four of the five hard anchors do not measure their target. MYC's pocket is
+#     100% MAX (P61244), zero MYC lining residues; IL-11's is 100% IL-11 receptor
+#     alpha (Q14626); CD20's anchor ligand is cholesterol hemisuccinate, a
+#     detergent; TL1A had no site anchor at all. TNF's pocket is on TNF but has
+#     zero residue overlap with its only drug-anchored site;
+#   - RORgt's 6C1P contains no RORgt (sole entity A8EVM5, an ion transport
+#     protein) and was selected by ligand_site_jaccard, the trusted path, on a
+#     CHAPSO detergent anchor — so restricting to the target's chains is
+#     necessary and not sufficient;
+#   - chain_accessions was {} on EVERY entry, so every chain of every assembly
+#     was scored as target, and max_druggability_no_ligand_site (which identifies
+#     no site) set the headline median for MYC, IL-11, TL1A and TNF;
+#   - the bootstrap CI of [1.000, 1.000] was degenerate by construction, since
+#     resampling a perfectly separated set cannot create an inversion;
+#   - and the confound is fatal: the binary flag "a drug-like ligand was
+#     co-crystallised" separates the groups at AUC 0.900 with no structural
+#     measurement at all. The label and the measurability are the same variable.
+#
+# THE CONSTANTS BELOW ARE UNCHANGED AND DELIBERATELY SO. Nothing in this file
+# classifies on them and nothing ever did; they are read by exactly one rule, to
+# decide when a low druggability sitting beside a large volume disagree loudly
+# enough that the disagreement must be written into tractability.caveat. That is
+# a disclosure trigger, and it survives the retraction because it asserts nothing
+# about which side of it a target falls on. Do not add a rule that gates on them.
 VOLUME_GUIDE_DRUGGABLE_A3 = 240.0
 VOLUME_GUIDE_HARD_A3 = 210.0
 
@@ -305,7 +372,14 @@ SUBSTANTIVE_INTERFACE_CLASSES = frozenset(
 
 # USAN stems. Cheap, and they catch the exact mistake the dossier exists to
 # prevent: an antibody sitting in the small-molecule list.
-BIOLOGIC_NAME_STEMS = ("mab", "cept", "nib-cept")
+#
+# This constant used to carry a third entry, `"nib-cept"`, which is not a USAN
+# stem and could never have matched the `endswith` test — and it did not matter,
+# because nothing read the constant: the rule hardcoded its own tuple. A named
+# constant exists so a reader can see the policy and argue with it, so one that
+# nothing reads is worse than no constant at all. It is now the tuple the rule
+# actually uses.
+BIOLOGIC_NAME_STEMS = ("mab", "cept")
 
 
 # --------------------------------------------------------------------------
@@ -737,7 +811,22 @@ def check_modality_separation(d: dict) -> list[Violation]:
                 )
             if isinstance(entry, dict):
                 mod = entry.get("modality")
-                if mod is not None and mod != "small_molecule":
+                if mod is None:
+                    # A missing modality used to pass. It is the one field where
+                    # silence is the failure: rule 1's whole content is that
+                    # `molecule_type` was READ per drug, and an absent value is
+                    # indistinguishable from never having looked.
+                    v.append(
+                        Violation(
+                            "MODALITY_LEAK",
+                            f"{path}.modality",
+                            "no modality on a small-molecule entry — rule 1 says "
+                            "it is read per drug from "
+                            "chembl.molecule_dictionary.molecule_type, and an "
+                            "absent value says only that it was never read",
+                        )
+                    )
+                elif mod != "small_molecule":
                     v.append(
                         Violation(
                             "MODALITY_LEAK",
@@ -745,7 +834,7 @@ def check_modality_separation(d: dict) -> list[Violation]:
                             f"{mod!r} in a small-molecule block",
                         )
                     )
-            if norm.endswith("mab") or norm.endswith("cept"):
+            if norm.endswith(BIOLOGIC_NAME_STEMS):
                 v.append(
                     Violation(
                         "MODALITY_LEAK",
@@ -944,7 +1033,7 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
     `not_tractable` on a druggability of 0.013 measured at a pocket with
     osimertinib physically bound in it, and pass clean.
 
-    Three clauses:
+    Four clauses:
 
     1. `load_bearing` is a declaration and only one value is legal. It exists so
        the demotion is visible in every output rather than living only in prose.
@@ -953,6 +1042,16 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
     3. A negative verdict may not rest on it. With no volume beside it there is
        nothing else the computed axis could be resting on, and 41% of pockets
        with a drug bound score below 0.1 — so the verdict is unsupported.
+    4. A low druggability sitting beside a large volume must be written down in
+       `tractability.caveat`. That is the EGFR shape — 290 A^3 at D=1.6 against
+       6LUD at 0.013 — and it is reported, not resolved. Nothing here
+       classifies on the volume guide; it only decides when the two numbers are
+       far enough apart to be worth saying.
+
+    This docstring said "Three clauses" over four for as long as the fourth has
+    existed, which is the same species of rot as the rubric's test count. It is
+    listed because a reader who counts three and finds four has to work out
+    which one is the accident.
     """
     v: list[Violation] = []
     drug = _get(d, "tractability.pocket_druggability")
@@ -1030,7 +1129,10 @@ def check_druggability_not_load_bearing(d: dict) -> list[Violation]:
                     f"{max(volumes)!r} A^3 — the demoted number and the primary "
                     "number disagree. Report the disagreement in "
                     "tractability.caveat; do not resolve it in either direction "
-                    "(the volume guide is an uncalibrated proposal, n=15)",
+                    "(the volume guide is RETRACTED as of rule 4a, and is no "
+                    "longer even the uncalibrated proposal it was previously "
+                    "described as. It triggers this disclosure and classifies "
+                    "nothing)",
                 )
             )
     return v
@@ -1066,9 +1168,13 @@ def check_volume_is_primary(d: dict) -> list[Violation]:
                     "VOLUME_NOT_PRIMARY",
                     "tractability.pocket_volume_a3.primary_d1_6_a3",
                     "computed-axis geometry reported without the D=1.6 site "
-                    "volume, which is the primary number (AUC 1.000 over 15 "
-                    "targets against 0.720 for druggability) — measure it or "
-                    "record the gap in not_found",
+                    "volume, which is the primary number reported on the "
+                    "computed axis — it is a cavity measurement and carries no "
+                    "verdict: its AUC 1.000 separation over 15 targets is "
+                    "RETRACTED (rule 4a, 2026-08-15 — the calibration anchors "
+                    "did not measure the proteins they were attributed to), so "
+                    "do not compare it to 210 or 240 A^3 — measure it or record "
+                    "the gap in not_found",
                 )
             )
 
@@ -1536,6 +1642,26 @@ def check_cryptic_definition(d: dict) -> list[Violation]:
 
 @rule
 def check_null_is_not_zero(d: dict) -> list[Violation]:
+    """A failed measurement is null with a reason; a measured zero is a result.
+
+    The general principle, which this project keeps rediscovering under new
+    names: **a thing that failed to run is not a thing that scored badly.**
+
+    It has now bitten four ways. A decoy that failed to run was read as a decoy
+    that scored badly, and because `analyze.py` filters on `"error" not in r`
+    while a repair pass flushed the artifact after each recovered ligand, five
+    different separation figures were published off one file at five different
+    moments — every one internally consistent, every one a smaller decoy set
+    rather than a worse one. A Paperclip statement timeout was read as zero
+    rows. An unclassifiable ligand was read as apo. A credential failure was
+    read as no data. Each time the absence wore the costume of a measurement,
+    and each time it flattered the instrument.
+
+    That is what this rule is: the structural form of that principle, enforced
+    on the one axis a validator can see. `null` must say why it is null, or it
+    is indistinguishable from a zero somebody forgot to write — and a zero that
+    is *also* listed in `not_found` is claiming to be both.
+    """
     v: list[Violation] = []
     texts = _not_found_texts(d)
     sentinels = {"n/a", "na", "none", "null", "unknown", "not_found", "-", "?", ""}

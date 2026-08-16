@@ -447,7 +447,10 @@ Measured, not claimed:
   groups).
 - **61/70 = 87.1%** on a blind held-out sample from `pdb_v.chemcomps`, with
   **0 false positives**. Nothing that was really a cofactor, lipid or additive
-  was called drug-like.
+  was called drug-like. **That sample did not contain TNF 5UUI's `MTN` spin
+  label, which is a genuine false positive no chemistry can fix** — see "A
+  ligand can be disqualified by why it is there" below. Quote the zero with that
+  boundary attached.
 
 Known false negatives — deliberate, since a false positive is what caused all
 four bugs: nucleoside/SAM-analog inhibitors and bisphosphonates → `cofactor`;
@@ -841,6 +844,33 @@ it has moved from cofactors and lipids, which are now handled, to bench
 chemistry that happens to have a ring. Report `BEN`, `B3P` and `JEF` upstream
 rather than adding a local denylist; a local list is the defect this replaced.
 
+### A ligand can be disqualified by why it is there, not by what it is — TNF 5UUI `MTN`
+
+**This is the one false positive no chemistry can fix, and it marks the boundary
+of what a structural classifier can decide.**
+
+`MTN` in TNF-alpha entry **5UUI** classifies `druglike`, and the classifier is
+not wrong about the molecule: its chemistry really is drug-like. The
+disqualifying fact is not in the molecule at all — it is in the **entry title**,
+"Crystal Structure of Spin-Labeled T77C TNFa". `MTN` is an **MTSL spin label
+covalently attached to an engineered cysteine** for EPR. It is a reagent for
+measuring the protein, not a ligand bound to a site, and an entry carrying it is
+**apo** for every purpose this skill serves.
+
+Two consequences:
+
+- **The "0 false positives on 70 blind components" figure is true of a sample
+  that did not contain this case.** It is not a claim about the classifier's
+  ceiling. Quote it with this caveat wherever it appears — including
+  `pocket-scan/SKILL.md` and `OUTPUT_NOTES.md`, which quote the same number.
+- **Read the entry title before promoting a structure to holo.** Titles naming a
+  spin label, a crosslinker, a fluorophore, a photo-affinity probe, a chaperone
+  or a fusion describe why the chemistry is present, and that is information the
+  molecule does not carry. `ligand_filter` decides *what a ligand is*; only the
+  title decides *why it is there*. Do not add `MTN` to a denylist — the denylist
+  is the defect this replaced, and the next case will be a different comp_id
+  with the same shape.
+
 ### The public server's latency varies by two orders of magnitude
 
 Same query, same day: KRAS 6OIM_A took **4.4 s**, then 8.4 s. IL-17A's 283-hit
@@ -883,10 +913,67 @@ search. **Version any such cache.** Ours stores parsed hits, so adding the
 `-N` chain-suffix strip silently invalidated every existing file — the module now
 carries a `cache_version` and re-runs on mismatch.
 
-### Paperclip truncates wide cells and caps at 200 rows
+### THE ROW CAP MOVES, AND IT IS SILENT. Reconcile every structure count against a `COUNT`.
 
-`sql -s proteins` enforces a 200-row limit and a 15 s timeout, and it truncates
-a long value with a literal `...`. `json_agg(t)::text` looks like a way around
+**Read this before any other failure mode in this file.** The cap is not a fixed
+200. Measured 2026-08-15 while regenerating fixture counts: **the same query
+returned 200 rows one moment and exactly 10 the next** — same SQL, same source,
+well-formed table, correct columns, **no error, no warning, no truncation
+marker**. The first run recorded **KRAS as 10 PDB entries against a true 522**.
+Only a separately issued `COUNT` caught it.
+
+This skill is where that does the most damage, because almost everything it
+produces is a *length*: `total_pdb_structures`, `holo_count`, `apo_count`, the
+ensemble, the apo census behind a cryptic call, the Foldseek neighbourhood.
+A capped structure list does not look broken — it looks like a target nobody has
+crystallised, which is precisely the conclusion this station must never reach by
+accident. It is also the leading explanation for things previously filed
+elsewhere in this section: a table that looked degraded and then returned in
+7 ms, and latencies spanning two orders of magnitude.
+
+**Binding, per `CLAUDE.md` rule 14:**
+
+- **Reconcile every count against an independently issued `SELECT COUNT(*)` /
+  `COUNT(DISTINCT …)`** over the same predicate, as its own call — entry counts,
+  holo/apo splits, neighbour counts, and any list whose length becomes a number.
+- **A mismatch is a hard failure**: the field is `null`, and `not_found` names
+  both figures and both queries. Do not report the larger one.
+- **Aggregate server-side wherever the rows are not themselves needed.** A
+  one-row result cannot be capped.
+- **Exactly 200 or exactly 10 rows is capped until an aggregate says otherwise**
+  — and 47 rows is not thereby safe. We do not know what moves the cap.
+- The **per-accession loop** below is not a substitute for this. Sixteen
+  per-accession queries that each came back capped still produce a wrong total,
+  and each one needs its own `COUNT` before its length means anything.
+
+### Four Paperclip failure signatures, and all four mean the query did not run
+
+**11 of 30 SQL calls in one dry run failed**, across four distinct signatures,
+three of them undocumented:
+
+| signature | what it actually is |
+| --- | --- |
+| `[error] Request timed out` | seen at 120 s on a **tableless `SELECT 1`**. Not a statement-cost signal — it says nothing about your query, so do not read it as "this accession is expensive". |
+| `[error] Something went wrong. Please try again.` | undocumented. No code, no detail. |
+| `vsh: cd: /papers/: Permission denied` | returned by `paperclip sql` **for a SQL query** — a shell error from another subsystem, naming a path you never queried. |
+| a silently capped row set | the section above. **No error text at all.** |
+
+**Any of these means the query did not run.** The value is `null`, the reason
+goes in `not_found` quoting the signature verbatim, and the retry is
+short-then-long. Never `0`, never `[]`, never "no structures", never "apo". This
+is the same rule already written here as `lookup_failed` /
+`holo_determined: false` and "**a timeout is not a zero**" — it now covers four
+signatures instead of one, and the fourth one is invisible.
+
+**Only auth failures are guarded, and that guard catches none of the four.** The
+tool layer throws on `401`/`403`/`unauthorized`/`forbidden`/`invalid api key`,
+and only on a non-zero exit. Timeouts, "Something went wrong", `Permission
+denied` and a capped table match none of those patterns, and the last one is not
+even a failed run.
+
+### Paperclip truncates wide cells
+
+`sql -s proteins` truncates a long value with a literal `...`. `json_agg(t)::text` looks like a way around
 the row cap and is not — a 200-row aggregate came back cut off mid-array at
 ~880 characters. Aggregate server-side into short columns instead
 (`LEFT(title, 78)`), and rank with a window function when you need N per group.

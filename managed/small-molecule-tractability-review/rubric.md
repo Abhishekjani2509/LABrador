@@ -24,8 +24,10 @@ python3 .claude/skills/assemble-dossier/validate_dossier.py \
         /mnt/session/outputs/druggability-dossier.json
 ```
 
-It carries **16 rule functions emitting 17 violation codes**, and it is covered
-by 86 unit tests in `test_validate_dossier.py` beside it. It exits **0** with no
+It carries **17 rule functions emitting 18 violation codes**, and it is covered
+by the unit-test suite in `test_validate_dossier.py` beside it — run
+`python3 -m unittest test_validate_dossier` for the current count rather than
+trusting a number written here, which has now gone stale twice. It exits **0** with no
 violations, **1** with them, and **2** if invoked with no argument; on violations
 it prints one `  [CODE] path: message` line per finding, sorted.
 
@@ -37,12 +39,35 @@ ones the validator does not cover; they are still decided from the file.
 Where this rubric and the validator could ever disagree, **the validator wins**
 and this document is the stale one. It is the machine grader; this is its index.
 
+**Known gap in this index, measured 2026-08-15.** The validator emits **18**
+codes; the list below enumerates **17**. The one with no entry here is
+**`INTERFACE_MIXED_UNRESOLVED`** (rule function
+`check_mixed_interface_is_resolvable`, registry position 12 — it sorts between
+criteria 12 and 13 below). It fires when
+`tractability.pocket_vs_interface.classification` is `mixed` without the four
+things that make `mixed` actionable: at least two distinct values in
+`classifications_seen`, per-copy values in `pocket_interface_overlap` rather
+than one scalar, a `partner_pdb_id`, and `matches_mechanism_hypothesis` not set
+to `true` — plus the converse, `classifications_seen` naming two labels while
+`classification` reports just one of them. It is **enforced** by the validator
+and merely unnumbered here, so a clean exit still covers it; grade it from the
+validator's output. Renumbering the list is left to whoever owns the criteria
+sequence, since it shifts criteria 13–17 and the 18–21 block below.
+
 ## Criteria 1–17 — exactly the validator's rules
 
 Listed in the validator's own registry order, with the trigger that fails them.
 
 1. **`WELL_FORMED` — the file parses and the template is filled.** A JSON object;
-   all 16 required top-level keys present; every enumerated field
+   all 16 required top-level keys present — the output template now carries a
+   **17th top-level key, `input`**, echoing the five contract fields so a
+   consumer can key a cache on
+   `(input.uniprot_accession, input.mechanism_hypothesis, input.as_of_date)`,
+   but `REQUIRED_TOP_LEVEL` does **not** list it, so a dossier that omits the
+   block still passes this criterion today (verified 2026-08-15: the validator
+   contains no reference to `input` at all). Treat a missing `input` block as a
+   validator gap to be fixed in `validate_dossier.py`, not as a passing
+   dossier; every enumerated field
    (`verdict`, `verdict_basis`, `structure.tier`,
    `tractability.cryptic_pocket_risk`, `tractability.cryptic_mechanism`,
    `cryptic_potency_prior.expected_ceiling`,
@@ -102,10 +127,17 @@ Listed in the validator's own registry order, with the trigger that fails them.
    `pocket_volume_a3` (`primary_d1_6_a3`, `min`, `max`) fails outright — decline
    on an **unmeasured volume**, never on a poor score; and a low druggability
    sitting beside a volume of 240 Å³ or more requires a non-empty
-   `tractability.caveat` stating the disagreement.
+   `tractability.caveat` stating the disagreement. **That 240 Å³ is a disclosure
+   trigger only** — it fires a *write it down*, never a classification, and the
+   calibration it came from is withdrawn (rule 4a; see the grader failure modes
+   below).
 
-8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the computed axis's number.**
-   Whenever any volume or druggability figure is reported,
+8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the number the computed axis
+   must report.** "Primary" here means *reported first and never omitted*, **not
+   that volume separates druggable from hard** — that separation is withdrawn
+   (rule 4a, 2026-08-15: three of fifteen calibration anchors scored the wrong
+   protein). This criterion checks presence and sanity, and grades no volume
+   against any boundary. Whenever any volume or druggability figure is reported,
    `pocket_volume_a3.primary_d1_6_a3` must be numeric (or excused by name in
    `not_found`); it must not exceed **1000 Å³**, which is the signature of sites
    merged with neighbouring cavities rather than a D=1.6 site volume; and a
@@ -235,16 +267,28 @@ The validator does not check these. Read them off the JSON directly.
 These are failure modes of the *grader*, and they are as costly as a bad
 dossier.
 
-- **Do not gate on a volume threshold.** Volume at D=1.6 separated all 15
-  evaluation targets perfectly (AUC 1.000, stable under all 15 leave-one-out
-  refits, hard ≤207 Å³ and druggable ≥242 Å³), but that boundary is a **17%
-  margin fitted post hoc on n=15 and is not calibrated**, on 5 hard targets that
-  are all PPI/cytokine/membrane against a druggable set enriched in kinases and
-  GPCRs — so it may partly be tracking target class. A target at 230 Å³ is
-  *unclassified* by it. The only numeric volume gates anywhere in the grader are
-  the 1000 Å³ merge-artifact ceiling (criterion 8) and the 240 Å³ trigger for
-  *requiring a caveat* (criterion 7) — neither classifies anything as druggable
-  or hard, and no criterion may be added that does.
+- **Do not gate on a volume threshold. The separation behind it is WITHDRAWN
+  (rule 4a, 2026-08-15).** This bullet used to justify the prohibition by saying
+  the boundary was merely uncalibrated — AUC 1.000 across 15 targets, hard
+  ≤207 Å³ and druggable ≥242 Å³, a 17% margin fitted post hoc. **That result is
+  now suspended outright**, because the calibration anchors did not all measure
+  the proteins they were attributed to: MYC's 188 Å³ pocket contains **zero MYC
+  atoms** (lining residues are MAX, MAX plus DNA, or engineered OmoMYC), IL-11's
+  164 Å³ came from an IL-11 **receptor** entry, and KRAS's 400 Å³ is a median
+  spanning the GDP site rather than switch-II. Correcting them crosses the
+  boundary — MYC moves 187.9 → 325.7 Å³ — so **thresholded on volume, MYC would
+  have come out druggable.** The prohibition is therefore no longer "pending
+  out-of-sample validation"; there is no validated separation to gate on at all.
+  A volume is a number about a cavity and nothing more. **Verified in the
+  validator, 2026-08-15:** nothing classifies on volume. The only numeric volume
+  uses anywhere in the grader are the 1000 Å³ merge-artifact ceiling
+  (criterion 8) and a 240 Å³ trigger that merely *requires a caveat* when a low
+  druggability sits beside a large volume (criterion 7) — neither calls anything
+  druggable or hard, and no criterion may be added that does. Note the 240 Å³
+  trigger is now a bare disclosure threshold inherited from a withdrawn
+  calibration; it should be re-derived or replaced with a rule that does not name
+  a number. `VOLUME_GUIDE_HARD_A3 = 210.0` is defined in the validator and never
+  read — dead code from the same withdrawn guide.
 
 - **Do not grade a druggability value against an expected number.** The same
   structure read 0.673 on the deployed path and 0.708 locally; fpocket estimates

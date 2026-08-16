@@ -176,6 +176,41 @@ Not required — `first_approval` is sufficient at year resolution.
 
 ---
 
+## 2b. Modality — structure is stable under a cutoff, `molecule_type` is not
+
+Modality classification (SKILL.md steps 2 and 2c) interacts with `as_of_date` in
+one direction only, and it favours the structural test.
+
+**A molecule's structure does not change.** Classifying a compound from its
+`canonical_smiles` gives the same answer whatever the cutoff, so the structural
+modality call carries **no leakage risk of its own**. It inherits the leakage
+of whatever set you fed it.
+
+**`chembl.molecule_dictionary.molecule_type` is a current-state annotation with
+no history**, exactly like `max_phase`. There is no column recording when a
+molecule was typed, and 404,621 molecules are still `Unknown` today — some of
+which were typed *later* than the cutoff you are asking about. So a
+`molecule_type` read under a cutoff is a present-day fact about a past compound.
+
+Practical consequence:
+
+- **Filter the compound set by date first, then classify.** Do not classify the
+  full set and then filter — the modality split must be over the same rows as
+  `distinct_actives`, or the two numbers describe different populations.
+- The date filter for compounds is the bioactivity route in section 1
+  (`activities.doc_id -> docs.year`); `compounds_by_accession` has no date
+  column any more than `bioactivities_by_accession` does.
+- `target_precedent.compound_modality_split`,
+  `target_precedent.modality_unknown_count` and
+  `target_precedent.best_potency_modality` inherit `distinct_actives`'s
+  `as_of_leakage` entry. They do **not** need their own — the structural call
+  adds nothing undatable. Say this explicitly rather than leaving them
+  unflagged, because an unflagged field next to a flagged one reads as
+  "checked and clean".
+- **`molecule_type`-derived drug modality does need its own flag under a
+  cutoff**, for the same reason `clinical_stage_small_molecules` does: the
+  annotation is current-state.
+
 ## 3. Clinical candidates — NOT datable
 
 `max_phase` is a **current-state** field. ChEMBL stores no phase history. A

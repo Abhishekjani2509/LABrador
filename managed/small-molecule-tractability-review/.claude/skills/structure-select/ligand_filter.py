@@ -126,6 +126,7 @@ from typing import Any, Iterable, Mapping, Sequence
 __all__ = [
     "LigandVerdict",
     "VERDICTS",
+    "CONTEXT_VERDICTS",
     "classify_ligand",
     "classify_ligands",
     "classify_record",
@@ -134,6 +135,10 @@ __all__ = [
     "holo_call",
     "SmilesGraph",
     "ChemCompSource",
+    "StructureContext",
+    "PolymerEntity",
+    "CovalentLink",
+    "read_mmcif_categories",
 ]
 
 VERDICTS = (
@@ -144,8 +149,13 @@ VERDICTS = (
     "sugar_or_glycan",
     "ion_or_solvent",
     "peptide_or_polymer",
+    "polymer_conjugate",
     "unknown",
 )
+
+#: The verdicts that require a `StructureContext` and cannot be reached from
+#: chemistry alone. `classify_record` never returns one of these.
+CONTEXT_VERDICTS = ("polymer_conjugate",)
 
 # --------------------------------------------------------------------------
 # Tunables. Every one of these is a measured trade-off, not a preference.
@@ -166,6 +176,21 @@ TRIVIAL_MAX_HEAVY_ATOMS = 9
 #: Upper bound on a small molecule. Above this a `non-polymer` is a natural
 #: product, a polymer or a macrocyclic peptide, not a small-molecule ligand.
 DRUGLIKE_MAX_MW = 1200.0
+
+#: The ubiquity prior (R14) fires only at or below this size. Additives and
+#: fragment hits overlap between roughly 5 and 15 heavy atoms and nowhere else,
+#: so bounding it here means the prior can never demote a real inhibitor. 15 is
+#: above benzamidine's 9 and below the 24 of 5QQE's `N5S`.
+UBIQUITY_MAX_HEAVY_ATOMS = 15
+
+#: Entries a small component must appear in before ubiquity overrides
+#: drug-like chemistry. Measured spread at the decision boundary: BEN 361 and
+#: B3P 232 against LZ1 10, ZBR 9, LFI 8, MOV 7, N5S 1. 150 sits in the empty
+#: band between them. **UNCALIBRATED** — it is fitted on one measured false
+#: positive, and it is a proposal in exactly the sense rule 4a's volume guide
+#: is. It gates only the small end, and it is reported in `evidence` and
+#: flagged (`ubiquity_prior_applied`) whenever it fires.
+UBIQUITY_MIN_ENTRIES = 150
 
 _METALS = frozenset(
     """LI BE NA MG AL K CA SC TI V CR MN FE CO NI CU ZN GA RB SR Y ZR NB MO TC
@@ -609,6 +634,34 @@ class SmilesGraph:
                 n += 1
         return n
 
+    def electrophilic_halide_carbons(self) -> int:
+        """sp3 carbons carrying a Cl, Br or I — alkyl-halide electrophiles.
+
+        Counted because a component carrying SEVERAL of them is a bifunctional
+        or trifunctional CROSSLINKING REAGENT, not a drug: a covalent drug
+        carries exactly one warhead. `LFI` (the TATA reagent that cyclises
+        Bicycle peptides) carries three, `ZBR` (TBMB) three, `A1I4O` three,
+        `8VY` (bis(bromomethyl)benzene) two.
+
+        Aryl halides are excluded — a chloro- or fluoro-phenyl is on half the
+        drugs ever made and is not an electrophile. `260`
+        (2-(bromomethyl)-1,3-difluorobenzene) therefore counts 1, not 3.
+
+        THE COUNT IS ADVISORY AND THE THRESHOLD IS 3, NOT 2, ON PURPOSE.
+        Nitrogen mustards — chlorambucil, melphalan, bendamustine — are
+        approved drugs carrying exactly TWO alkyl chlorides on one nitrogen. A
+        threshold of 2 would file them as reagents, which is the false negative
+        this module refuses to trade for a false positive. Three arms is a
+        symmetric crosslinker; two is a mustard.
+        """
+        n = 0
+        for a in self.atoms:
+            if a.element != "C" or a.aromatic:
+                continue
+            if any(nb.element in ("CL", "BR", "I") for nb in self.neighbours(a.idx)):
+                n += 1
+        return n
+
     # -- scaffold signatures ---------------------------------------------
 
     def purine_like_rings(self) -> bool:
@@ -771,6 +824,377 @@ class SmilesGraph:
 
 
 # --------------------------------------------------------------------------
+# Structural context — the entry the component actually appears in
+# --------------------------------------------------------------------------
+#
+# WHY THIS EXISTS. Everything above answers "what is this molecule?". That is
+# the right question for ADP and for cholesteryl hemisuccinate, and it was the
+# whole module until 2026-08-15, when a Foldseek/TSLP run measured the first
+# false positive against the held-out set's 0-false-positive result:
+#
+#   8QFZ carries `LFI`, C12H18Br3N3O3 — 1,3,5-tris(3-bromopropanoyl)-1,3,5-
+#   triazinane, the TATA tri-electrophile that CYCLISES a Bicycle peptide. It
+#   is covalently bonded to all three cysteines of a 12-residue polypeptide
+#   (`CHWLENCWRGFC`, entity `8QFZ_2`). It is a macrocyclisation reagent inside
+#   a peptide ligand. As a molecule in isolation `druglike` is defensible; the
+#   chemistry really is drug-like. In the entry it is not a ligand at all.
+#
+# The consequence was a MODALITY error, which is what makes it serious rather
+# than merely wrong: `druglike` made the entry a holo small-molecule structure,
+# the run set `tier: holo` with `tier_note: "drug-like ligand LFI"`, anchored
+# the site on it and emitted `ligand_site_jaccard` of 0.769 and 1.000 — the
+# strongest site-hypothesis basis this pipeline can produce — for what is
+# actually PEPTIDE precedent. Rule 1 of the dossier exists to stop exactly that
+# substitution, and this module was making it one layer down.
+#
+# NOTE WHAT THIS IS *NOT*. It is not "a peptide-binding site is not a site".
+# A groove that binds a bicyclic peptide is a demonstrated ligandable surface
+# and a perfectly good small-molecule target — MDM2/p53, protease substrate
+# grooves, peptide GPCRs. Nothing here rejects a site. It attributes a
+# component to the right molecule, so the peptide is reported as peptide
+# precedent (see `holo_call`'s `polymer_ligand_precedent`) instead of being
+# laundered into small-molecule precedent by the reagent that staples it.
+#
+# WHERE THE CONTEXT COMES FROM, and the trap in getting it. `_struct_conn` and
+# `_struct_ref`. Both are present in the ENTRY mmCIF and in
+# `files.rcsb.org/header/<ID>.cif`, and BOTH ARE STRIPPED FROM THE ASSEMBLY
+# FILE. Verified on 8QFZ: `8QFZ-assembly1.cif` — the file the pocket-scan
+# pipeline actually downloads, because the biological assembly is the right
+# coordinate set — contains 23 categories and `_struct_conn` is not one of
+# them. A caller that builds context from the coordinates it already has will
+# silently get an empty link table and every verdict will fall through
+# unchanged. Build it from the header, which `pocket-scan` already fetches per
+# entry for `_struct_ref`, so this costs no extra network call.
+#
+# STILL NO NON-STDLIB IMPORT. The mmCIF reader below is ~90 lines and reads
+# five categories. `gemmi` is not imported here and must not be: `pocket-scan`'s
+# Modal image has it, the dossier sandbox does not, and this module's whole
+# point is that the verdict does not vary with the environment.
+
+_MMCIF_CONTEXT_CATEGORIES = (
+    "_entity.",
+    "_entity_poly.",
+    "_entity_poly_seq.",
+    "_struct_asym.",
+    "_struct_conn.",
+    "_struct_ref.",
+)
+
+
+def _mmcif_tokens(text: str):
+    """(value, was_quoted) over an mmCIF document. Stdlib, no dependency.
+
+    Handles the three quoting forms that appear in RCSB files: bare tokens,
+    single/double-quoted tokens, and semicolon-delimited multi-line text
+    fields. `was_quoted` matters because an unquoted token beginning with `_`
+    is a TAG while a quoted one is a value, and `loop_` is a keyword only when
+    unquoted.
+    """
+    lines = text.splitlines()
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        if line.startswith(";"):
+            buf = [line[1:]]
+            i += 1
+            while i < n and not lines[i].startswith(";"):
+                buf.append(lines[i])
+                i += 1
+            i += 1
+            yield ("\n".join(buf), True)
+            continue
+        j, m = 0, len(line)
+        while j < m:
+            ch = line[j]
+            if ch in " \t":
+                j += 1
+                continue
+            if ch == "#":
+                break
+            if ch in "'\"":
+                k = j + 1
+                while k < m:
+                    if line[k] == ch and (k + 1 >= m or line[k + 1] in " \t"):
+                        break
+                    k += 1
+                yield (line[j + 1:k], True)
+                j = k + 1
+                continue
+            k = j
+            while k < m and line[k] not in " \t":
+                k += 1
+            yield (line[j:k], False)
+            j = k
+        i += 1
+
+
+def read_mmcif_categories(
+    text: str, categories: Sequence[str] = _MMCIF_CONTEXT_CATEGORIES
+) -> dict[str, list[dict[str, str]]]:
+    """`{'_struct_conn.': [{'conn_type_id': 'covale', ...}, ...]}`.
+
+    Single-item categories come back as a one-row list, so a consumer does not
+    have to care whether the depositor used a `loop_`. Values of `.` and `?`
+    (mmCIF's not-applicable and unknown) become `''`.
+    """
+    wanted = tuple(categories)
+    out: dict[str, list[dict[str, str]]] = {}
+
+    def norm(v: str, quoted: bool) -> str:
+        return "" if (not quoted and v in (".", "?")) else v
+
+    toks = list(_mmcif_tokens(text))
+    i, n = 0, len(toks)
+    while i < n:
+        val, quoted = toks[i]
+        if not quoted and val == "loop_":
+            i += 1
+            tags: list[str] = []
+            while i < n and not toks[i][1] and toks[i][0].startswith("_"):
+                tags.append(toks[i][0])
+                i += 1
+            cat = tags[0].rsplit(".", 1)[0] + "." if tags else ""
+            keys = [t.split(".", 1)[1] for t in tags]
+            rows: list[list[str]] = []
+            cur: list[str] = []
+            while i < n and not (
+                not toks[i][1]
+                and (toks[i][0].startswith("_") or toks[i][0] in ("loop_",)
+                     or toks[i][0].lower().startswith("data_"))
+            ):
+                cur.append(norm(*toks[i]))
+                i += 1
+                if len(cur) == len(keys):
+                    rows.append(cur)
+                    cur = []
+            if cat in wanted:
+                out.setdefault(cat, []).extend(dict(zip(keys, r)) for r in rows)
+            continue
+        if not quoted and val.startswith("_") and "." in val:
+            cat = val.rsplit(".", 1)[0] + "."
+            key = val.split(".", 1)[1]
+            if i + 1 < n:
+                if cat in wanted:
+                    rows = out.setdefault(cat, [])
+                    if not rows:
+                        rows.append({})
+                    rows[0][key] = norm(*toks[i + 1])
+                i += 2
+                continue
+        i += 1
+    return out
+
+
+@dataclass(frozen=True)
+class PolymerEntity:
+    """One polymer entity of an entry — a protein chain, a peptide, a nucleic
+    acid. `accessions` is what `_struct_ref` declares for it."""
+    entity_id: str
+    poly_type: str | None          # `_entity_poly.type`, e.g. 'polypeptide(L)'
+    description: str | None        # `_entity.pdbx_description`
+    n_monomers: int | None
+    sequence: str | None           # one-letter, canonical
+    accessions: tuple[str, ...] = ()
+    strand_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["accessions"] = list(self.accessions)
+        d["strand_ids"] = list(self.strand_ids)
+        return d
+
+
+@dataclass(frozen=True)
+class CovalentLink:
+    """One `_struct_conn` row of type `covale` touching a component."""
+    partner_comp_id: str
+    partner_entity_id: str | None
+    partner_is_polymer: bool
+    partner_chain: str | None
+    partner_seq_id: str | None
+    partner_is_target: bool | None      # None == target identity unknown
+
+
+@dataclass(frozen=True)
+class StructureContext:
+    """The facts about ONE PDB entry that change a component's attribution.
+
+    Built from the entry or header mmCIF; never from the assembly file, which
+    does not carry `_struct_conn`. `target_entity_ids` is what makes the
+    covalent-inhibitor control work — see `_apply_structure_context`.
+    """
+    entry_id: str | None = None
+    polymer_entities: Mapping[str, PolymerEntity] = field(default_factory=dict)
+    entity_of_comp: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    polymer_monomers: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    covalent_links: Mapping[str, tuple[CovalentLink, ...]] = field(default_factory=dict)
+    target_entity_ids: tuple[str, ...] = ()
+    target_accession: str | None = None
+    target_basis: str | None = None
+    source: str = "mmcif"
+
+    # -- construction ----------------------------------------------------
+
+    @classmethod
+    def from_mmcif_text(cls, text: str, *, entry_id: str | None = None,
+                        target_accession: str | None = None,
+                        target_entity_ids: Iterable[str] | None = None
+                        ) -> "StructureContext":
+        cats = read_mmcif_categories(text)
+        ent_rows = cats.get("_entity.", [])
+        poly_rows = cats.get("_entity_poly.", [])
+        seq_rows = cats.get("_entity_poly_seq.", [])
+        asym_rows = cats.get("_struct_asym.", [])
+        conn_rows = cats.get("_struct_conn.", [])
+        ref_rows = cats.get("_struct_ref.", [])
+
+        ent_type = {r.get("id", ""): (r.get("type") or "").lower() for r in ent_rows}
+        ent_desc = {r.get("id", ""): r.get("pdbx_description") or None
+                    for r in ent_rows}
+        poly_by_ent = {r.get("entity_id", ""): r for r in poly_rows}
+        asym_to_ent = {r.get("id", ""): r.get("entity_id", "") for r in asym_rows}
+
+        accs: dict[str, list[str]] = {}
+        for r in ref_rows:
+            if (r.get("db_name") or "").upper() not in ("UNP", "UNIPROT"):
+                continue
+            a = (r.get("pdbx_db_accession") or r.get("db_code") or "").strip()
+            if a:
+                accs.setdefault(r.get("entity_id", ""), []).append(a)
+
+        monomers: dict[str, list[str]] = {}
+        n_mon: dict[str, int] = {}
+        for r in seq_rows:
+            e = r.get("entity_id", "")
+            monomers.setdefault(e, [])
+            mid = (r.get("mon_id") or "").upper()
+            if mid and mid not in monomers[e]:
+                monomers[e].append(mid)
+            n_mon[e] = n_mon.get(e, 0) + 1
+
+        polymers: dict[str, PolymerEntity] = {}
+        for eid, ty in ent_type.items():
+            if ty != "polymer":
+                continue
+            p = poly_by_ent.get(eid, {})
+            seq = (p.get("pdbx_seq_one_letter_code_can")
+                   or p.get("pdbx_seq_one_letter_code") or "")
+            seq = "".join(seq.split()) or None
+            strands = tuple(
+                s for s in (p.get("pdbx_strand_id") or "").replace(",", " ").split()
+            )
+            polymers[eid] = PolymerEntity(
+                entity_id=eid,
+                poly_type=(p.get("type") or None),
+                description=ent_desc.get(eid),
+                n_monomers=n_mon.get(eid) or (len(seq) if seq else None),
+                sequence=seq,
+                accessions=tuple(accs.get(eid, ())),
+                strand_ids=strands,
+            )
+
+        # comp_id -> entity ids, recovered from the linkage table's own
+        # asym ids. Enough to say which entity a bonded component belongs to.
+        comp_ent: dict[str, list[str]] = {}
+        for r in conn_rows:
+            for side in ("1", "2"):
+                c = (r.get(f"ptnr{side}_label_comp_id") or "").upper()
+                a = r.get(f"ptnr{side}_label_asym_id") or ""
+                e = asym_to_ent.get(a)
+                if c and e and e not in comp_ent.setdefault(c, []):
+                    comp_ent[c].append(e)
+
+        # -- the target entity, which decides bonded-to-the-target vs
+        # bonded-to-another-polymer. Explicit ids win; then an accession match;
+        # then nothing, and "nothing" is a real state that the rules below
+        # handle conservatively rather than guessing at.
+        tgt: tuple[str, ...] = tuple(target_entity_ids or ())
+        basis = "caller: target_entity_ids" if tgt else None
+        if not tgt and target_accession:
+            want = target_accession.strip().upper()
+            tgt = tuple(e for e, p in polymers.items()
+                        if want in {a.upper() for a in p.accessions})
+            basis = (f"_struct_ref accession {target_accession}"
+                     if tgt else None)
+
+        links: dict[str, list[CovalentLink]] = {}
+        for r in conn_rows:
+            if (r.get("conn_type_id") or "").lower() != "covale":
+                continue
+            for side, other in (("1", "2"), ("2", "1")):
+                c = (r.get(f"ptnr{side}_label_comp_id") or "").upper()
+                oc = (r.get(f"ptnr{other}_label_comp_id") or "").upper()
+                oa = r.get(f"ptnr{other}_label_asym_id") or ""
+                oe = asym_to_ent.get(oa)
+                if not c or not oc:
+                    continue
+                links.setdefault(c, []).append(CovalentLink(
+                    partner_comp_id=oc,
+                    partner_entity_id=oe,
+                    partner_is_polymer=bool(oe and oe in polymers),
+                    partner_chain=(r.get(f"ptnr{other}_auth_asym_id") or oa or None),
+                    partner_seq_id=(r.get(f"ptnr{other}_auth_seq_id") or None),
+                    partner_is_target=(None if not tgt else (oe in tgt)),
+                ))
+
+        return cls(
+            entry_id=entry_id or None,
+            polymer_entities=polymers,
+            entity_of_comp={k: tuple(v) for k, v in comp_ent.items()},
+            polymer_monomers={k: tuple(v) for k, v in monomers.items()},
+            covalent_links={k: tuple(v) for k, v in links.items()},
+            target_entity_ids=tgt,
+            target_accession=target_accession,
+            target_basis=basis,
+        )
+
+    @classmethod
+    def from_mmcif_path(cls, path: str | os.PathLike[str], **kw) -> "StructureContext":
+        p = Path(path)
+        return cls.from_mmcif_text(
+            p.read_text(errors="replace"),
+            entry_id=kw.pop("entry_id", None) or p.stem.split("-")[0].split("_")[0].upper(),
+            **kw,
+        )
+
+    # -- queries ---------------------------------------------------------
+
+    def links_for(self, comp_id: str) -> tuple[CovalentLink, ...]:
+        return tuple(self.covalent_links.get(comp_id.upper(), ()))
+
+    def is_polymer_monomer(self, comp_id: str) -> str | None:
+        """Entity id of the polymer this comp_id is a MONOMER of, if any.
+
+        `_entity_poly_seq` is the authority: a component listed there is a
+        residue of that chain, not a bound ligand, whatever the CCD type says.
+        Catches `NH2` and `ACE` capping groups, which are two of the ground-
+        truth set's three standing misses.
+        """
+        c = comp_id.upper()
+        for eid, mons in self.polymer_monomers.items():
+            if c in mons:
+                return eid
+        return None
+
+    def is_available(self) -> bool:
+        """False when the file carried no `_struct_conn` at all — which is what
+        an ASSEMBLY file looks like. A caller must not read a fall-through as
+        "no covalent linkage"; it may be "the category was stripped"."""
+        return bool(self.covalent_links) or bool(self.polymer_entities)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entry_id": self.entry_id,
+            "n_polymer_entities": len(self.polymer_entities),
+            "target_entity_ids": list(self.target_entity_ids),
+            "target_accession": self.target_accession,
+            "target_basis": self.target_basis,
+            "has_struct_conn": bool(self.covalent_links),
+            "source": self.source,
+        }
+
+
+# --------------------------------------------------------------------------
 # Chemical component source — Paperclip `pdb_v.chemcomps`
 # --------------------------------------------------------------------------
 
@@ -927,6 +1351,48 @@ class ChemCompSource:
                 "name": _nn(r.get("nm")),
             }
 
+    def with_entry_counts(self, comp_ids: Iterable[str]) -> dict[str, int]:
+        """`comp_id -> number of PDB entries carrying it`, folded into the
+        cached records as `n_pdb_entries` so R14 can read it.
+
+        BEST EFFORT AND NEVER FATAL. A failure leaves `n_pdb_entries` absent,
+        which R14 reads as NOT CHECKED rather than as rare — the same
+        distinction `fetch_errors` makes for the CCD row itself, and for the
+        same reason. Measured: this aggregate returns in ~0.6 s for 15 ids;
+        the analogous join against `uniprot_v.pdb_chains`, which would give the
+        better statistic (distinct proteins rather than entries), times out at
+        120 s and is not usable.
+        """
+        want = [c.upper() for c in comp_ids if c]
+        out: dict[str, int] = {}
+        for i in range(0, len(want), 40):
+            batch = want[i:i + 40]
+            inlist = ", ".join("'" + c.replace("'", "''") + "'" for c in batch)
+            q = ("SELECT comp_id, count(distinct entry_id) n FROM "
+                 f"pdb_v.entry_ligands WHERE comp_id IN ({inlist}) GROUP BY 1")
+            try:
+                proc = subprocess.run(
+                    [self._paperclip, "sql", "-s", "proteins", q],
+                    capture_output=True, text=True, env=self._env,
+                    timeout=self._timeout, stdin=subprocess.DEVNULL,
+                )
+            except Exception as exc:                   # noqa: BLE001
+                self.last_error = f"entry counts: {type(exc).__name__}: {exc}"
+                continue
+            if proc.returncode != 0:
+                self.last_error = f"entry counts: {(proc.stderr or proc.stdout)[:200]}"
+                continue
+            for r in _parse_paperclip_table(proc.stdout):
+                cid = (r.get("comp_id") or "").strip().upper()
+                n = _ni(r.get("n"))
+                if cid and n is not None:
+                    out[cid] = n
+        for cid, n in out.items():
+            rec = self._cache.get(cid)
+            if isinstance(rec, dict):
+                rec["n_pdb_entries"] = n
+        return out
+
     def save_cache(self) -> None:
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -945,6 +1411,13 @@ def _nn(v: Any) -> Any:
 def _nf(v: Any) -> float | None:
     try:
         return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ni(v: Any) -> int | None:
+    try:
+        return int(v)
     except (TypeError, ValueError):
         return None
 
@@ -1073,6 +1546,10 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
         "has_phosphorus": bool(els.get("P")),
         "metals": sorted(e for e in els if e in _METALS) or None,
         "smiles_present": bool(smiles),
+        # Optional, supplied by the caller or by
+        # `ChemCompSource.with_entry_counts()`. `None` means NOT CHECKED, which
+        # is not the same as "rare" and never reads as one — see R14.
+        "n_pdb_entries": _ni(rec.get("n_pdb_entries")),
     }
 
     # ---- R0. The CCD's own placeholder components. `UNK`, `UNL`, `UNX` and
@@ -1190,6 +1667,7 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
         "peptide_residues": g.peptide_backbone_residues(),
         "alkyl_sulfonates": g.alkyl_sulfonate_groups(),
         "pyrimidine_base": g.pyrimidine_base(),
+        "electrophilic_halide_carbons": g.electrophilic_halide_carbons(),
     })
 
     chain = ev["longest_aliphatic_chain"]
@@ -1317,6 +1795,27 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
         return _v(cid, rec, "crystallisation_additive",
                   f"acyclic C/H/O chain with {ev['ether_oxygens']} ether "
                   "oxygens: a polyethylene glycol", ev)
+    # ---- R11b. Acyclic polyol / polyether, AT ANY SIZE and with nitrogen
+    # allowed. Two measured false positives, both from an IL-17A Foldseek run,
+    # missed the three rules around this one by a hair:
+    #   * `B3P` bis-tris propane — 19 heavy atoms, 6 hydroxyls, ring-free. The
+    #     `heavy <= 14 and not rings` rule misses it by 5 atoms and the
+    #     `heavy <= 18` polyol rule by ONE.
+    #   * `JEF` Jeffamine — 41 heavy atoms, 9 ether oxygens, ring-free. The PEG
+    #     rule above misses it only because a Jeffamine carries a terminal
+    #     amine, so `set(els) <= {C,H,O}` fails.
+    # Neither is a size question. A molecule with NO ring system at all, no
+    # amide, and four or more hydroxyl/ether oxygens is a polyol, a polyether
+    # or a Tris-family buffer, at 19 heavy atoms or at 41. Drug-like ligands
+    # essentially always carry a ring; the ones that do not are peptides and
+    # lipids, and both are decided well above this line.
+    if not g.rings and ev["n_amide_bonds"] == 0 \
+            and (ev["hydroxyls"] + ev["ether_oxygens"]) >= 4:
+        return _v(cid, rec, "crystallisation_additive",
+                  f"no ring system at all, no amide, and "
+                  f"{ev['hydroxyls']} hydroxyl(s) + {ev['ether_oxygens']} ether "
+                  "oxygen(s): an acyclic polyol, polyether or Tris-family "
+                  "buffer (bis-tris propane / Jeffamine / PEG class)", ev)
     # Good's buffers. An ALKYL sulfonate (S with >=3 O, on an sp3 carbon) with
     # no aromatic ring is MES/HEPES/MOPS/PIPES/CHES chemistry. Aryl sulfonamide
     # drugs are not touched: their sulfur carries two oxygens and a nitrogen.
@@ -1358,6 +1857,49 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
                   "pure C/H/O, no nitrogen and no aromatic ring: not drug-like "
                   "chemistry", ev, confidence="medium")
 
+    # ---- R14. UBIQUITY. The one place a measured LIST is the right
+    # instrument, and the argument for it is narrow on purpose.
+    #
+    # `BEN` (benzamidine, 120 Da, 9 heavy atoms) is a ubiquitous protease
+    # crystallisation additive AND a bona fide fragment: its close neighbours
+    # are real thrombin and trypsin inhibitors. No structural test can reject
+    # it without rejecting a real ligand class, which is a different situation
+    # from ADP, where chemistry separates cleanly and a list never could.
+    #
+    # So the discriminator is not what the molecule looks like but how it
+    # BEHAVES across the PDB: a component that turns up in hundreds of
+    # unrelated entries is laboratory practice, not precedent. That is a query
+    # (`SELECT comp_id, count(distinct entry_id) FROM pdb_v.entry_ligands`),
+    # not an opinion, and `ChemCompSource.with_entry_counts()` runs it.
+    #
+    # BOUNDED TWO WAYS, because an unbounded frequency prior would eat real
+    # chemistry. It fires only (a) below `UBIQUITY_MAX_HEAVY_ATOMS`, the size
+    # band where additives and fragments actually overlap, so it can never
+    # demote a 500 Da inhibitor, and (b) at the very end, so it can only ever
+    # convert `druglike` and never overrides a chemistry verdict.
+    #
+    # MEASURED, and note what the measurement also says: BEN 361 entries,
+    # B3P 232, JEF 21, LZ1 (a genuine fragment hit) 10, ZBR 9, LFI 8, MOV 7,
+    # N5S 1 — against GOL 26004 and EDO 17548. A frequency prior ALONE would
+    # not have worked: JEF is a real additive at 21 entries, below any cut that
+    # keeps LZ1 safe. JEF and B3P are caught by chemistry (R11b) and only BEN
+    # needs this. The better statistic — spread across unrelated proteins
+    # rather than entries — is not usable here: the
+    # `entry_ligands x pdb_chains` join times out at 120 s while the plain
+    # count returns in 617 ms.
+    n_entries = ev.get("n_pdb_entries")
+    if n_entries is not None and heavy is not None \
+            and heavy <= UBIQUITY_MAX_HEAVY_ATOMS \
+            and n_entries >= UBIQUITY_MIN_ENTRIES:
+        return _v(cid, rec, "crystallisation_additive",
+                  f"{heavy} heavy atoms and present in {n_entries} PDB entries "
+                  f"(>= {UBIQUITY_MIN_ENTRIES}): a component this small that "
+                  "appears across hundreds of unrelated entries is a "
+                  "crystallisation additive, whatever its chemistry looks "
+                  "like. This is the benzamidine class, which no structural "
+                  "test can separate from a real fragment hit", ev,
+                  flags=("ubiquity_prior_applied",), confidence="medium")
+
     bits = []
     if els.get("N"):
         bits.append(f"{els['N']} nitrogen(s)")
@@ -1365,9 +1907,246 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
     bits.append(f"{heavy} heavy atoms")
     if mw is not None:
         bits.append(f"{mw:.0f} Da")
+
+    dl_flags: list[str] = []
+    conf = "high"
+    # A component carrying THREE OR MORE alkyl-halide electrophiles is a
+    # bifunctional/trifunctional crosslinking reagent, not a drug — see
+    # `SmilesGraph.electrophilic_halide_carbons` for why the threshold is 3 and
+    # not 2 (nitrogen mustards are approved drugs with exactly two). The
+    # chemistry cannot settle it on its own, so this does NOT change the
+    # verdict; it lowers confidence and says what to go and check. With a
+    # `StructureContext` the question is answered outright — `LFI` in 8QFZ
+    # becomes `polymer_conjugate`.
+    if ev["electrophilic_halide_carbons"] >= 3:
+        dl_flags.append("multi_electrophile_may_be_a_crosslinking_reagent")
+        conf = "medium"
+    if n_entries is None and heavy is not None \
+            and heavy <= UBIQUITY_MAX_HEAVY_ATOMS:
+        # Said out loud rather than left as a silent pass: at this size the
+        # additive/fragment ambiguity is real and it was not checked.
+        dl_flags.append("ubiquity_not_checked")
+
     return _v(cid, rec, "druglike",
               "no cofactor, lipid, sugar, peptide, polymer or additive "
-              "signature fired; " + ", ".join(bits), ev)
+              "signature fired; " + ", ".join(bits)
+              + ("; NOTE: 3+ alkyl-halide electrophiles — check "
+                 "_struct_conn before treating this as a ligand"
+                 if "multi_electrophile_may_be_a_crosslinking_reagent" in dl_flags
+                 else ""),
+              ev, flags=tuple(dl_flags), confidence=conf)
+
+
+# --------------------------------------------------------------------------
+# The context rules. Applied ON TOP of the chemistry verdict, never instead
+# of it — `classify_record` stays a pure function of the CCD row.
+# --------------------------------------------------------------------------
+
+
+def _apply_structure_context(v: LigandVerdict, context: "StructureContext | None"
+                             ) -> LigandVerdict:
+    """Re-attribute a component using the entry it appears in.
+
+    WHY A NEW VERDICT RATHER THAN A FLAG ON `druglike`, OR RE-USING
+    `peptide_or_polymer`. Three arguments, in order of weight:
+
+    1. **A flag fails open, and this module exists because fail-open is how the
+       four historical bugs happened.** Four call sites test
+       `verdict == "druglike"` — `is_druglike_ligand`, `filter_druglike`,
+       `holo_call`, and `pocket-scan`'s `_ligands`. A hard flag that the holo
+       call "must respect" is a flag that one of them will not read, and the
+       failure mode when it is missed is silent and flattering. A distinct
+       verdict is respected by every one of those four without any of them
+       changing, because none of them equals `"druglike"`.
+    2. **`peptide_or_polymer` would be chemically false and would break the
+       invariant that a verdict is a property of the component.** `LFI` is not
+       a peptide residue and is not a polymer; saying so would mislead the next
+       reader. Worse, the same comp_id would carry the verdict
+       `peptide_or_polymer` in 8QFZ and `druglike` in some future entry where
+       it sits free — the same label meaning two different things. A separate
+       verdict makes it explicit that a DIFFERENT question was answered, and
+       `evidence["chemistry_verdict"]` keeps the chemistry answer readable.
+    3. **It names the finding and carries the thing the dossier actually
+       needs.** `polymer_conjugate` means "this component is a covalent
+       constituent of a polymer, and here is which one" —
+       `evidence["conjugate_of"]` holds that entity's description, length and
+       sequence, which is exactly what a PEPTIDE-PRECEDENT block is made of.
+       The peptide in 8QFZ is real evidence about the target; it is just not
+       small-molecule evidence. Downgrading to a flag on `druglike` would keep
+       the modality error; downgrading to `peptide_or_polymer` would throw the
+       pointer away.
+
+    THE RULES, and the control each one has to survive.
+
+    C0 — the component is a MONOMER of a polymer entity (`_entity_poly_seq`).
+         Then it is a residue, not a ligand: `peptide_or_polymer`. Catches the
+         `NH2`/`ACE` capping groups.
+
+    C1 — covalently bonded to a polymer entity that is NOT the target.
+         `polymer_conjugate`. This is `LFI` in 8QFZ (three bonds to the Bicycle
+         peptide, entity 2, while the target TSLP is entity 1).
+
+    C2 — covalently bonded to TWO OR MORE polymer residues.
+         `polymer_conjugate`, and this one needs no target identity at all. A
+         covalent DRUG carries one warhead and makes one bond; two or more
+         bonds means the component is stapling a chain together, i.e. it is
+         part of that chain's covalent constitution rather than a thing bound
+         to it. Measured: `LFI` 3 bonds, `ZBR` (TBMB) 3, `A1I4O` 3, `8VY`
+         (bis(bromomethyl)benzene) 2 — and 8VY's two bonds are to Cys427 and
+         Cys432 of the SAME chain in 5V2P, a crosslinked protein, which C1
+         cannot catch because that chain may well be the target.
+
+    C3 — exactly one covalent bond, to the TARGET polymer. **The chemistry
+         verdict is preserved untouched** and a flag is added. This is the
+         control that stops the fix trading one false positive for a worse
+         false negative: 6OIM's `MOV` (sotorasib, one bond to KRAS Cys12) and
+         4G5J's `0WN` (afatinib, one bond to EGFR Cys797) both stay `druglike`.
+
+    C4 — exactly one covalent bond, to a polymer, target identity UNKNOWN.
+         Undecidable, so nothing is changed except `confidence` -> `medium` and
+         a flag. Refusing to guess here is the difference between C3 and C1 and
+         it is the only place this fix could manufacture a false negative.
+    """
+    if context is None:
+        return v
+    cid = v.comp_id
+    ev = dict(v.evidence)
+    ev["structure_context"] = context.to_dict()
+
+    # ---- C0. A monomer of a polymer chain is a residue, not a ligand.
+    mono = context.is_polymer_monomer(cid)
+    if mono is not None and v.verdict != "peptide_or_polymer":
+        pe = context.polymer_entities.get(mono)
+        ev["chemistry_verdict"] = v.verdict
+        ev["chemistry_reason"] = v.reason
+        ev["polymer_monomer_of"] = pe.to_dict() if pe else {"entity_id": mono}
+        return _v(cid, _rec_of(v), "peptide_or_polymer",
+                  f"{context.entry_id or 'this entry'} lists {cid} in "
+                  f"_entity_poly_seq for polymer entity {mono}"
+                  + (f" ({pe.description})" if pe and pe.description else "")
+                  + ": it is a RESIDUE of that chain, not a bound ligand. "
+                  f"Chemistry alone called it {v.verdict!r}",
+                  ev, flags=tuple(v.flags) + ("polymer_monomer",),
+                  confidence="high", source=v.source)
+
+    if not context.is_available():
+        return v
+
+    links = context.links_for(cid)
+    poly_links = [l for l in links if l.partner_is_polymer]
+    if not poly_links:
+        return v
+
+    ev["covalent_links"] = [asdict(l) for l in poly_links]
+    partners = sorted({l.partner_entity_id or "?" for l in poly_links})
+    ev["covalently_bonded_to_entities"] = partners
+    ev["n_covalent_bonds_to_polymer"] = len(poly_links)
+
+    def conjugate(reason: str, rule: str, confidence: str = "high") -> LigandVerdict:
+        e = dict(ev)
+        e["chemistry_verdict"] = v.verdict
+        e["chemistry_reason"] = v.reason
+        e["context_rule"] = rule
+        hosts = [context.polymer_entities[p].to_dict()
+                 for p in partners if p in context.polymer_entities]
+        e["conjugate_of"] = hosts
+        # The thing a dossier has to record INSTEAD of a small-molecule holo
+        # call. Rule 1 of the dossier: modality first, always.
+        e["precedent_modality"] = _precedent_modality(hosts)
+        return _v(cid, _rec_of(v), "polymer_conjugate", reason, e,
+                  flags=tuple(v.flags) + ("covalent_to_polymer_ligand",),
+                  confidence=confidence, source=v.source)
+
+    non_target = [l for l in poly_links if l.partner_is_target is False]
+    on_target = [l for l in poly_links if l.partner_is_target is True]
+
+    # ---- C1. Bonded to a polymer that is not the target.
+    if non_target and not on_target:
+        host = ", ".join(
+            f"{p}"
+            + (f" ({context.polymer_entities[p].description})"
+               if p in context.polymer_entities
+               and context.polymer_entities[p].description else "")
+            for p in sorted({l.partner_entity_id or "?" for l in non_target})
+        )
+        return conjugate(
+            f"covalently bonded ({len(non_target)} _struct_conn covale "
+            f"linkage(s)) to polymer entity {host}, which is NOT the target "
+            f"({context.target_basis or 'target given by caller'}). The "
+            "component is a covalent constituent of that polymer's assembly, "
+            f"not an independent ligand. Chemistry alone called it "
+            f"{v.verdict!r}; that chemistry is not disputed, its ATTRIBUTION "
+            "is — precedent here belongs to the polymer, not to a small "
+            "molecule",
+            "C1_bonded_to_non_target_polymer")
+
+    # ---- C2. Two or more bonds to a polymer: a crosslink, not a warhead.
+    if len(poly_links) >= 2:
+        chains = sorted({l.partner_chain or "?" for l in poly_links})
+        return conjugate(
+            f"{len(poly_links)} covalent linkages to polymer residues "
+            f"({', '.join(f'{l.partner_comp_id} {l.partner_chain}/{l.partner_seq_id}' for l in poly_links)}"
+            f") across chain(s) {', '.join(chains)}: a CROSSLINKER or "
+            "macrocyclisation reagent, not a ligand. A covalent drug carries "
+            "one warhead and makes one bond; two or more means the component "
+            "is stapling the chain rather than binding it",
+            "C2_multivalent_covalent_crosslink",
+            confidence="high" if not on_target else "medium")
+
+    # ---- C3 / C4. Exactly one bond.
+    only = poly_links[0]
+    if only.partner_is_target is True:
+        ev["chemistry_verdict"] = v.verdict
+        ev["context_rule"] = "C3_single_covalent_bond_to_target"
+        return _v(cid, _rec_of(v), v.verdict,
+                  v.reason + f". Covalently bonded to the TARGET polymer "
+                  f"({only.partner_comp_id} {only.partner_chain}/"
+                  f"{only.partner_seq_id}) by one linkage — a covalent "
+                  "inhibitor, which IS evidence of a bindable site and is "
+                  "deliberately left untouched",
+                  ev, flags=tuple(v.flags) + ("covalent_to_target",),
+                  confidence=v.confidence, source=v.source)
+    ev["chemistry_verdict"] = v.verdict
+    ev["context_rule"] = "C4_single_covalent_bond_target_unknown"
+    return _v(cid, _rec_of(v), v.verdict,
+              v.reason + f". Covalently bonded to polymer entity "
+              f"{only.partner_entity_id} by ONE linkage, and the target entity "
+              "could not be resolved, so bonded-to-the-target cannot be told "
+              "from bonded-to-a-partner. Verdict left unchanged and confidence "
+              "lowered rather than guessed; pass uniprot_accession or "
+              "target_entity_ids to decide it",
+              ev, flags=tuple(v.flags) + ("covalent_to_unidentified_polymer",),
+              confidence="medium", source=v.source)
+
+
+def _precedent_modality(hosts: list[dict[str, Any]]) -> str:
+    """What modality the HOST polymer's precedent is, per dossier rule 1.
+
+    The point of the whole context fix: 8QFZ is real evidence — a 12-residue
+    bicyclic peptide binds this groove — and it belongs in the peptide block,
+    not the small-molecule one.
+    """
+    if not hosts:
+        return "unknown"
+    kinds = set()
+    for h in hosts:
+        t = (h.get("poly_type") or "").lower()
+        n = h.get("n_monomers") or 0
+        if "polypeptide" in t or "peptide" in t:
+            kinds.add("peptide" if n and n <= 50 else "protein")
+        elif "polyribonucleotide" in t or "polydeoxyribonucleotide" in t:
+            kinds.add("nucleic_acid")
+        else:
+            kinds.add("other")
+    return "/".join(sorted(kinds))
+
+
+def _rec_of(v: LigandVerdict) -> dict[str, Any]:
+    """Rebuild the minimal CCD row `_v` reads, so a re-verdict keeps its
+    name/formula/type/smiles without the caller passing them again."""
+    return {"name": v.name, "formula": v.formula, "formula_weight": v.mw,
+            "type": v.comp_type, "smiles": v.smiles,
+            "drugbank_id": v.drugbank_id}
 
 
 def _classify_without_smiles(cid, rec, ev, heavy, els, ctype) -> LigandVerdict:
@@ -1397,7 +2176,8 @@ def _classify_without_smiles(cid, rec, ev, heavy, els, ctype) -> LigandVerdict:
 
 
 def classify_ligand(comp_id: str, *, source: str = "pdb",
-                    chemcomps: ChemCompSource | None = None) -> LigandVerdict:
+                    chemcomps: ChemCompSource | None = None,
+                    context: StructureContext | None = None) -> LigandVerdict:
     """Classify one chemical component.
 
     `comp_id` is the FULL component ID from the mmCIF — `A1JPS`, not the first
@@ -1411,11 +2191,13 @@ def classify_ligand(comp_id: str, *, source: str = "pdb",
     """
     if source != "pdb":
         raise ValueError(f"unsupported source {source!r}; only 'pdb' is implemented")
-    return classify_ligands([comp_id], source=source, chemcomps=chemcomps)[comp_id.upper()]
+    return classify_ligands([comp_id], source=source, chemcomps=chemcomps,
+                            context=context)[comp_id.upper()]
 
 
 def classify_ligands(comp_ids: Iterable[str], *, source: str = "pdb",
-                     chemcomps: ChemCompSource | None = None
+                     chemcomps: ChemCompSource | None = None,
+                     context: StructureContext | None = None
                      ) -> dict[str, LigandVerdict]:
     """Batch form — ONE Paperclip round trip per 40 comp_ids.
 
@@ -1444,24 +2226,29 @@ def classify_ligands(comp_ids: Iterable[str], *, source: str = "pdb",
                         flags=("lookup_failed",), confidence="none",
                         source="paperclip:pdb_v.chemcomps (lookup failed)")
         else:
-            out[c] = classify_record(rec, c)
+            out[c] = _apply_structure_context(classify_record(rec, c), context)
     return out
 
 
-def is_druglike_ligand(comp_id: str, *, chemcomps: ChemCompSource | None = None) -> bool:
+def is_druglike_ligand(comp_id: str, *, chemcomps: ChemCompSource | None = None,
+                       context: StructureContext | None = None) -> bool:
     """True only for `druglike`. `unknown` is False — an unclassified ligand is
-    not evidence of a bindable site."""
-    return classify_ligand(comp_id, chemcomps=chemcomps).verdict == "druglike"
+    not evidence of a bindable site. `polymer_conjugate` is False as well: a
+    crosslinker inside a peptide ligand is that peptide's chemistry."""
+    return classify_ligand(comp_id, chemcomps=chemcomps,
+                           context=context).verdict == "druglike"
 
 
 def filter_druglike(comp_ids: Iterable[str], *,
-                    chemcomps: ChemCompSource | None = None) -> list[str]:
-    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps)
+                    chemcomps: ChemCompSource | None = None,
+                    context: StructureContext | None = None) -> list[str]:
+    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps, context=context)
     return [c for c, v in verdicts.items() if v.verdict == "druglike"]
 
 
 def holo_call(comp_ids: Iterable[str], *,
-              chemcomps: ChemCompSource | None = None) -> dict[str, Any]:
+              chemcomps: ChemCompSource | None = None,
+              context: StructureContext | None = None) -> dict[str, Any]:
     """Entry-level holo/apo call with the full reasoning attached.
 
     Returns `is_holo`, the drug-like ligands that justify it, and every other
@@ -1469,15 +2256,36 @@ def holo_call(comp_ids: Iterable[str], *,
     rather than "apo" full stop, and can show WHY a rejected ligand was
     rejected.
     """
-    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps)
+    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps, context=context)
     buckets: dict[str, list[str]] = {}
     for c, v in verdicts.items():
         buckets.setdefault(v.verdict, []).append(c)
     dl = sorted(buckets.get("druglike", []))
     failed = sorted(c for c, v in verdicts.items() if "lookup_failed" in v.flags)
+    # WHAT THE ENTRY IS EVIDENCE OF, WHEN IT IS NOT EVIDENCE OF A SMALL
+    # MOLECULE. A `polymer_conjugate` is not an absence — it says a peptide or
+    # another polymer is bound here, which is real and belongs in the dossier's
+    # PEPTIDE precedent block under rule 1, not in the small-molecule one.
+    # 8QFZ is a demonstrated ligandable groove with a 12-residue bicyclic
+    # peptide against it; what it is not is a small-molecule holo structure.
+    precedent: list[dict[str, Any]] = []
+    for c in sorted(buckets.get("polymer_conjugate", [])):
+        ev = verdicts[c].evidence
+        for host in ev.get("conjugate_of", []) or []:
+            precedent.append({
+                "via_comp_id": c,
+                "modality": ev.get("precedent_modality"),
+                "entity_id": host.get("entity_id"),
+                "description": host.get("description"),
+                "n_monomers": host.get("n_monomers"),
+                "sequence": host.get("sequence"),
+            })
     return {
         "is_holo": bool(dl),
         "druglike_ligands": dl,
+        "polymer_conjugates": sorted(buckets.get("polymer_conjugate", [])),
+        "polymer_ligand_precedent": precedent,
+        "context_applied": context is not None and context.is_available(),
         "by_verdict": {k: sorted(v) for k, v in sorted(buckets.items())},
         "unknown_ligands": sorted(buckets.get("unknown", [])),
         # `is_holo=False` with a non-empty `undetermined` is NOT an apo call.

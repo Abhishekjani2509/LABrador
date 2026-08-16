@@ -137,10 +137,23 @@ enough: a fusion chaperone can sit *inside* a chain (3V2Y's T4 lysozyme at
 1002–1161 beside the receptor at 16–330), which needs a residue range.
 
 **Read `site_pocket_selected_by` on every value before using it.** It is
-returned per structure per clustering value, and two of its five possible values
-mean the number does not describe a known site:
-`max_druggability_no_ligand_site` and `site_signature_unreliable_homooligomer`.
-Values carrying either must not be pooled into one spread.
+returned per structure per clustering value, and **four of its six possible
+values** mean the number does not describe a known site:
+`max_druggability_no_ligand_site` ("the most druggable pocket anywhere in the
+chain"), `site_signature_unreliable_homooligomer` (a residue-number match a
+homo-oligomer makes ambiguous in principle), `no_pocket_matched_site_signature`
+(matched nothing) and `no_pocket_overlapped_ligand_site` (a ligand site was
+known and no pocket reached it — the strongest case of all, because the
+measurement is anchored to nothing). Values carrying any of them must not be
+pooled into one spread.
+
+**This sentence read "two of its five" until 2026-08-15, and both numbers were
+wrong.** `no_pocket_overlapped_ligand_site` was never transcribed into
+`SELECTION_BASES` at all, so the validator rejected a basis the tool emits — and
+it is the basis for the exact false negative rule 4 exists around (TNF-alpha
+0.002 at D=1.6 on a co-crystallised 570 Da ligand, the cluster discarded below
+fpocket's `-i 15` floor). `test_four_of_the_six_bases_do_not_identify_a_site`
+now pins both counts.
 
 **Writes:** `tractability.pocket_volume_a3` — including
 `primary_d1_6_a3`, **the computed axis's primary number**, and `clustering_d`
@@ -246,12 +259,19 @@ discount.
 
 ### 8. Verdict, then validate
 
-Write `verdict`, `verdict_basis`, `axis_conflict` and `next_experiment`. Then
-run the gate:
+Write `verdict`, `verdict_basis`, `axis_conflict` and `next_experiment`. Write
+the dossier to its pinned path, then run the gate **on the file you wrote**:
 
 ```bash
-python3 validate_dossier.py dossier.json
+python3 .claude/skills/assemble-dossier/validate_dossier.py \
+        /mnt/session/outputs/druggability-dossier.json
 ```
+
+**This command used to read `python3 validate_dossier.py dossier.json`**, which
+named a file `CLAUDE.md` forbids writing (the output path is pinned and no
+other) and a script path that only resolves if the working directory happens to
+be this skill's own. Validate the artifact the grader reads, not a copy of it —
+a copy is where the two can differ and nobody finds out.
 
 Zero violations, or the dossier does not go out. Fix the dossier, not the
 validator — every rule in it exists because the corresponding mistake is easy,
@@ -326,6 +346,20 @@ the `tractability.site_pocket_rank` block. Two of them are `_`-prefixed and so
 are invisible to the provenance walker by design — they carry the reason a
 number is discounted, not a claim. `load_bearing` has exactly one legal value.
 
+**The first four of those six reached the validator before they reached the
+template, and an agent filling the template exactly as written produced a
+dossier the gate rejected.** That is the regression `test_template_drift.py`
+exists for; see "Nobody was reading the template" below. Do not fix a
+recurrence by editing the validator — the template is where the key is missing.
+
+**And a seventeenth top-level key landed the same day: `input`**, echoing the
+five contract fields verbatim. It exists because a downstream team was told to
+key a cache on (accession, `mechanism_hypothesis`, `as_of_date`) and none of the
+three survived into the output. It is an **echo**, never inferred and never
+back-filled: `input.uniprot_accession` is what the caller said,
+`target.uniprot_accession` is the resolved accession, and the top-level
+`as_of_date` remains authoritative. Both worked examples carry it.
+
 What remains genuinely added, and why each earns its place:
 
 | key | why |
@@ -350,7 +384,9 @@ not data: use `[]` for "none", never an entry with an empty name.
 
 `validate_dossier.py` — pure stdlib, importable as
 `validate_dossier(dossier: dict) -> list[Violation]`, or runnable as a CLI that
-exits 1 on any violation. Sixteen rule functions, seventeen violation types:
+exits 1 on any violation. **Seventeen rule functions, eighteen violation types**
+— and both numbers are asserted by `test_the_rule_inventory_is_pinned`, so this
+sentence cannot go stale the way the rubric's test count did:
 
 | rule | catches |
 | --- | --- |
@@ -365,6 +401,7 @@ exits 1 on any violation. Sixteen rule functions, seventeen violation types:
 | `FRACTION_WITHOUT_N` | a consensus fraction with no N, or an N disagreeing with the named ensemble |
 | `SAME_SITE_BASIS_MISSING` / `_INVALID` | a pooled spread with no recorded basis, or pooled on a basis that does not identify a site |
 | `SITE_INCONSISTENT` | geometry quoted off `site_from_density` when its centroid is past the 4 A proposed threshold, or an interface class asserted with no partner structure and no measured overlap |
+| `INTERFACE_MIXED_UNRESOLVED` | a `mixed` interface classification that does not say what it is mixed between, carries one overlap instead of the disagreeing ones, names no partner, or claims to confirm a mechanism hypothesis — and, in the other direction, a `classifications_seen` naming two labels while `classification` reports one of them |
 | `CRYPTIC_MISCLAIM` | cryptic asserted on a site present in the apo ensemble, on too few apo structures, from tier alone, with a mechanism-inconsistent potency prior, or with a mechanism asserted over an all-null census |
 | `NULL_IS_NOT_ZERO` | an unexplained null, a measured zero also listed in `not_found`, a sentinel string in a numeric field |
 | `AS_OF_LEAKAGE` | undated sources used under a cutoff without `leakage_risk: true`, and any date after the cutoff |
@@ -376,16 +413,117 @@ with: `INSUFFICIENT_ACTIVES_THRESHOLD = 50`, `SINGLE_ASSAY_DOMINANCE_PCT = 30.0`
 `CRYPTIC_APO_ABSENCE_FRACTION = 0.8`, `AXIS_CONFLICT_ACTIVES_THRESHOLD = 500`,
 `DRUGGABILITY_FALSE_NEGATIVE_BAND = 0.5`, `DRUGGABILITY_FALSE_NEGATIVE_FLOOR = 0.1`,
 `PRIMARY_VOLUME_CLUSTERING_D = 1.6`, `MERGED_VOLUME_A3 = 1000.0`,
-`VOLUME_GUIDE_DRUGGABLE_A3 = 240.0`, `VOLUME_GUIDE_HARD_A3 = 210.0`.
-`test_the_measured_constants_are_pinned` asserts every one of them, so widening
-the false-negative band or promoting the volume guide into a classifier fails a
-test that names the number that moved.
+`VOLUME_GUIDE_DRUGGABLE_A3 = 240.0`, `VOLUME_GUIDE_HARD_A3 = 210.0`, and
+`OFF_SITE_CENTROID_DISTANCE_A = 4.0`.
+`test_the_measured_constants_are_pinned` asserts **every one of them**, so
+widening the false-negative band or promoting the volume guide into a classifier
+fails a test that names the number that moved. That claim was false until
+2026-08-15 — the test pinned six of the ten, and the four it skipped were the
+policy thresholds, which are exactly the ones a reader would want to argue with.
+`OFF_SITE_CENTROID_DISTANCE_A` was in neither the list nor the test, despite
+being the threshold `CLAUDE.md` and `rubric.md` describe at most length.
 
 **The two volume-guide constants classify nothing, deliberately.** They are used
 in exactly one place: deciding when a low druggability and a large volume
 disagree loudly enough that `tractability.caveat` must say so. No verdict, no
 threshold, no gate — the boundary is a 17% margin fitted post hoc on n=15 and it
 needs out-of-sample validation first.
+
+### The gate's vocabulary is the TOOL's vocabulary, not a shorter one
+
+`pocket_vs_interface.classification` has **seven** legal values, not four. Four
+come from `interface_analysis.classify_pocket` — `orthosteric_candidate`,
+`allosteric_candidate`, `destabiliser_candidate`, `no_partner_structure` — and
+three come from the aggregation step in `modal_app.py` that runs over them:
+`mixed`, `no_pocket_to_classify` and `numbering_mismatch_not_interpretable`.
+The last two are abstentions and demand nothing.
+
+The same defect had a second instance one field over: `SELECTION_BASES` was
+transcribed with five of `site_pocket_selected_by`'s **six** values, so the
+validator rejected `no_pocket_overlapped_ligand_site` — see step 4 above. **When
+this skill and the tool disagree about a vocabulary, the tool is right**, because
+the tool is what produces the value. A gate narrower than its own input does not
+make the output stricter; it makes the agent launder.
+
+**The validator used to reject `mixed`, and `pocket-scan` mandates it.** That is
+not a difference of opinion about a label; it is a machine gate refusing a value
+its own upstream tool is required to emit. Two symmetry copies of one ligand in
+one structure can land either side of the 0.25 overlap boundary — measured on
+**8DYG, ligand U5Q**: copy A `allosteric_candidate` at **0.22**, copy B
+`orthosteric_candidate` at **0.36**, both flagged borderline. A caller that
+reaches into `per_structure` and takes whichever copy came first is tossing a
+coin between two different mechanistic claims, so the aggregation rule reports
+the disagreement *as* a disagreement. A run that met the old enum had to record
+the conflict in `not_found` and hide the true value in a `_consensus_note`.
+**That is laundering, and it is precisely what this dossier exists to prevent.**
+The enum was wrong; `mixed` is now legal.
+
+**But admitting it is not the whole fix, because a bare `mixed` is worse than
+either label it replaces** — it names no mechanism, so a reader cannot act on it
+at all. `INTERFACE_MIXED_UNRESOLVED` is the price of admission. `mixed` must
+carry:
+
+| what | why |
+| --- | --- |
+| `classifications_seen` — at least two *distinct* classes | mixed **between what**. One class repeated is a consensus, not a disagreement |
+| `pocket_interface_overlap` as the individual overlaps, not one scalar | 0.22 and 0.36 straddling 0.25 is a pocket **on the boundary**; a single 0.22 is a claim that it is not |
+| `partner_pdb_id` | a classification is measured against a complex, mixed or not — rule 2b does not relax |
+| `matches_mechanism_hypothesis` not `true` | a disagreement cannot confirm a hypothesis, and the copy that agrees with the prior is exactly the one that gets quoted |
+
+So a consumer reading `mixed` acts on it like this: **both mechanistic
+hypotheses are live**, the overlaps say how far apart, and the resolving
+experiment is a structure that separates the copies — which is what
+`next_experiment` should then name. It is not a hedge and it is not a
+"medium confidence".
+
+The rule also fires in the opposite direction. `classifications_seen` naming two
+labels while `classification` reports one of them is the first-wins bug itself,
+caught after the fact.
+
+### Nobody was reading the template, so the template kept drifting
+
+`test_template_drift.py` loads the literal JSON out of `CLAUDE.md`, fills every
+leaf with a plausible value and asserts the gate returns **zero violations**.
+
+It exists because the template and the validator disagreed **three times in one
+day**, and the pair had already had this exact defect once before. Every other
+test in the suite builds its dossiers from `examples/*.json` — hand-maintained
+real runs, which get updated whenever the validator does. **The template was the
+one artifact the suite never read**, so a validator change that did not reach it
+was invisible until a live run failed.
+
+Two halves, because they fail differently:
+
+- **Static.** Every dotted path the validator names — from `REQUIRED_TOP_LEVEL`,
+  `ENUMS`, `MEASURED_FIELDS`, `NOT_DATE_FILTERABLE`, and from every
+  fully-qualified dotted string literal in the module source — must exist in the
+  template. It names the missing key instead of making you read a violation. The
+  source scan is not `_get(d, "…")`-shaped on purpose: three of the four keys in
+  the regression it was built for are never passed to `_get` at all. What they
+  all have is a `Violation` naming the path, which is a property of how this
+  validator is written.
+- **Behavioural.** Fill and run the gate. This is what catches requirements
+  living inside a rule body (`drug.get("load_bearing")`), which no static scan of
+  call shapes would see.
+
+**A key that must genuinely live on only one side is fine — it needs an entry in
+`EXEMPTIONS` with a stated reason, and a test asserts every exemption is still
+needed.** Silence is not an option. There is currently exactly one.
+
+Three things the file is careful about, all of which cost a debugging cycle:
+
+- **The fill table encodes semantics, never structure.** A new template key that
+  needs no special value is handled by `_default_for` and needs no edit. If the
+  table had to name every key it would be a second copy of the template, free to
+  drift on its own — so `test_every_FILL_key_is_a_real_template_path` refuses to
+  let it reference a path the template does not have. That test caught a stale
+  entry the first time it ran.
+- **A list of literals is not a list stub.** Filling `clustering_d_swept:
+  [1.6, 2.4]` by taking element zero turned the mandatory two-value D sweep into
+  a single D, and the gate correctly called it a coin flip.
+- **The placeholder string contains no substring of any `MEASURED_FIELDS` path.**
+  `_mentions_field` matches by substring, so a careless placeholder dropped into
+  `not_found` would silently excuse a null somewhere else in the dossier.
 
 ### A rule that asks "was this attempted?" must test the VALUE, never the key
 
@@ -832,7 +970,26 @@ read a clean run as verification of the content.
 ## Output
 
 A single JSON object matching the template in `CLAUDE.md`, with the extension
-keys above. Return the JSON and nothing else.
+keys above. It goes to **two places, every run**:
+
+1. **Write it to `/mnt/session/outputs/druggability-dossier.json`** — that exact
+   path and no other, creating the directory first if it does not exist.
+2. **Paste the complete JSON into your final reply.**
+
+**Neither substitutes for the other, and this file used to say "Return the JSON
+and nothing else", which was wrong.** The file is the only channel the dossier
+reaches the *grader* by — a dossier that exists only in the reply is ungraded and
+fails every criterion. The reply is the only channel it reaches a *human* by,
+because sandbox files are not retrievable through the Files API once the session
+ends. A short wrap-up message in place of the JSON loses the deliverable. The
+deployed prompt in `CLAUDE.md` requires both; that is the authority here.
+
+Validate the file you wrote, not a copy of it:
+
+```bash
+python3 .claude/skills/assemble-dossier/validate_dossier.py \
+        /mnt/session/outputs/druggability-dossier.json
+```
 
 Before returning: `validate_dossier.py` returns zero violations. If it does not,
 fix the dossier. If a rule seems wrong for a genuine case, say so in the run's

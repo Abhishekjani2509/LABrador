@@ -210,6 +210,12 @@ MAX_POCKETS_CLASSIFIED = 10
 # out when an mmCIF chain name will not fit column 22.
 _PDB_CHAIN_POOL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
+# Polymer-chain count above which whole-assembly scoring stops being a
+# measurement of a binding site. PROPOSED, NOT CALIBRATED: set above every
+# assembly in the calibration set (NLRP3's octamer is the largest at 8) and far
+# below the 60-mers that produced the failure. It FLAGS and never filters.
+LARGE_ASSEMBLY_CHAINS = 12
+
 
 def _fetch(pdb_id: str, dest: Path) -> Path:
     """Fetch the mmCIF. Always the mmCIF, never the legacy PDB.
@@ -343,8 +349,15 @@ def _load(cif: Path) -> tuple[object, list[str], dict[str, str]]:
             continue
         if not pool:
             raise RuntimeError(
-                f"{cif.stem}: more chains than PDB chain IDs; cannot write "
-                "an fpocket input without losing chain identity"
+                f"{cif.stem}: more chains than PDB chain IDs "
+                f"({len(_PDB_CHAIN_POOL)}); cannot write an fpocket input "
+                "without losing chain identity. NOTE THIS IS AN IMPLEMENTATION "
+                "LIMIT, NOT A JUDGEMENT ABOUT THE STRUCTURE: an assembly just "
+                "under it is not thereby suitable for whole-assembly scoring. "
+                "1JH5, a 60-mer, fits and returned 378 pockets with the "
+                "selected one 60.28 A from the protein centre. See "
+                "LARGE_ASSEMBLY_CHAINS, which flags both sides of this "
+                "boundary the same way."
             )
         renamed[chain.name] = pool.pop(0)
     for old, new in renamed.items():
@@ -1104,7 +1117,123 @@ def _unit_interval(value, field: str, context: str = ""):
 # ===========================================================================
 
 
-def _chain_accessions(cif: Path | None, renamed: dict[str, str]) -> dict[str, list[str]]:
+# {accession -> (aliases, resolved_ok)} for the life of one container.
+_ACC_ALIAS_CACHE: dict[str, dict] = {}
+
+
+def _accession_aliases(acc: str) -> dict:
+    """Every accession UniProt considers the same entry as `acc`.
+
+    THIS IS WHAT MAKES FAILING CLOSED SAFE. A PDB entry declares the accession
+    that was current when it was deposited, and UniProt merges accessions
+    afterwards — so an older entry for the same protein legitimately names a
+    different string. Caught before shipping, on the TL1A ensemble: 2O0O, 2QE3
+    and 2RE9 declare **Q8NFE9**, whose UniProt record is
+    `inactiveReason: {inactiveReasonType: "MERGED", mergeDemergeTo: ["O95150"]}`
+    — it IS O95150 — while 3K51 and the newer entries declare O95150 directly.
+    Refusing on a literal string comparison would have thrown away three of six
+    entries of the target's own ensemble and called them "not this protein".
+
+    Returns `{aliases, genes, taxid, ok}`. `ok` is False when the lookup could
+    not be made, and a caller must NOT refuse an entry on an unresolved record —
+    an unanswered question is not a negative answer.
+    """
+    acc = (acc or "").strip()
+    if not acc:
+        return {"aliases": set(), "genes": set(), "taxid": None, "ok": False}
+    if acc in _ACC_ALIAS_CACHE:
+        return _ACC_ALIAS_CACHE[acc]
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    rec = {
+        "aliases": {acc, acc.split("-")[0]},
+        "genes": set(),
+        "taxid": None,
+        "ok": False,
+    }
+    try:
+        req = urllib.request.Request(  # noqa: S310
+            f"https://rest.uniprot.org/uniprotkb/{acc}.json"
+            "?fields=accession,gene_names,organism_id",
+            headers={"User-Agent": "pocket-scan"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as fh:  # noqa: S310
+            d = _json.loads(fh.read().decode())
+        rec["ok"] = True
+        if d.get("primaryAccession"):
+            rec["aliases"].add(d["primaryAccession"])
+        for s in d.get("secondaryAccessions") or ():
+            rec["aliases"].add(s)
+        # An accession that has been merged away answers with entryType
+        # "Inactive" and names its successor here.
+        for s in (d.get("inactiveReason") or {}).get("mergeDemergeTo") or ():
+            rec["aliases"].add(s)
+        for g in d.get("genes") or ():
+            name = (g.get("geneName") or {}).get("value")
+            if name:
+                rec["genes"].add(name.strip().upper())
+        rec["taxid"] = (d.get("organism") or {}).get("taxonId")
+    except (urllib.error.URLError, OSError, ValueError, KeyError):
+        rec["ok"] = False
+    _ACC_ALIAS_CACHE[acc] = rec
+    return rec
+
+
+def _accession_matches(declared: str, target: str) -> tuple[bool, bool]:
+    """Is `declared` the same protein as `target`? Returns (matches, checkable).
+
+    THREE TESTS, AND THE THIRD IS THE ONE THAT KEEPS FAILING CLOSED HONEST.
+    String equality alone is far too brittle to refuse an entry on:
+
+      1. the accession, or its isoform base, is literally the same;
+      2. UniProt has MERGED one into the other — TL1A's 2O0O/2QE3/2RE9 declare
+         Q8NFE9, whose record says `mergeDemergeTo: ["O95150"]`;
+      3. they are the SAME GENE in the SAME ORGANISM under two different
+         UniProt entries. IL-13's 3BPO declares **Q4VB50**, which is not merged
+         into P35225 and never will be — it is an unreviewed TrEMBL entry whose
+         recommended name is "Interleukin-13" and whose gene is IL13, human.
+         Refusing 3BPO on the string would have been wrong in the damaging
+         direction: the entry DOES contain IL-13, and what it actually needs is
+         for chain A to be recognised as the target so that chains B and C —
+         IL-4R-alpha and IL-13R-alpha-1 — are recognised as partners.
+
+    `checkable` is False when neither side could be resolved against UniProt.
+    An unanswered question is not a negative answer and must not refuse.
+    """
+    if declared == target or declared.split("-")[0] == target.split("-")[0]:
+        return True, True
+    d, t = _accession_aliases(declared), _accession_aliases(target)
+    if d["aliases"] & t["aliases"]:
+        return True, True
+    if (
+        d["genes"] and t["genes"] and d["genes"] & t["genes"]
+        and d["taxid"] is not None and d["taxid"] == t["taxid"]
+    ):
+        return True, True
+    return False, (d["ok"] and t["ok"])
+
+
+def _assembly_base_chain(name: str) -> str:
+    """`"A-3"` -> `"A"`. The source chain an assembly-expansion copy came from.
+
+    gemmi appends `-<n>` when it expands a biological assembly, and
+    `_struct_ref_seq` only ever names the un-suffixed strand. Everything that
+    joins a chain to an accession has to strip this or the copies come back
+    unmapped — see `_chain_accessions`.
+    """
+    import re
+
+    m = re.match(r"^(.+)-\d+$", name)
+    return m.group(1) if m else name
+
+
+def _chain_accessions(
+    cif: Path | None,
+    renamed: dict[str, str],
+    chain_names: list[str] | None = None,
+) -> tuple[dict[str, list[str]], str]:
     """{chain id -> UniProt accessions}, from `_struct_ref` + `_struct_ref_seq`.
 
     WHICH CHAIN IS THE TARGET IS A LOOKUP, NOT A GUESS. Everything that used to
@@ -1119,15 +1248,36 @@ def _chain_accessions(cif: Path | None, renamed: dict[str, str]) -> dict[str, li
 
     Chain IDs are returned in THIS module's namespace, i.e. after `_load`'s
     single-character renaming, so they can be compared against `used_chains`.
+
+    Returns `(mapping, status)`. THE STATUS IS NOT DECORATION — it is the
+    difference between "this entry says it does not contain your protein" and
+    "we could not read what this entry says", and those must not be collapsed.
+    Collapsing them is what made the resolver fail OPEN: an empty mapping was
+    treated as "no mapping declared", the caller fell back to every chain, and
+    the pocket selector was then free to pick a cavity inside an antibody.
+
+        ok            the entry declares UniProt refs and they were read
+        no_header     the header file could not be fetched
+        unparsable    it was fetched and gemmi would not read it
+        no_unp_refs   it parsed and declares no UNP reference at all
+
+    ASSEMBLY-EXPANSION COPIES INHERIT THEIR SOURCE CHAIN'S ACCESSION. gemmi
+    names the copies it creates when expanding a biological assembly
+    `<orig>-<n>`, and `_struct_ref_seq` only ever names `<orig>`. Without this
+    every copy came back unmapped: 1JH5 is a 60-mer of ONE protein in which ten
+    chains resolved to Q9Y275 and the other FIFTY — the same protein, renamed by
+    expansion — carried `chain_accessions: null` and were reported as
+    `non_target_chains_scored`. A pocket lined by any of those fifty is on the
+    target and was being described as if it were not.
     """
     import gemmi
 
     if cif is None:
-        return {}
+        return {}, "no_header"
     try:
         block = gemmi.cif.read(str(cif)).sole_block()
     except Exception:  # noqa: BLE001
-        return {}
+        return {}, "unparsable"
     ref_acc: dict[str, str] = {}
     for row in block.find("_struct_ref.", ["id", "db_name", "pdbx_db_accession"]):
         if row.str(1).strip().upper() != "UNP":
@@ -1135,36 +1285,217 @@ def _chain_accessions(cif: Path | None, renamed: dict[str, str]) -> dict[str, li
         acc = row.str(2).strip()
         if acc and acc not in ("?", "."):
             ref_acc[row.str(0).strip()] = acc
-    out: dict[str, list[str]] = {}
+    by_strand: dict[str, list[str]] = {}
     for row in block.find("_struct_ref_seq.", ["ref_id", "pdbx_strand_id"]):
         acc = ref_acc.get(row.str(0).strip())
         if not acc:
             continue
         for raw in row.str(1).replace(",", " ").split():
-            ch = renamed.get(raw, raw)
-            if acc not in out.setdefault(ch, []):
-                out[ch].append(acc)
-    return out
+            if acc not in by_strand.setdefault(raw, []):
+                by_strand[raw].append(acc)
+    if not by_strand:
+        return {}, "no_unp_refs"
+    inv = {new: old for old, new in renamed.items()}
+    names = (
+        list(chain_names) if chain_names is not None
+        else [renamed.get(r, r) for r in by_strand]
+    )
+    out: dict[str, list[str]] = {}
+    for ch in names:
+        orig = inv.get(ch, ch)
+        for key in (orig, _assembly_base_chain(orig)):
+            if key in by_strand:
+                out[ch] = list(by_strand[key])
+                break
+    return out, "ok"
 
 
 def _target_chains(
     chain_acc: dict[str, list[str]],
     accession: str | None,
     fallback: list[str],
-) -> tuple[list[str], str]:
-    """The chains that ARE the target, by accession. Falls back audibly."""
-    if not accession or not chain_acc:
-        return list(fallback), (
-            "no accession available" if not accession
-            else "entry declares no _struct_ref UniProt mapping"
-        )
-    hits = [c for c in fallback if accession in chain_acc.get(c, [])]
+    acc_status: str = "ok",
+) -> dict:
+    """The chains that ARE the target, by accession. FAILS CLOSED.
+
+    Returns {chains, basis, verified, refuse, reason, declared_accessions}.
+
+    THIS USED TO FAIL OPEN AND THAT IS WHAT LET THE POCKET SELECTOR LOOSE.
+    When the requested accession was absent from the entry it returned EVERY
+    chain with the note "using every chain scored, which may include partners" —
+    a warning in a string, downstream of nothing. Measured on IL-13 3BPO, whose
+    `_struct_ref` declares Q4VB50, P24394 and P78552 and does NOT declare
+    P35225: all three chains became "target", the longest of them (IL-13R-alpha-1
+    at 314 aa) became the target SEQUENCE, and the interface stage then put the
+    receptor on the target's side of its own interface and returned
+    `interface_status: ok`.
+
+    THE THREE OUTCOMES ARE DIFFERENT AND ARE NOW DISTINGUISHED:
+
+      * the entry declares UniProt refs and one matches   -> verified, use them
+      * the entry declares UniProt refs and NONE match    -> REFUSE the entry.
+        It says what proteins it contains and yours is not among them. Scoring
+        it anyway measures a different molecule, which is precisely how a pocket
+        inside tralokinumab's Fab became IL-13's headline volume.
+      * the mapping could not be READ (no header, unparsable, no UNP refs)
+        -> fall back to every chain, but `verified` is False, and everything
+        downstream that would otherwise trust the chain set must degrade rather
+        than assume. Unreadable is not the same claim as absent and must not
+        refuse an entry on our own parser's behalf.
+
+    With no accession supplied there is nothing to verify against; that is the
+    caller's choice, not a failure, and it is reported as unverified rather than
+    refused.
+    """
+    declared = sorted({a for accs in chain_acc.values() for a in accs})
+    if not accession:
+        return {
+            "chains": list(fallback),
+            "basis": (
+                "no uniprot_accession supplied; every scored chain is treated "
+                "as target and NOTHING below is verified against an accession"
+            ),
+            "verified": False,
+            "refuse": False,
+            "reason": None,
+            "declared_accessions": declared,
+        }
+    if acc_status != "ok":
+        return {
+            "chains": list(fallback),
+            "basis": (
+                f"the entry's UniProt mapping could not be read ({acc_status}); "
+                "every scored chain is treated as target and the chain set is "
+                "UNVERIFIED"
+            ),
+            "verified": False,
+            "refuse": False,
+            "reason": (
+                "unreadable is not the same finding as absent, so this entry is "
+                "not refused — but no pocket from it has been checked against "
+                "the target's chains, and a pocket lined by a partner cannot be "
+                "distinguished from one lined by the target here."
+            ),
+            "declared_accessions": declared,
+        }
+    # Matched through UniProt's own merge history, not by string equality — see
+    # `_accession_aliases`. `checkable` False anywhere means we could not
+    # establish that a declared accession is NOT the target, and an unanswered
+    # question must not refuse an entry.
+    hits, checkable = [], True
+    for c in fallback:
+        for a in chain_acc.get(c, ()):
+            m, ck = _accession_matches(a, accession)
+            checkable = checkable and ck
+            if m:
+                hits.append(c)
+                break
+    if not hits and not checkable:
+        return {
+            "chains": list(fallback),
+            "basis": (
+                f"no chain of this entry maps to {accession} by string, and "
+                "UniProt could not be reached to check whether any of "
+                f"{declared} is a merged form of it; every scored chain is "
+                "treated as target and the chain set is UNVERIFIED"
+            ),
+            "verified": False,
+            "refuse": False,
+            "reason": (
+                "the entry declares accessions this run could not resolve. "
+                "Older depositions legitimately name accessions UniProt has "
+                "since merged — TL1A's 2O0O, 2QE3 and 2RE9 declare Q8NFE9, "
+                "which IS O95150 — so refusing on the string alone would "
+                "discard half an ensemble. Not refused, not verified."
+            ),
+            "declared_accessions": declared,
+        }
     if not hits:
-        return list(fallback), (
-            f"no chain of this entry maps to {accession}; using every chain "
-            "scored, which may include partners"
+        return {
+            "chains": [],
+            "basis": f"no chain of this entry maps to {accession}",
+            "verified": True,
+            "refuse": True,
+            "reason": (
+                f"this entry declares UniProt accessions {declared or '[]'} in "
+                f"_struct_ref, and none of them is {accession} or a UniProt "
+                "merge of it, so it does not "
+                "contain the target. REFUSED rather than scored: the previous "
+                "behaviour was to use every chain 'which may include partners', "
+                "and what that produced was pocket volumes measured inside "
+                "antibody Fabs and on receptor chains, reported as the target's."
+            ),
+            "declared_accessions": declared,
+        }
+    return {
+        "chains": hits,
+        "basis": f"chains mapping to {accession} in _struct_ref_seq",
+        "verified": True,
+        "refuse": False,
+        "reason": None,
+        "declared_accessions": declared,
+    }
+
+
+# Fraction of a pocket's lining residues that must sit on the target's own
+# chains before the pocket may be SELECTED as that target's site.
+#
+# PROPOSED, NOT CALIBRATED. A majority, not unanimity, deliberately: a genuine
+# orthosteric pocket at a target/partner interface is legitimately lined by
+# both, and requiring 1.0 would refuse exactly the pockets rule 2b exists to
+# find. The failures this catches are not marginal — they are pockets lined
+# ENTIRELY by a partner, at on-target fraction 0.00: cavities inside the Fabs of
+# tralokinumab and lebrikizumab reported as IL-13's site, a cavity inside
+# belimumab reported as BAFF's, cavities inside rituximab's Fab reported as
+# CD20's. Anything near this boundary should be read off
+# `on_target_residue_fraction` directly rather than off the flag.
+POCKET_MIN_ON_TARGET_FRACTION = 0.5
+
+
+def _annotate_on_target(
+    pockets: list[dict], target_chains: list[str] | None, verified: bool
+) -> None:
+    """Mark each pocket with how much of it is actually on the target.
+
+    THE RESOLVER WORKED AND THE SELECTOR IGNORED IT. `target_chains` was
+    resolved by UniProt accession, announced in `target_chains_basis` with a
+    `_why` naming the case it was built for — and then the site pocket was
+    chosen as the most druggable pocket ANYWHERE in the file, with no check that
+    a single lining residue was on those chains. Measured, selected pockets that
+    were actually on the target:
+
+        IL-13   1 of 9    the rest inside the Fabs of tralokinumab and
+                          lebrikizumab (3L5X, 5L6Y, 3L5W, 4PS4, 3G6D) and on the
+                          receptor chain (3LB6)
+        BAFF    2 of 5    5Y9J lined by belimumab; no fully on-target pocket
+                          exists among its 22
+        CD20    4 of 7    6Y90 and 6Y97 lined by rituximab's Fab
+
+    Filtering on this inverts a verdict-relevant number: IL-13's median volume
+    moves 312.3 -> 106.8 A^3, from above the (now suspended) druggable bound to
+    below the hard bound. BAFF 258.3 -> 177.4. CD20 281.0 -> 242.3. Nothing in
+    the payload flagged any of it — the figure was uniformly PRESENT and quietly
+    measuring a different molecule, which is the twin of a field that is
+    uniformly null and reads as "not measured".
+
+    `on_target` is None when the chain set is unverified, and None never
+    excludes: an unreadable accession mapping must not silently drop pockets. It
+    is a False that excludes, and a False requires a verified chain set.
+    """
+    tgt = set(target_chains or ())
+    for p in pockets:
+        res = p.get("residues") or []
+        chains = [r.split("/")[0] for r in res]
+        on = [c for c in chains if c in tgt]
+        p["n_on_target_lining_residues"] = len(on)
+        p["on_target_residue_fraction"] = (
+            round(len(on) / len(res), 3) if res else None
         )
-    return hits, f"chains mapping to {accession} in _struct_ref_seq"
+        p["off_target_lining_chains"] = sorted({c for c in chains if c not in tgt})
+        p["on_target"] = (
+            None if (not verified or not res)
+            else (len(on) / len(res)) >= POCKET_MIN_ON_TARGET_FRACTION
+        )
 
 
 def _one_letter(st, chains: list[str] | None = None) -> tuple[str | None, str | None]:
@@ -1585,16 +1916,27 @@ def _motion_scope(r: dict, sup: dict, glob: dict) -> dict:
     """
     site = r.get("site") or {}
     site_max = site.get("max_ca_displacement")
+    site_rmsd = site.get("ca_rmsd")
     gmax = glob.get("max_ca_displacement_a")
+    # "STILL" IS TESTED ON THE SITE RMSD, NOT ON THE SITE MAXIMUM, and
+    # deliberately so: the maximum is one residue and is exactly the knife-edge
+    # quantity `mechanism_margin` exists to warn about. S1PR1 3V2Y -> 7TD4 has a
+    # site C-alpha RMSD of 1.04 A and a maximum of 2.16 A, and keying on the
+    # maximum would have declared the site NOT still by 0.16 A — hiding the very
+    # case this block was added for. 2.0 A is also CryptoBench's own
+    # pocket-residue RMSD criterion, so the same number means the same thing on
+    # both sides.
     still_site = (
-        site_max is not None
-        and float(site_max) <= CRYPTIC_BACKBONE_MOTION_THRESHOLD_A
+        site_rmsd is not None
+        and float(site_rmsd) <= CRYPTIC_BACKBONE_MOTION_THRESHOLD_A
     )
     big_global = (
         gmax is not None and float(gmax) >= CRYPTIC_GLOBAL_MOTION_NOTABLE_A
     )
     return {
         "site_max_ca_displacement_a": site_max,
+        "still_site_tested_on": "site_ca_rmsd_a",
+        "still_site_threshold_a": CRYPTIC_BACKBONE_MOTION_THRESHOLD_A,
         "site_max_ca_displacement_at": site.get("max_ca_displacement_at"),
         "site_ca_rmsd_a": site.get("ca_rmsd"),
         "global_max_ca_displacement_a": gmax,
@@ -1604,18 +1946,21 @@ def _motion_scope(r: dict, sup: dict, glob: dict) -> dict:
         "global_notable_threshold_a": CRYPTIC_GLOBAL_MOTION_NOTABLE_A,
         "global_motion_with_still_site": (
             bool(big_global and still_site)
-            if (gmax is not None and site_max is not None) else None
+            if (gmax is not None and site_rmsd is not None) else None
         ),
         "note": (
             None if not (big_global and still_site) else
-            f"THE SITE IS STILL ({site_max} A) AND THE PROTEIN IS NOT "
-            f"({gmax} A at {glob.get('max_ca_displacement_at')}). This is a "
-            "reportable state, not a defect and not crypticity: the two "
-            "conformers differ by a rearrangement that does not pass through "
-            "the site. S1PR1 inactive 3V2Y -> active 7TD4 is the case — site "
-            "C-alpha RMSD 1.04 A, is_cryptic false, and a 14.6 A TM6 swing "
-            "that had no field to appear in. Say BOTH in the dossier; 'the site "
-            "is pre-formed' alone omits the activation-state change."
+            f"THE SITE IS STILL (C-alpha RMSD {site_rmsd} A, maximum "
+            f"{site_max} A) AND THE PROTEIN IS NOT ({gmax} A at "
+            f"{glob.get('max_ca_displacement_at')}). This is a reportable "
+            "state, not a defect and not crypticity: the two conformers differ "
+            "by a rearrangement that does not pass through the site. S1PR1 "
+            "inactive 3V2Y -> active 7TD4 is the case — site C-alpha RMSD "
+            "1.04 A, is_cryptic false, and a 14.4 A TM6 swing at R:248 that had "
+            "no field to appear in: result['global'] was null and the only "
+            "protein-wide number was all_ca_rmsd_after_core_fit 2.035, which "
+            "reads as agreement. Say BOTH in the dossier; 'the site is "
+            "pre-formed' alone omits the activation-state change."
         ),
         "reconstruction": {
             k: glob.get(k) for k in (
@@ -1706,7 +2051,8 @@ def _cryptic_block(
     #
     # Same threshold as mdpocket's, for the same reason and so that the two
     # stages cannot disagree about whether a pair is superposable.
-    # THREE GATES, NOT ONE. RMSD alone would not have caught S1PR1, which is
+    # FOUR GATES, NOT ONE — and the fourth is below, at `sup_all`, because three
+    # were not enough either. RMSD alone would not have caught S1PR1, which is
     # the worst instance measured: the module mapped the S1PR1 receptor onto
     # 8G94 chain F — CD69, a 25-residue peptide — fitted it on FIVE equivalent
     # C-alpha with FIFTEEN residue-name mismatches, and reported the resulting
@@ -1729,7 +2075,7 @@ def _cryptic_block(
     #     core_ca_rmsd 1.472 over n_fitted_ca 202   ->  the old gate PASSED
     #     n_excluded_ca 274, n_equivalent_ca 476, 0 name mismatches
     #     all_ca_rmsd_after_core_fit 25.619        <- in the same block
-    #     emitted: 41.67 A, is_cryptic true, loop_or_backbone_motion, nanomolar
+    #     emitted: 41.7 A, is_cryptic true, loop_or_backbone_motion, nanomolar
     #
     # That is a WORSE confident answer than the 21.6 A this gate was built to
     # stop, produced from a fit the payload itself scores at 25.6 A. The field
@@ -1818,16 +2164,19 @@ def _cryptic_block(
                 "each domain superposes perfectly on its own. THIS GATE CANNOT "
                 "TELL THEM APART and must not be read as saying (a). Test (b) "
                 "before discarding the pair: fit each domain separately and see "
-                "whether the RMSD collapses. Measured on NLRP3 8SWF, 16.507 A "
-                "over the pair with ZERO positions trimmed and the identical "
-                "16.507 A when restricted to one chain — yet NBD 130-370 "
-                "superposes at 0.57 A over 153 C-alpha and HD2 541-680 at "
-                "0.74 A. That is a genuine NACHT hinge rotation between an open "
-                "octamer and a closed NACHT, not a broken alignment; calling it "
-                "'not superposed' misdiagnoses it exactly the way the TL1A "
-                "numbering-offset message used to. A large core RMSD WITH "
-                "well-superposing subdomains is a hinge and is reportable as "
-                "one. THERE IS NO FLAG FOR THE FIX: the domain-restricted fit "
+                "whether the RMSD collapses. Measured on NLRP3 8SWF vs 9HG4 — "
+                "16.503 A over 476 equivalent C-alpha with ZERO positions "
+                "trimmed, and 16.507 A restricted to a single apo chain, so "
+                "neither a bad chain mapping nor a trimmed outlier explains it "
+                "— yet the same pair restricted to the NBD (130-370) fits at "
+                "1.472 A over 202 C-alpha, to 220-370 at 1.377 A over 151, and "
+                "to HD1 (371-430) at 0.922 A over 58. An order of magnitude, "
+                "per domain. That is a genuine NACHT hinge rotation between an "
+                "open octamer and a closed NACHT, not a broken alignment; "
+                "calling it 'not superposed' misdiagnoses it exactly the way "
+                "the TL1A numbering-offset message used to. A large core RMSD "
+                "WITH well-superposing subdomains is a hinge and is reportable "
+                "as one. THERE IS NO FLAG FOR THE FIX: the domain-restricted fit "
                 "that would recover a hinged pair is cryptic_analysis's "
                 "fit_residue_range / exclude_residues, and pocket_scan does not "
                 "expose either — see superposition_gate._why for why exposing "
@@ -1855,7 +2204,13 @@ def _cryptic_block(
                 "small domain it would refuse a VALID comparison, and nothing "
                 "measured says where it should sit. Treat a refusal that cites "
                 "only this line, on a target that is legitimately small, as an "
-                "untested threshold rather than a finding."
+                "untested threshold rather than a finding. NOTE ALSO THAT THE "
+                "GATED COUNT IS NOW n_fitted_ca, WHICH IS SMALLER: auto_trim's "
+                "min_fit_fraction is 0.5, so a pair with 30 equivalent C-alpha "
+                "can present as few as 15 fitted and refuse where it used to "
+                "pass. On the regression that changes nothing (the smallest "
+                "fitted count measured is 135), but it moves the floor closer "
+                "to a legitimately small target, not further away."
             ),
             "n_residue_name_mismatches": n_mismatch,
             "name_mismatch_denominator": n_overlap,
@@ -1885,7 +2240,7 @@ def _cryptic_block(
                 "over 202 fitted C-alpha with 274 excluded and 0 name "
                 "mismatches — three green lights — beside "
                 "all_ca_rmsd_after_core_fit 25.619 A in the same block, and the "
-                "old gate emitted 41.67 A / is_cryptic true / "
+                "old gate emitted 41.7 A / is_cryptic true / "
                 "loop_or_backbone_motion / nanomolar prior on top of it. "
                 "all_ca_rmsd_after_core_fit is the same rotation scored over "
                 "every equivalent C-alpha, so it cannot be narrowed away and it "
@@ -2057,9 +2412,30 @@ def _split_partner_chains(partner_st, target_seqs: list[str]) -> tuple[list, lis
 
 
 def _interface_block(
-    partner_cifs: dict[str, Path], target_seqs: list[str]
+    partner_cifs: dict[str, Path], target_seqs: list[str],
+    target_accession: str | None = None, work: Path | None = None,
 ) -> dict:
-    """Partner epitope on the target side, from a real complex structure."""
+    """Partner epitope on the target side, from a real complex structure.
+
+    WHICH CHAINS ARE OURS IS RESOLVED BY ACCESSION FIRST, SEQUENCE SECOND.
+    Splitting by 5-mer overlap against `target_seqs` is only as good as
+    `target_seqs`, and `target_seqs` came from `_one_letter` over the target
+    chains — so when the chain resolver failed open, the "target sequence" was a
+    partner's and the split inherited the error silently.
+
+    Measured on IL-13 3BPO: `target_chains ["A","C"]` against `partner ["B"]`,
+    where A is IL-13 and **C is IL-13R-alpha-1 at 314 aa**. `side_a` came back
+    containing `C:ASN240, C:PHE259, C:TYR276` — receptor residues reported as
+    the target's own epitope — with `interface_status: "ok"` and no warning.
+    5E4E splits identically. It did not fire on BAFF only because BAFF's
+    receptor fragments are 31-63 aa, so BAFF is the longest chain anyway: the
+    length heuristic was still deciding, it was just guessing right.
+
+    So the partner entry's own `_struct_ref_seq` is read and the split is made
+    on it whenever it resolves. The sequence split stays as the fallback for
+    entries that declare nothing, and where BOTH are available and DISAGREE the
+    disagreement is reported rather than resolved.
+    """
     out: dict = {
         "interface_status": "not_run",
         "interface_reason": None,
@@ -2083,20 +2459,64 @@ def _interface_block(
     for pid, cif in sorted(partner_cifs.items()):
         try:
             st = IA.load_structure(str(cif))
-            ours, theirs = _split_partner_chains(st, target_seqs)
+            all_ch = [c.name for c in st[0]]
+            by_seq_ours, by_seq_theirs = _split_partner_chains(st, target_seqs)
+            # ---- accession first ---------------------------------------
+            acc_map, acc_status = (
+                _chain_accessions(_fetch_header(pid, work), {}, all_ch)
+                if (target_accession and work is not None) else ({}, "not_attempted")
+            )
+            acc_ours = [
+                c for c in all_ch
+                if target_accession in acc_map.get(c, [])
+                or target_accession in acc_map.get(_assembly_base_chain(c), [])
+            ]
+            if acc_ours:
+                ours = acc_ours
+                theirs = [c for c in all_ch if c not in acc_ours]
+                split_basis = (
+                    f"chains mapping to {target_accession} in {pid}'s own "
+                    "_struct_ref_seq"
+                )
+            else:
+                ours, theirs = by_seq_ours, by_seq_theirs
+                split_basis = (
+                    "5-mer sequence overlap against the target's sequence "
+                    f"(accession split unavailable: {acc_status}"
+                    + ("" if acc_status != "ok" else
+                       f"; {pid} declares no chain for {target_accession}")
+                    + "). UNVERIFIED — this is the heuristic that put "
+                    "IL-13R-alpha-1 on IL-13's side of its own interface."
+                )
+            disagreement = (
+                None if not acc_ours or sorted(by_seq_ours) == sorted(acc_ours)
+                else (
+                    f"the accession split gives target chains {sorted(acc_ours)} "
+                    f"and the 5-mer sequence split gives {sorted(by_seq_ours)}. "
+                    "The accession is used. A chain the sequence split claimed "
+                    "as target and the accession does not is a partner subunit "
+                    "similar enough to fool a 5-mer overlap — which is exactly "
+                    "the IL-13/IL-13R-alpha-1 failure."
+                )
+            )
             if not ours or not theirs:
                 per_partner[pid] = {
                     "error": (
                         f"could not split {pid} into target and partner chains "
                         f"(target-like {ours}, other {theirs}); it may not be a "
                         "complex, or it may be a homo-oligomer of the target only"
-                    )
+                    ),
+                    "target_partner_split_basis": split_basis,
                 }
                 continue
             iface = IA.interface_residues(st, ours, theirs)
             rec = {
                 "target_chains": ours,
                 "partner_chains": theirs,
+                "target_partner_split_basis": split_basis,
+                "target_partner_split_verified": bool(acc_ours),
+                "target_partner_split_disagreement": disagreement,
+                "chain_accessions": acc_map,
                 **iface.as_dict(),
             }
             per_partner[pid] = rec
@@ -2562,6 +2982,22 @@ MDPOCKET_MAX_ACCEPTABLE_RMSD_A = 5.0
 MDPOCKET_MIN_N_AFTER_DROPS = 3
 
 
+def _filter_chains(by_chain: dict, keep: list[str] | None) -> dict:
+    """Restrict a {chain: ...} map to `keep`, or pass it through when unknown.
+
+    Passing through on None is deliberate: a run with no accession has no
+    verified target chains, and silently dropping chains on a guess would be the
+    same class of error as scoring them on a guess.
+    """
+    if not keep:
+        return by_chain
+    kept = {c: v for c, v in by_chain.items() if c in keep}
+    # Never empty the structure out. If the target chain names do not appear in
+    # this prepared file at all, something upstream disagreed about naming and
+    # the honest response is to fall back audibly rather than return nothing.
+    return kept or by_chain
+
+
 def _ca_by_chain(pdb: Path) -> dict[str, dict[int, list[float]]]:
     """{chain: {resseq: CA xyz}} straight out of a PDB, by fixed column."""
     out: dict[str, dict[int, list[float]]] = {}
@@ -2908,9 +3344,17 @@ def _select_mdpocket_reference(
 
     Measured on NLRP3 (8SWF, 7ZGU, 9HG4). 8SWF came first, so 7ZGU and 9HG4 were
     dropped at 16.43 and 16.55 A, 1 of 3 survived, and the whole mdpocket stage
-    was refused — while 7ZGU and 9HG4 superpose onto EACH OTHER at 1.301 A, a
-    figure the cryptic stage of the same payload had already measured and
-    printed. One structure cost an entire ensemble by being listed first.
+    was refused — while 7ZGU and 9HG4 superpose onto EACH OTHER at 2.69 A by
+    this stage's own whole-assembly fit, and at 1.301 A in the cryptic stage of
+    the same payload, which had already measured and printed it. One structure
+    cost an entire ensemble by being listed first.
+
+    Verified after the change, on the prepared NLRP3 trio:
+
+        candidate   median RMSD to the rest   would keep
+        8SWF        16.49                     0 of 2      <- was the reference
+        7ZGU         9.559                    1 of 2      <- is now
+        9HG4         9.621                    1 of 2
 
     Lowest MEDIAN RMSD to the rest. Not the first, not the largest, and the
     median specifically: an outlier's own median is large by construction so it
@@ -3421,6 +3865,7 @@ def _mdpocket_ensemble(
     donor_ligand_xyz: list[list[float]] | None,
     donor_chains: list[str] | None = None,
     timeout: int = 900,
+    target_chains: dict[str, list[str]] | None = None,
 ) -> dict:
     """Superpose the ensemble, then measure ONE site definition in all of it.
 
@@ -3499,8 +3944,47 @@ def _mdpocket_ensemble(
     # a message that misdiagnosed its own failure as a conformational one. The
     # same ensemble superposes at 0.51-1.45 A once numbering is aligned. See
     # `_best_numbering_offset` and `_common_core`.
-    cas_raw = {pid: _ca_by_chain(p) for pid, p in prepped.items()}
-    names_raw = {pid: _res_names_by_chain(p) for pid, p in prepped.items()}
+    # ---- THE CORE IS BUILT OVER THE TARGET'S CHAINS ONLY -------------------
+    # `_common_core` requires a residue number to be present in EVERY chain of
+    # EVERY structure and to name the same residue in all of them. Applied
+    # across every chain in the file, an entry carrying an antibody Fab, a
+    # receptor ectodomain or a fusion partner poisons the intersection with
+    # chains that have nothing to do with the target and nothing to do with each
+    # other. Measured on BAFF, which returned:
+    #
+    #     "only 0 C-alpha positions are shared by every chain of every structure
+    #      AND name the same residue in all of them (131 numbers were shared,
+    #      131 of them dropped because the entries disagree about which residue
+    #      that number is)"
+    #
+    # 131 shared numbers, all 131 rejected — and the whole by-construction site
+    # definition lost, on all three targets in that batch. The identity gate is
+    # right and its SCOPE was wrong: two chains that are different proteins are
+    # supposed to disagree about residue 131, and asking them to agree is not a
+    # test the ensemble can pass. Restricted to the target's own chains it is
+    # the test it was meant to be.
+    #
+    # Falls back to every chain per structure where target chains are unknown,
+    # so a run without an accession behaves exactly as before.
+    tchains = target_chains or {}
+    cas_raw = {
+        pid: _filter_chains(_ca_by_chain(p), tchains.get(pid))
+        for pid, p in prepped.items()
+    }
+    names_raw = {
+        pid: _filter_chains(_res_names_by_chain(p), tchains.get(pid))
+        for pid, p in prepped.items()
+    }
+    out["core_restricted_to_target_chains"] = {
+        "applied": bool(tchains),
+        "per_structure": {pid: tchains.get(pid) for pid in ids},
+        "_why": (
+            "the common core is an intersection over chains, so a chain that is "
+            "a different protein empties it. BAFF returned 131 shared numbers "
+            "and dropped all 131 on residue-name disagreement, losing the "
+            "mdpocket stage on every target in that batch."
+        ),
+    }
     # THE REFERENCE IS CHOSEN, NOT INHERITED FROM DICT ORDER. It used to be
     # `ids[0]`, and on NLRP3 that was the outlier — see
     # `_select_mdpocket_reference` for the measurement and for what it does and
@@ -4040,6 +4524,7 @@ def pocket_scan(
     # reuse exactly what was scored — same files, same chains, same frame.
     prepped_by_pid: dict[str, Path] = {}
     chains_by_pid: dict[str, list[str]] = {}
+    tgt_chains_by_pid: dict[str, list[str]] = {}
     cif_by_pid: dict[str, Path] = {}
     seqs_by_pid: dict[str, str] = {}
     vert_by_pid: dict[str, dict[str, Path]] = {}
@@ -4206,11 +4691,61 @@ def pocket_scan(
             # its business: 8G94's CD69 pair (25 and 27 residues) tripped it and
             # disqualified an apo structure whose rank-1 pocket matches the holo
             # pockets at Jaccard 0.79/0.94/0.94.
-            chain_acc = _chain_accessions(_fetch_header(pid, work), renamed)
-            tgt_chains, tgt_basis = _target_chains(
-                chain_acc, target_accession, used_chains
+            chain_acc, acc_status = _chain_accessions(
+                _fetch_header(pid, work), renamed,
+                [c.name for c in st[0]],
             )
+            tgt = _target_chains(
+                chain_acc, target_accession, used_chains, acc_status
+            )
+            tgt_chains, tgt_basis = tgt["chains"], tgt["basis"]
+            if tgt["refuse"]:
+                # FAIL CLOSED. The entry says which proteins it contains and the
+                # target is not one of them; scoring it measures a different
+                # molecule. See `_target_chains`.
+                results[pid] = {
+                    "error": f"entry does not contain {target_accession}",
+                    "stage": "target_chain_resolution",
+                    "tier": "none",
+                    "by_clustering": {},
+                    "target_chains": tgt,
+                    "chain_accessions": chain_acc,
+                    "_why": tgt["reason"],
+                }
+                continue
             homo = _homo_oligomer(st, tgt_chains)
+            # THE FILE'S OWN CHAIN COUNT, beside the target's. The guard runs
+            # over target chains, which is right, but reporting only that count
+            # made a 60-chain file announce `n_polymer_chains: 10`. Two numbers,
+            # both true, neither able to be mistaken for the other.
+            homo["n_polymer_chains_in_file"] = sum(
+                1 for c in st[0]
+                if any(r.het_flag == "A" and len(r) for r in c)
+            )
+            homo["n_polymer_chains_scored"] = len(used_chains)
+            # A LARGE ASSEMBLY IS FLAGGED WHETHER OR NOT IT HAPPENED TO FIT.
+            # The only thing that used to notice one was `_load` running out of
+            # single-character chain IDs, which is an implementation limit at 62
+            # and not a scientific boundary — so 1OQE, 1OQD and 4V46 refused
+            # while 1JH5, ALSO a 60-mer, sailed through and produced 378 pockets
+            # and a selected pocket 60.28 A from the protein centre. Same shape
+            # of file, opposite handling, and the one that did not refuse gave
+            # plausible numbers with no error anywhere.
+            homo["large_assembly_warning"] = (
+                None if homo["n_polymer_chains_in_file"] < LARGE_ASSEMBLY_CHAINS
+                else (
+                    f"this file contains {homo['n_polymer_chains_in_file']} "
+                    f"polymer chains ({len(used_chains)} scored). Whole-assembly "
+                    "pocket detection on an assembly this size returns hundreds "
+                    "of pockets, most of them shallow surface features and "
+                    "inter-protomer crevices far from anything a dossier is "
+                    "asking about — 1JH5, a 60-mer, returned 378 pockets and a "
+                    "selected pocket 60.28 A from the protein centre. Restrict "
+                    "with `chains` or `site_residues`; a number off this "
+                    "structure without that restriction is not a measurement of "
+                    "a binding site."
+                )
+            )
         except LigandSourceError:
             # DELIBERATELY NOT RECORDED AS A PER-STRUCTURE ERROR. Every
             # structure would carry the same message and the run would return a
@@ -4272,6 +4807,10 @@ def pocket_scan(
         # Hand the downstream stages exactly what fpocket was given.
         prepped_by_pid[pid] = prepped
         chains_by_pid[pid] = used_chains
+        # The TARGET's chains, carried to the mdpocket stage so the common core
+        # is an intersection over one protein rather than over whatever else the
+        # entry contains. See `_mdpocket_ensemble`.
+        tgt_chains_by_pid[pid] = list(tgt_chains)
         cif_by_pid[pid] = cif
         # The TARGET's sequence, not the assembly's longest chain. This feeds
         # the interface stage's target/partner split and the disorder fallback,
@@ -4285,6 +4824,10 @@ def pocket_scan(
             "target_accession_basis": accession_basis,
             "target_chains": tgt_chains,
             "target_chains_basis": tgt_basis,
+            "target_chains_verified": tgt["verified"],
+            "target_chains_note": tgt["reason"],
+            "entry_declares_accessions": tgt["declared_accessions"],
+            "chain_accession_status": acc_status,
             "chain_accessions": chain_acc,
             "non_target_chains_scored": [
                 c for c in used_chains if c not in tgt_chains
@@ -4356,11 +4899,24 @@ def pocket_scan(
                 # the two is itself a finding about how much the ranking is
                 # carrying.
                 p["prank_rank"] = prank_ranks.get(p["rank"])
-            # Rank by overlap with the real site when we have one; by
-            # druggability only when we do not.
-            if true_site:
+            # ---- ON-TARGET FILTER, BEFORE ANY SELECTION -------------------
+            # The chain resolver was already right and selection ignored it.
+            # See `_annotate_on_target` for what that cost. Every pocket is
+            # annotated (so the fraction is readable for all of them) and only
+            # the on-target ones are eligible to BE the site.
+            _annotate_on_target(pockets, tgt_chains, tgt["verified"])
+            candidates = [p for p in pockets if p.get("on_target") is not False]
+            off_target = [p for p in pockets if p.get("on_target") is False]
+            if pockets and not candidates:
+                # NOT "the best of a bad set". An entry in which no pocket sits
+                # on the target contributes NOTHING rather than contributing a
+                # partner's value — genuinely the case for BAFF 5Y9J, where none
+                # of 22 pockets is on-target and the selected one was lined by
+                # belimumab.
+                best, basis = None, "no_on_target_pocket"
+            elif true_site:
                 best = max(
-                    pockets,
+                    candidates,
                     key=lambda p: p.get("jaccard_vs_ligand_site") or 0.0,
                     default=None,
                 )
@@ -4388,7 +4944,7 @@ def pocket_scan(
                         else None
                     )
                 best = max(
-                    pockets, key=lambda p: p.get("signature_overlap") or 0.0,
+                    candidates, key=lambda p: p.get("signature_overlap") or 0.0,
                     default=None,
                 )
                 basis = "site_signature_overlap"
@@ -4413,8 +4969,13 @@ def pocket_scan(
                     # identical defect. The guard is load-bearing where it fires.
                     basis = "site_signature_unreliable_homooligomer"
             else:
+                # "The most druggable pocket ANYWHERE" — now at least anywhere
+                # ON THE TARGET. This branch is the one that produced every
+                # measured failure, because it is the branch a pure-apo entry
+                # with no site signature falls into, and it ranked an antibody's
+                # interior against the target's surface on equal terms.
                 best = max(
-                    pockets,
+                    candidates,
                     key=lambda p: p.get("druggability_score") or 0.0,
                     default=None,
                 )
@@ -4512,6 +5073,82 @@ def pocket_scan(
                 "max_pockets_returned": MAX_POCKETS_RETURNED,
                 "site_pocket": best,
                 "site_pocket_selected_by": basis,
+                # ---- IS THE SELECTED POCKET EVEN ON THE TARGET? ------------
+                # The question that had no field. `on_target_selection` is the
+                # answer for the pocket that was chosen; the census beside it is
+                # the answer for the entry.
+                "on_target_selection": {
+                    "target_chains": list(tgt_chains),
+                    "target_chains_verified": tgt["verified"],
+                    "min_on_target_fraction": POCKET_MIN_ON_TARGET_FRACTION,
+                    "_threshold_status": "PROPOSED, NOT CALIBRATED",
+                    "site_pocket_on_target_fraction": (
+                        best.get("on_target_residue_fraction") if best else None
+                    ),
+                    "site_pocket_off_target_chains": (
+                        best.get("off_target_lining_chains") if best else None
+                    ),
+                    "n_pockets_on_target": len(candidates),
+                    "n_pockets_off_target": len(off_target),
+                    # The stricter count, reported so a consumer can apply a
+                    # stricter policy than this module's without re-running it.
+                    # BAFF 5Y9J has ZERO of 22 fully on-target and exactly one
+                    # above the 0.5 floor (at 0.667, druggability 0.000): under
+                    # `>= 0.5` that entry contributes 118.8 A^3, under `== 1.0`
+                    # it contributes nothing. Both are defensible and this
+                    # module does not have the evidence to pick, so it reports
+                    # both counts and applies the looser one.
+                    "n_pockets_fully_on_target": sum(
+                        1 for p in pockets
+                        if (p.get("on_target_residue_fraction") or 0.0) >= 1.0
+                    ),
+                    "off_target_ranks": [p["rank"] for p in off_target][:40],
+                    "off_target_max_volume_a3": (
+                        round(max((p.get("volume") or 0.0) for p in off_target), 2)
+                        if off_target else None
+                    ),
+                    "_why": (
+                        "The chain resolver worked and selection ignored it. "
+                        "Selected pockets that were actually on the target: "
+                        "IL-13 1 of 9 (the rest inside the Fabs of tralokinumab "
+                        "and lebrikizumab, and on the receptor chain of 3LB6), "
+                        "BAFF 2 of 5 (5Y9J lined by belimumab), CD20 4 of 7 "
+                        "(6Y90/6Y97 lined by rituximab's Fab). Filtering on it "
+                        "moves IL-13's median volume 312.3 -> 106.8 A^3, BAFF "
+                        "258.3 -> 177.4, CD20 281.0 -> 242.3 — a verdict-"
+                        "relevant inversion, previously unflagged anywhere in "
+                        "the payload."
+                    ),
+                    "_unverified_note": (
+                        None if tgt["verified"] else
+                        "THE CHAIN SET IS UNVERIFIED, so no pocket was excluded "
+                        "and on_target is null throughout. Either no "
+                        "uniprot_accession was supplied or this entry's "
+                        "_struct_ref could not be read. The selected pocket has "
+                        "NOT been shown to be on the target; read "
+                        "target_chains_basis before quoting its volume."
+                    ),
+                    "_off_target_note": (
+                        None if not off_target else
+                        f"{len(off_target)} of {len(pockets)} detected pockets "
+                        f"are lined <{POCKET_MIN_ON_TARGET_FRACTION:.0%} by the "
+                        "target's own chains and were EXCLUDED from selection. "
+                        "They are still returned in `pockets` with their "
+                        "on_target_residue_fraction, because a cavity inside a "
+                        "partner is a real cavity — it is just not this "
+                        "target's site and must never be quoted as its volume."
+                    ),
+                    "_no_candidate_note": (
+                        None if basis != "no_on_target_pocket" else
+                        f"NO POCKET IN THIS ENTRY IS ON THE TARGET. All "
+                        f"{len(pockets)} detected pockets are lined mostly by "
+                        "chains that are not the target's, so this entry "
+                        "contributes NO volume and NO druggability rather than "
+                        "contributing a partner's. This is a real outcome, not "
+                        "a failure: BAFF 5Y9J has no fully on-target pocket "
+                        "among its 22."
+                    ),
+                },
                 # The number behind the basis in defect 7's sense: whether the
                 # residue-number signature could identify a site AT ALL, stated
                 # per measurement rather than only once at ensemble level.
@@ -4915,7 +5552,8 @@ def pocket_scan(
             except Exception as exc:  # noqa: BLE001
                 fetch_errors[pid] = f"{type(exc).__name__}: {exc}"
         interface_out = _interface_block(
-            partner_cifs, [seqs_by_pid[p] for p in pdb_ids if p in seqs_by_pid]
+            partner_cifs, [seqs_by_pid[p] for p in pdb_ids if p in seqs_by_pid],
+            target_accession, work,
         )
         if fetch_errors:
             interface_out["fetch_errors"] = fetch_errors
@@ -5059,8 +5697,18 @@ def pocket_scan(
                         else "numbering_mismatch_not_interpretable" if skipped
                         else "no_pocket_to_classify"
                     ),
+                    # `overlap_fraction`, NOT `pocket_interface_overlap`. These
+                    # entries are the raw classification dicts from
+                    # `_classify_site_pocket`; `pocket_interface_overlap` is the
+                    # name the field is RENAMED to when it is copied into
+                    # results[pid]["pocket_vs_interface"], and reading it here
+                    # returned None for every structure at every clustering
+                    # value in every run. Not found by the regression — found by
+                    # reading the TL1A payload it produced, where the whole map
+                    # came back {"1.6": null, "2.4": null} beside overlaps of
+                    # 0.267 and 0.133 sitting one level down in per_structure.
                     "overlap_by_clustering": {
-                        k: c.get("pocket_interface_overlap")
+                        k: c.get("overlap_fraction")
                         for k, c in byd.items()
                     },
                     # THE FLAG TRAVELS WITH THE LABEL. Both halves of the fix are
@@ -5172,6 +5820,10 @@ def pocket_scan(
                 donor["prepped"] if donor else None,
                 donor["ligand_xyz"] if donor else None,
                 donor["site_chains"] if donor else None,
+                target_chains={
+                    p: tgt_chains_by_pid[p]
+                    for p in pdb_ids if p in tgt_chains_by_pid
+                },
             )
             if donor_error:
                 mdpocket_out["site_donor_error"] = donor_error

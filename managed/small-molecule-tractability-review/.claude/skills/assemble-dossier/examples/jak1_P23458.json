@@ -1,6 +1,14 @@
 {
   "_example": "JAK1 (P23458), measured end-to-end. The worked example for assemble-dossier, and the positive control for validate_dossier.py — it returns zero violations. The computed axis is now FILLED, on a named two-entry ensemble swept over two clustering values, because all 4 of 4 site pockets were selected by ligand_site_jaccard — the one basis that is same-site evidence. An earlier version of this file reported no pocket geometry at all: that run had relayed a maximum druggability of 0.735 and no minimum, and a maximum without a minimum is a point estimate, so nothing was reportable. That refusal was correct on the data it had. It has been superseded by measurement, not overruled — see tractability.caveat. Compare with tnf_P01375.json, where the same tool ran and the refusal SURVIVED, because there the site could not be identified across the ensemble.",
   "_retrieved": "2026-08-15",
+  "input": {
+    "_note": "Verbatim echo of the request, never inferred and never back-filled. This run was invoked with the accession only; every other contract field was absent and is null here because it was not supplied, not because it could not be retrieved. `target.uniprot_accession` is the RESOLVED accession; this one is what the caller said.",
+    "uniprot_accession": "P23458",
+    "as_of_date": null,
+    "disease_context": null,
+    "interaction_to_disrupt": null,
+    "mechanism_hypothesis": null
+  },
   "target": {
     "uniprot_accession": "P23458",
     "gene_symbol": "JAK1",

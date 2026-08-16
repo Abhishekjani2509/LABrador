@@ -586,6 +586,51 @@ mdpocket silently lost remain distinguishable, which is the whole point.
 Below **3 surviving structures once a drop has occurred** (or 2 in any case) the
 run refuses rather than reporting a CV over the survivors of a partial ensemble.
 
+#### But which structure is the reference decides *who* gets dropped, and it used to be `ids[0]`
+
+Every structure is fitted onto the reference and dropped if it will not go — so
+picking an outlier as the reference does not fail the outlier, **it fails
+everything else**, and the payload then reports the ensemble as unusable instead
+of reporting the outlier.
+
+Measured on NLRP3 (`8SWF, 7ZGU, 9HG4`). 8SWF came first, so it was the reference;
+7ZGU and 9HG4 were dropped at **16.43 and 16.55 A**, 1 of 3 survived, and the
+whole stage returned `mdpocket_status: "failed"`. **7ZGU and 9HG4 superpose onto
+each other at 2.69 A** by this stage's own whole-assembly fit — and at **1.301 A**
+in the *cryptic stage of the same payload*, which had already measured and
+printed it. One structure cost an entire ensemble by being listed first.
+
+| candidate | median RMSD to the rest | would keep |
+| --- | --- | --- |
+| 8SWF | **16.49** | **0 of 2** ← was the reference |
+| 7ZGU | **9.559** | 1 of 2 ← is now |
+| 9HG4 | 9.621 | 1 of 2 |
+
+The reference is now chosen as the structure with the **lowest median core-Cα
+RMSD to the rest** — not the first, not the largest. The median is what makes it
+robust: an outlier's own median is large by construction so it cannot elect
+itself, and one bad entry cannot unseat a good reference the way a mean would.
+Ties go to the choice that keeps the most structures. Every candidate's median,
+its per-structure RMSDs and how many structures it *would* have kept are in
+`mdpocket.reference_selection.candidates`, and the selection is **re-run over the
+survivors after a drop**, because a drop changes which structure is central to
+what is left.
+
+Two things this does **not** do, both worth knowing:
+
+- **It does not rescue NLRP3.** The best reference is 7ZGU, 8SWF is then
+  correctly dropped as the outlier, and 2 of 3 survive — still below the
+  3-after-a-drop floor, so that run still refuses. It refuses **for the right
+  reason and names the right outlier**, which is the whole difference.
+- **It does not renumber twice.** `superposition.reference` is the *frame* every
+  structure was fitted onto and may be re-elected after a drop;
+  `superposition.numbering_reference` is the entry whose residue numbering the
+  ensemble was put on and is fixed at the first choice. They differ only after a
+  re-election. Read both before comparing two runs.
+
+Above 12 structures the O(n²) search is skipped and the first entry is used, with
+the fallback stated in `reference_selection.selected_by`.
+
 ### Geometric scoring is blind to cryptic pockets — measured, on KRAS
 
 | | 6OIM (holo) | 4OBE (apo) |
@@ -644,20 +689,132 @@ The S1PR1 case is the most damaging: `subunit_occlusion` maps through rule 5 to 
 five approved drugs. **Four log units wrong, in the direction that kills a
 program.**
 
-**Gate on all three of RMSD, equivalent-Cα count and residue-name agreement** —
-not RMSD alone. The S1PR1 fit had a *low* RMSD precisely because it was fitted on
-five atoms. The deployed thresholds are core RMSD ≤ 5.0 A (the same value
-mdpocket uses, deliberately, so the two stages cannot disagree), ≥ 20 equivalent
-Cα, and ≤ 10% residue-name mismatches. On failure, refuse — `cryptic_status:
-"failed"` with the gate's own numbers in `superposition_gate`.
+**Gate on FOUR things: core RMSD, all-Cα RMSD, fitted-Cα count and residue-name
+agreement** — not RMSD alone, and not the core RMSD alone. The S1PR1 fit had a
+*low* RMSD precisely because it was fitted on five atoms. The deployed thresholds
+are core RMSD ≤ 5.0 A **and all-Cα RMSD after the core fit ≤ 5.0 A** (the same
+value mdpocket uses, deliberately, so the two stages cannot disagree), ≥ 20
+**fitted** Cα, and ≤ 10% residue-name mismatches. On failure, refuse —
+`cryptic_status: "failed"` with the gate's own numbers in `superposition_gate`.
+
+#### The fourth check exists because the first three can be defeated by narrowing the fit
+
+`core_ca_rmsd` is scored over the **fitted subset**. Exclude enough of the
+structure and it goes green while the two entries stay where they were.
+Demonstrated on NLRP3, 8SWF vs 9HG4 with `fit_residue_range=(130,370)`:
+
+| field | value | what the old gate saw |
+| --- | --- | --- |
+| `core_ca_rmsd` | **1.472 A** over `n_fitted_ca` 202 | ✅ under 5.0 |
+| `n_equivalent_ca` | 476 | ✅ over 20 |
+| `n_residue_name_mismatches` | 0 | ✅ |
+| `n_excluded_ca` | **274** | not read |
+| `all_ca_rmsd_after_core_fit` | **25.619 A** | **not read** |
+
+It **passed**, and emitted `41.7 A`, `is_cryptic: true`,
+`loop_or_backbone_motion` and a **nanomolar** potency prior on two structures
+16.5 Å out of frame — a *worse* confident answer than the 21.6 Å the gate was
+built to stop, from a fit the payload itself scores at 25.6 Å. The field that
+catches it was already computed and already in the output; the gate did not read
+it. It does now, and the same pair refuses with
+`after the core fit, RMSD over ALL 476 equivalent C-alpha is 25.611 A (the fitted
+subset was 1.472 A over 202, with 274 excluded); the fit describes a fragment,
+not the pair`.
+
+Two details worth carrying:
+
+- **The count gated is `n_fitted_ca`, not `n_equivalent_ca`.** The floor asks how
+  many positions the fit stood on, not how many were equivalent before the
+  exclusions.
+- **This route is latent, not live.** Reaching it needs `fit_residue_range` or
+  `exclude_residues` and `pocket_scan` exposes neither. It is not hypothetical
+  either: `auto_trim` writes the same `n_excluded_ca` on its own, so on a hinged
+  protein it is one convergence away from doing this unasked. The measured
+  core→all gap across six real pairs is small (0.58→1.42, 0.96→1.10, 0.71→1.02,
+  1.30→2.72, 1.27→2.04), which is why it had not fired and why the check costs
+  the controls nothing.
+
+#### The mismatch fraction had no denominator, and could exceed 1
+
+The refusal on the S1PR1 CD69 fit read *"**15 of 5** fitted positions name a
+DIFFERENT residue"* — a ratio of **3.0**. `n_residue_name_mismatches` is counted
+over the **pre-filter overlap**, `n_equivalent_ca` counts the **survivors** of
+that filter, and dividing one by the other is not a fraction of anything. The
+denominator is now survivors + mismatches (the overlap the mismatches were
+counted over) while `match_residue_names` is on, and the survivors alone when it
+is off. The same case now reads **15 of 20 = 0.75**, and
+`superposition_gate.name_mismatch_denominator` and `name_mismatch_fraction`
+carry it.
+
+It erred toward *refusing*, so nothing was ever wrongly accepted by it — but a
+gate that prints an impossible number is a gate a reader will stop trusting, and
+the direction it errs in is luck rather than design.
+
+#### A large core RMSD is not the same finding as a wrong pair — it may be a hinge
+
+The refusal used to say *"These two entries are not superposed"*, which asserts a
+mismatch. **The gate cannot tell a mismatch from a hinge and must not claim to.**
+NLRP3 8SWF against 9HG4:
+
+| fit | core RMSD | fitted Cα |
+| --- | --- | --- |
+| whole pair | **16.503 A** | 476, **zero trimmed** |
+| single apo chain only | **16.507 A** | 476, zero trimmed |
+| NBD, residues 130–370 | **1.472 A** | 202 |
+| residues 220–370 | **1.377 A** | 151 |
+| HD1, residues 371–430 | **0.922 A** | 58 |
+
+An order of magnitude, per domain, with nothing trimmed at the whole-pair level —
+so neither a bad chain mapping nor a trimmed outlier explains it. That is a
+genuine **NACHT hinge rotation** between an open octamer and a closed NACHT. The
+refusal is right; calling it "not superposed" misdiagnoses it exactly the way the
+TL1A numbering-offset message used to. **A large core RMSD with well-superposing
+subdomains is a hinge, and is reportable as one.**
+
+**There is no CLI flag that expresses the domain-restricted fit which would
+recover such a pair.** `fit_residue_range` / `exclude_residues` live on
+`cryptic_analysis` and are deliberately not exposed by `pocket_scan` — exposing
+them would also expose the narrowed-fit failure above. So a hinge is currently
+**refused rather than measured**, and that is a known gap, not a verdict.
+
+#### The ≥ 20 Cα floor has never been exercised against a legitimately small target
+
+Every pair in the regression carried **162 to 476** equivalent Cα (135 to 422
+*fitted*), so this floor has only ever been tested far from itself. On a genuine
+peptide target or a single small domain it would refuse a **valid** comparison,
+and nothing measured says where it should sit.
+`superposition_gate.min_equivalent_ca_status` carries this. Treat a refusal
+citing only that line, on a target that is legitimately small, as an untested
+threshold rather than a finding.
+
+**And the count now gated is `n_fitted_ca`, which is the smaller number.**
+`auto_trim`'s `min_fit_fraction` is 0.5, so a pair with 30 equivalent Cα can
+present as few as 15 fitted and refuse where it used to pass. On the regression
+that changes nothing. It does move the floor **closer** to a legitimately small
+target, not further away, and that is a debt this fix took on rather than paid.
 
 **And whatever drops a structure from the call must drop it from every statistic
-derived from it.** After the NLRP3 re-run the block reported `is_cryptic: false,
-mechanism: "none"` (from 7ZGU) while still carrying
-`max_backbone_ca_displacement_a: 21.6` — from the **rejected** 8SWF. Those cannot
-both be true. Every headline field now comes from one named
+derived from it — at every level that reprints them.** After the NLRP3 re-run the
+aggregate reported `is_cryptic: false, mechanism: "none"` (from 7ZGU) while still
+carrying `max_backbone_ca_displacement_a: 21.6` — from the **rejected** 8SWF.
+Those cannot both be true. Every headline field now comes from one named
 `representative_apo_pdb_id`, chosen as the best-superposed apo entry, with the
 per-structure values beside it and rejected entries listed separately.
+
+**The same bug then survived one nesting level down.**
+`structures.<PDB>.cryptic` exists so a reader looking at one apo structure does
+not have to find the pairwise block — which makes it the block most likely to be
+**quoted** — and it was carrying `cryptic_status: "failed"` *beside*
+`mechanism: "loop_or_backbone_motion"`, `is_cryptic: true`,
+`max_backbone_ca_displacement_a: 21.13` and
+`cryptic_potency_prior: {expected_ceiling: "nanomolar"}`. All five fit-derived
+keys — `mechanism`, `is_cryptic`, `max_backbone_ca_displacement_a`,
+`clash_attribution`, `cryptic_potency_prior` — are now **null** whenever
+`cryptic_status != "ok"`, with `_quarantined_keys` listing them and
+`_quarantine_note` saying they were computed and refused rather than missing.
+The refused values remain in `cryptic.per_apo_structure.<PDB>` for diagnosis
+only. `core_ca_rmsd_a` is added to the block so a reader can see *why* without
+leaving it.
 
 **The displacement figures are protocol-dependent — quote what the run
 measured.** 8.83 A (KRAS) and 1.62 A (TNF-alpha) are **hand-calibration**
@@ -687,6 +844,170 @@ intact apo trimer gives **27–29 heavy-atom clashes under 2.0 A** (minimum
 interatomic distance 0.28–0.53 A), attributed **identically in all five** to
 chain C — S60, Y119, L120, G121 — plus the Tyr119 triad. Five independent
 crystals, one answer.
+
+### The mechanism label is a threshold crossing — read `mechanism_margin` before quoting it
+
+`loop_or_backbone_motion` and `sidechain_occlusion` are separated by **one
+comparison**: max site Cα displacement against **2.0 A**. The two sides carry
+opposite potency priors under rule 5 (nanomolar against micromolar-at-best), so
+that single comparison is worth four log units of prognosis — and nothing in the
+payload said how far from the boundary any label was.
+
+Measured on S1PR1, inactive **3V2Y** → active **7TD4**. The pair passes the gate
+and returns `is_cryptic: false` with a site Cα RMSD of **1.04 A**, which is
+right. But `mechanism` comes back **`loop_or_backbone_motion`** because a max
+site displacement of **2.16 A** clears 2.00 A by **0.16 A** on one residue
+(`R:293`) — and via rule 5 that maps to a **nanomolar** ceiling. Right answer,
+wrong reasoning: the label was generated by a 0.16 Å margin on a single residue,
+not by the motion anyone would describe.
+
+`cryptic.mechanism_margin` now carries `value_a`, `threshold_a`, `margin_a`, the
+residue it was decided at, and `decided_by_a_narrow_margin`. **When that flag is
+true, quote the displacement, not the label.** The warn band (0.5 Å) is
+PROPOSED, NOT CALIBRATED — set from this one case — and it flags rather than
+filters: no label is changed, suppressed or re-derived. It applies only to the
+two displacement-decided mechanisms; `subunit_occlusion` and `none` are decided
+earlier by different quantities and the block says so.
+
+### A large global motion with a still site is a real state, and it used to be invisible
+
+Same S1PR1 pair. **TM6's activation swing appeared nowhere in the payload.**
+`result["global"]` was null, there was no protein-wide displacement field at all,
+and the only trace was `all_ca_rmsd_after_core_fit: 2.035` — which reads as
+"fine". A dossier built from that payload would have stated the site is
+pre-formed and never mentioned that the two conformers differ by an
+activation-state rearrangement.
+
+**An RMSD is not a maximum.** Behind that 2.035 Å sits a **14.42 Å** single-residue
+displacement at `R:248`. `cryptic.motion_scope` reports both:
+
+| field | S1PR1 3V2Y→7TD4 |
+| --- | --- |
+| `site_ca_rmsd_a` | 1.04 |
+| `site_max_ca_displacement_a` | 2.16 |
+| `all_ca_rmsd_after_core_fit_a` | 2.035 |
+| `global_max_ca_displacement_a` | **14.42** at `R:248` |
+| `global_motion_with_still_site` | **true** |
+
+The global maximum is recomputed from the superposition block — same chain
+mapping, same name-matching setting, same excluded positions — and
+`motion_scope.reconstruction.reconstruction_agrees` is a self-check against the
+reported `core_ca_rmsd`. **If that is false the number is wrong and must not be
+used.** It was true on all five controls.
+
+"Still" is tested on the **site RMSD**, not the site maximum, deliberately: the
+maximum is one residue and is the same knife-edge quantity `mechanism_margin`
+warns about. Keying on it would have declared this site not-still by 0.16 Å —
+hiding the one case the field exists for. 2.0 Å is also CryptoBench's own
+pocket-residue criterion, so the number means the same thing on both sides.
+
+**Report both.** A large global motion beside a still site is not crypticity and
+not a failure; it is the most decision-relevant thing about the pair. "The site
+is pre-formed" alone omits the activation-state change.
+
+Measured across the controls: KRAS `false` (the global maximum **is** the site
+motion, 8.65 Å at `A:63`), TNF-alpha `false` (4.58 Å, below the 5.0 Å notable
+threshold), NLRP3 7ZGU `true` (0.63 Å site RMSD against 17.86 Å at `A:679`),
+S1PR1 receptor-to-receptor `true` (0.62 Å against 6.07 Å). The 5.0 Å notable
+threshold is PROPOSED, NOT CALIBRATED.
+
+### The chain resolver worked and the pocket selector ignored it
+
+**This is the defect that suspended the volume metric**, and it is the twin of
+the uniformly-null field below: a number that was uniformly *present* and quietly
+measuring a different molecule.
+
+The payload announced `"target_chains_basis": "chains mapping to P11836 in
+_struct_ref_seq"`, with a `_why` naming the S1PR1/Gβ1 case it was built to
+prevent — and then selection picked **the most druggable pocket anywhere in the
+file**, with no check that a single lining residue was on those chains.
+
+Measured. Selected pockets that were actually on the target:
+
+| target | on-target | what the others were |
+| --- | --- | --- |
+| IL-13 | **1 of 8** (reproduced here; 1 of 9 as first reported) | cavities inside the Fabs of **tralokinumab** and **lebrikizumab** (3L5X, 5L6Y, 3L5W, 4PS4), the **receptor** chain in 3LB6 and 3BPO, chain B in 5E4E |
+| BAFF | 2 of 5 | 5Y9J's rank-1 pocket, druggability **0.762**, lined 81% by **belimumab** |
+| CD20 | 4 of 7 | 6Y90 and 6Y97 lined by **rituximab's Fab** |
+
+Re-measured at D=1.6 over eight IL-13 entries after the fix:
+
+| entry | old pick | on-target | new pick |
+| --- | --- | --- | --- |
+| 3L5X | rank 2, 261.7 Å³ | **0.00** (chain H) | rank 7, 68.1 Å³ |
+| 5L6Y | rank 1, 225.3 Å³ | **0.00** (chain H) | rank 12, 82.9 Å³ |
+| 3L5W | rank 1, 328.9 Å³ | **0.00** (chain L) | rank 3, 301.9 Å³ |
+| 4PS4 | rank 15, 825.3 Å³ | **0.00** (H, L) | rank 17, 209.5 Å³ |
+| 3G6D | rank 2, 188.9 Å³ | 0.67 | unchanged |
+| 3LB6 | rank 1, 312.6 Å³ | **0.00** (chain C) | rank 3, 94.1 Å³ |
+| 3BPO | rank 4, 317.3 Å³ | **0.00** (chain C) | rank 1, 361.6 Å³ |
+| 5E4E | rank 3, 311.8 Å³ | 0.42 | rank 6, 102.4 Å³ |
+
+**Median volume 312.2 → 145.7 Å³.** (The first report measured 312.3 → 106.8 on a
+slightly different entry set and hand-filter; the *old* medians agree to 0.1 Å³,
+so the disagreement is in how the corrected value is taken, not in the defect.
+Quote the payload, not either of these.) BAFF and CD20 move the same way.
+
+**So: `on_target_residue_fraction` is now computed for every pocket, and only
+pockets above `POCKET_MIN_ON_TARGET_FRACTION` (0.5, PROPOSED and NOT CALIBRATED)
+are eligible to be selected as the site.** Read
+`by_clustering.<D>.on_target_selection` before quoting any volume. It carries the
+selected pocket's fraction, the off-target chains lining it, and three counts:
+`n_pockets_on_target`, `n_pockets_off_target`, and `n_pockets_fully_on_target`.
+
+Three things to know about the rule:
+
+- **A majority, not unanimity.** A genuine orthosteric pocket at a target/partner
+  interface is legitimately lined by both, and requiring 1.0 would refuse exactly
+  the pockets rule 2b exists to find. The failures being caught are not marginal
+  — they sit at **0.00**.
+- **`n_pockets_fully_on_target` is reported so you can be stricter than the
+  module.** BAFF 5Y9J has **0 of 22** fully on-target and exactly one above 0.5
+  (at 0.667, druggability 0.000). Under `≥0.5` that entry contributes 118.8 Å³;
+  under `==1.0` it contributes nothing. Both are defensible; the module applies
+  the looser one and gives you the number to apply the stricter.
+- **An entry where no pocket is on-target contributes NOTHING.**
+  `site_pocket_selected_by` becomes `no_on_target_pocket`, `site_pocket` is null,
+  and no volume or druggability is emitted — rather than emitting a partner's.
+  A sixth value therefore exists on `site_pocket_selected_by`.
+
+**Off-target pockets are still returned**, with their fractions, in `pockets`. A
+cavity inside an antibody is a real cavity. It is just not this target's site and
+must never be quoted as its volume.
+
+### Failing open on the accession is what let the selector loose
+
+`_target_chains` used to return **every** chain with the note *"no chain of this
+entry maps to P35225; using every chain scored, which may include partners"* — a
+warning in a string, downstream of nothing. It now **fails closed**: an entry
+that declares UniProt references and contains none matching the target is
+refused, with `tier: "none"` and the declared accessions named.
+
+**Refusing on a string comparison is not safe, and two real cases prove it.**
+Both were caught before shipping, and both would have thrown away valid data:
+
+- **UniProt merges accessions.** TL1A's 2O0O, 2QE3, 2RJK, 2RJL and 2RE9 declare
+  **Q8NFE9**, whose record reads `inactiveReason: {inactiveReasonType: "MERGED",
+  mergeDemergeTo: ["O95150"]}`. It *is* O95150. A literal comparison would have
+  refused **five of six** entries of the target's own ensemble.
+- **One gene can have several live accessions.** IL-13's 3BPO declares
+  **Q4VB50**, which is not merged into P35225 and never will be — it is an
+  unreviewed TrEMBL entry named "Interleukin-13", gene `IL13`, human. Refusing
+  3BPO would have been wrong in the damaging direction; what the entry needed was
+  for chain A to be recognised as target so that B and C — IL-4Rα and IL-13Rα1 —
+  are recognised as **partners**.
+
+So a declared accession matches the target if it is the same string, **or**
+UniProt has merged one into the other, **or** they are the same gene in the same
+organism. And when UniProt cannot be reached, the entry is **not refused and not
+verified** — an unanswered question is not a negative answer. Three statuses now
+exist where there was one: `verified` (checked and matched), unverified
+(mapping unreadable, or no accession supplied), and refused.
+
+**`target_chains_verified: false` disables the on-target filter**, deliberately.
+An unreadable accession mapping must not silently drop pockets — `on_target` is
+null throughout and `on_target_selection._unverified_note` says the selected
+pocket has not been shown to be on the target.
 
 ### Which chain is the target is a lookup, not the longest one
 
@@ -748,8 +1069,56 @@ they do not:
 Right where the numbering agrees, silently wrong where it does not, **no signal
 either way**. A one-line residue-name assertion catches all of it; the geometric
 `min_distance_to_interface_a` is unaffected, which is why the destabiliser call
-still stood. `pocket_vs_interface.<D>.numbering_check` now carries the identity
+still stood. `pocket_vs_interface.<D>.numbering_check` carries the identity
 fraction and the mismatching positions.
+
+#### Flagging it was not enough — the flagged numbers propagated upward unmarked
+
+`numbering_agrees: false` fired on **exactly** the two corrupt structures (2O0O
+at 2/69 = **0.029**, 2RE9 at 7/139 = **0.050**, against **0.993–1.000** for the
+three valid ones) and then stopped. The classifications built on those illegal
+matches travelled up into the field this SKILL.md tells callers to quote:
+
+- `per_structure_consensus["2RE9"] = "allosteric_candidate"`, derived
+  **entirely** from a 0.227 overlap on `A:THR34/PRO35/THR36` — VAL/VAL/ARG in the
+  partner;
+- `per_structure_consensus["2O0O"] = "mixed"`, from the `A:HIS118`-vs-THR118
+  artifact.
+
+`_aggregation_rule` said nothing about numbering. **Two fixes, both applied.**
+
+**1. The offset is recovered and applied before the match, not merely flagged.**
+A constant numbering offset between two depositions of one protein is the normal
+case — TL1A carries three at once (0, **+67**, **+71**) and IL-17A carries +23 —
+and it is recoverable by one vote over residue names. `interface_analysis`'s own
+module docstring says `detect_numbering_offset` "should be run before any
+cross-entry `match_by='seqid'` comparison"; the interface stage never ran one,
+while the **mdpocket stage of the same payload had already recovered exactly
+those offsets**. It does now: the partner epitope is renumbered onto our entry's
+numbering before `classify_pocket` sees it, and
+`pocket_vs_interface.<D>.numbering_offset_to_partner` records the offset, the
+before-and-after identity fractions and whether it was applied.
+
+The offset is applied **only** when it converts an illegal comparison into a
+legal one over ≥ 20 shared positions *and* strictly increases the number of
+name-agreeing positions — so an entry already on the partner's numbering is never
+shifted, and a spurious offset over a handful of positions cannot buy agreement.
+
+**2. What is still flagged after that is excluded from the consensus.** Anything
+reaching the aggregation with `numbering_agrees: false` is a case no constant
+offset fixes, and it is now dropped from `consensus`, from
+`classifications_seen` and from the run-level `classification`. It is never
+silently dropped: `excluded_numbering_mismatch` names the clustering values,
+`classifications_excluded_numbering_mismatch` names the labels they would have
+contributed, and `numbering_agrees` is carried onto `per_structure_consensus`
+itself so the flag travels with the label.
+
+A **sixth** consensus value exists for the case where every classification on a
+structure was excluded: **`numbering_mismatch_not_interpretable`**. It is *not*
+`no_pocket_to_classify` — pockets were found and classified; the classification
+is what could not be trusted. The geometric fields
+(`min_distance_to_interface_a`, `enclosure`, `subunit_enclosure_gain`) are
+unaffected and remain in `per_structure`.
 
 ### A near-sealed hydrophobic pocket is a domain core, not a site
 
@@ -1034,3 +1403,20 @@ interpretable.
 And a volume of **0.00 A^3 is a result, not a failed run.** Report it. It is the
 one output that cannot be an over-claim, and substituting the nearest pocket
 that *does* have volume is how this skill got a headline finding wrong.
+
+### A summary map that was all-`null` in every run ever made
+
+`pocket_vs_interface.per_structure_consensus.<PDB>.overlap_by_clustering` read
+the key `pocket_interface_overlap` off the raw classification dicts, where the
+field is called `overlap_fraction` — `pocket_interface_overlap` is the name it is
+*renamed to* one level down, when it is copied into
+`structures.<PDB>.pocket_vs_interface.<D>`. So the map came back
+`{"1.6": null, "2.4": null}` for every structure, at every clustering value, in
+every run, while the overlaps it was summarising (0.267, 0.133, 0.111, 0.045)
+sat one nesting level away. Fixed.
+
+**Worth generalising: a field that is null everywhere reads as "not measured"
+and never gets challenged.** No status flag was wrong, no exception was raised,
+and no check in the regression covered it — it was found by reading a payload
+the regression had already passed. When a summary field is uniformly null across
+a whole run, check that it is not simply looking up the wrong key.

@@ -652,52 +652,277 @@ function modalProfile(): string {
 /** Stage switches, in the order `modal_app.py`'s entrypoint declares them. */
 const POCKET_SCAN_STAGES = ["run_disorder", "run_cryptic", "run_mdpocket"];
 
-/**
- * Drop the per-structure pocket lists when the payload will not fit.
- *
- * Measured: one 1TNF structure with the cryptic and mdpocket stages OFF is
- * 87 kB, because `by_clustering.<D>.pockets` carries the top 30 pockets at each
- * of two clustering values. A six-structure ensemble with every stage on is
- * several times MAX_OUTPUT_CHARS, and `clip` would then hand the model a JSON
- * document cut off mid-object — which parses as nothing and reads as a broken
- * run rather than as a wide one.
- *
- * So when it does not fit, drop the one thing that is bulk (`pockets`) and keep
- * everything the dossier's numbers come from. This is selection, not
- * computation: no value is recomputed, rounded or summarised. It is lossy in
- * exactly one way, and that way is named in the returned `_handler_note` —
- * rule 2b's per-pocket interface classification cannot be satisfied from a
- * reduced payload, and the fix is to split the ensemble across calls.
- */
-function reduceScanPayload(text: string): string {
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    return clip(text);
+// ---------------------------------------------------------------------------
+// pocket_scan payload reduction
+//
+// THE INVARIANT: this handler never returns a truncated JSON document. Not
+// once, not with a warning. A payload cut mid-string parses as nothing, and a
+// model handed nothing after a paid Modal run has no way to tell a wide result
+// from a broken one.
+//
+// The previous version broke that invariant in three ways at once, measured on
+// a three-structure IL-6 (P05231) run that came back at 180,209 characters:
+//
+//   1. It dropped `pockets` and nothing else. `pockets` is not where the bulk
+//      is — with all six `pockets` arrays gone (98 objects) the payload was
+//      STILL over the cap, because two `structures.<ID>` blocks are ~118 kB on
+//      their own and `pocket_vs_interface.per_structure` is another ~60 kB.
+//   2. It then called `clip`, which hard-truncated the reduced document and
+//      handed the model invalid JSON anyway.
+//   3. `_handler_note` was appended as the LAST key, so `JSON.stringify` put
+//      it at the very end and `clip` deleted the explanation first.
+//
+// The consequence was concrete and expensive: on IL-6 the tool could not return
+// `mdpocket.sites` (rule 4b) and `pocket_vs_interface` (rule 2b) in one
+// parseable payload, so the axis cost two paid Modal runs.
+//
+// So: a LADDER of named reductions, cheapest first, re-measured after every
+// rung, with `_handler_note` written FIRST, and a hard throw naming the size if
+// the ladder runs out. No rung recomputes, rounds or summarises a number —
+// every rung deletes whole keys, and every deletion is named in the note.
+// ---------------------------------------------------------------------------
+
+/** Prose keys shorter than this are flags, not commentary; they stay. */
+const PROSE_MIN_CHARS = 160;
+/** `_why`, `_note`, `tier_note`, `_aggregation_rule`, `pockets_omitted_note`… */
+const PROSE_KEY = /^_|_(?:note|why|warning|caveat|rule)$/;
+
+type JsonObject = Record<string, unknown>;
+
+function isProse(key: string, value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    value.length >= PROSE_MIN_CHARS &&
+    PROSE_KEY.test(key)
+  );
+}
+
+/** Depth-first walk over every plain object in the tree, including in arrays. */
+function walkObjects(node: unknown, visit: (obj: JsonObject) => void): void {
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      walkObjects(item, visit);
+    }
+    return;
   }
-  const structures = parsed.structures as Record<string, unknown> | undefined;
-  let dropped = 0;
-  for (const entry of Object.values(structures ?? {})) {
-    const byClustering = (entry as Record<string, unknown>)?.by_clustering as
-      | Record<string, Record<string, unknown>>
-      | undefined;
-    for (const block of Object.values(byClustering ?? {})) {
-      if (Array.isArray(block.pockets)) {
-        dropped += block.pockets.length;
-        block.pockets = `[${block.pockets.length} pocket objects dropped by the local tool handler]`;
+  if (!node || typeof node !== "object") {
+    return;
+  }
+  const obj = node as JsonObject;
+  visit(obj);
+  for (const value of Object.values(obj)) {
+    walkObjects(value, visit);
+  }
+}
+
+/** Replace `obj[key]` with a marker naming what left. Returns 1 if it fired. */
+function dropKey(obj: JsonObject, key: string, what: string): number {
+  const value = obj[key];
+  if (value === undefined || typeof value === "string") {
+    return 0;
+  }
+  const n = Array.isArray(value) ? value.length : Object.keys(value ?? {}).length;
+  obj[key] = `[${n} ${what} dropped by the local tool handler to fit the output cap — NOT absent, NOT zero]`;
+  return 1;
+}
+
+/** Rung 1: method commentary. Constant overhead, carries no measurement. */
+function dropProse(root: JsonObject, names: Set<string>): number {
+  let n = 0;
+  walkObjects(root, (obj) => {
+    for (const [key, value] of Object.entries(obj)) {
+      if (isProse(key, value)) {
+        delete obj[key];
+        names.add(key);
+        n += 1;
       }
     }
+  });
+  return n;
+}
+
+/**
+ * Rung 2: `pocket_vs_interface.per_structure`.
+ *
+ * ~60 kB on the IL-6 run and it is the one large block that is a DUPLICATE:
+ * modal_app.py copies every field the dossier reads into
+ * `structures.<ID>.pocket_vs_interface.<D>` and summarises the same entries in
+ * `pocket_vs_interface.per_structure_consensus`. Rule 2b survives this rung.
+ */
+function dropInterfacePerStructure(root: JsonObject): number {
+  const block = root.pocket_vs_interface as JsonObject | undefined;
+  if (!block) {
+    return 0;
   }
-  parsed._handler_note =
-    `The full payload was ${text.length} characters, above this handler's ` +
-    `${MAX_OUTPUT_CHARS}-character cap, so ${dropped} per-pocket objects were ` +
-    "dropped from `by_clustering.<D>.pockets`. NOTHING WAS RECOMPUTED — every " +
-    "number still here is the app's own. What is lost is rule 2b's per-pocket " +
-    "interface classification and the `pockets_omitted` audit. If you need " +
-    "those, re-run with a smaller `pdb_ids` list rather than treating this as " +
-    "the complete result.";
-  return clip(JSON.stringify(parsed));
+  return dropKey(
+    block,
+    "per_structure",
+    "raw per-structure classification dicts (the same fields are in structures.<ID>.pocket_vs_interface.<D> and in per_structure_consensus)"
+  );
+}
+
+/** Rung 3: the top-30 pocket lists. `site_pocket` and the ranks stay. */
+function dropPocketLists(root: JsonObject): number {
+  let n = 0;
+  for (const entry of Object.values(
+    (root.structures as JsonObject | undefined) ?? {}
+  )) {
+    const byClustering = (entry as JsonObject)?.by_clustering as
+      | Record<string, JsonObject>
+      | undefined;
+    for (const block of Object.values(byClustering ?? {})) {
+      n += dropKey(block, "pockets", "pocket objects");
+    }
+  }
+  return n;
+}
+
+/** Rung 4: per-rank interface classification. This one DOES cost rule 2b. */
+function dropPerRankClassification(root: JsonObject): number {
+  let n = 0;
+  for (const entry of Object.values(
+    (root.structures as JsonObject | undefined) ?? {}
+  )) {
+    const pvi = (entry as JsonObject)?.pocket_vs_interface as
+      | Record<string, JsonObject>
+      | undefined;
+    for (const block of Object.values(pvi ?? {})) {
+      n += dropKey(block, "by_fpocket_rank", "per-rank classifications");
+    }
+  }
+  return n;
+}
+
+/** Rung 5: residue-name lists that duplicate or annotate `residues`. */
+const BULK_LISTS = ["lining_residue_names", "missing_residues"];
+
+function dropBulkLists(root: JsonObject): number {
+  let n = 0;
+  walkObjects(root, (obj) => {
+    for (const key of BULK_LISTS) {
+      if (Array.isArray(obj[key])) {
+        n += dropKey(obj, key, `${key} entries`);
+      }
+    }
+  });
+  return n;
+}
+
+type Rung = { apply: (root: JsonObject, names: Set<string>) => number; what: string };
+
+const REDUCTION_LADDER: Rung[] = [
+  {
+    apply: dropProse,
+    what: "prose-only keys (string-valued `_why`/`_note`/`_warning` commentary, no numbers in any of them)",
+  },
+  {
+    apply: dropInterfacePerStructure,
+    what: "`pocket_vs_interface.per_structure` (duplicated into structures.<ID>.pocket_vs_interface and per_structure_consensus)",
+  },
+  { apply: dropPocketLists, what: "`by_clustering.<D>.pockets`" },
+  {
+    apply: dropPerRankClassification,
+    what: "`structures.<ID>.pocket_vs_interface.<D>.by_fpocket_rank` — THIS ONE COSTS RULE 2b's per-pocket classification; the selected site pocket's classification is still there",
+  },
+  { apply: dropBulkLists, what: "`lining_residue_names` and `missing_residues`" },
+];
+
+function handlerNote(args: {
+  fullChars: number;
+  applied: string[];
+  proseKeys: Set<string>;
+  outFile: string;
+}): string {
+  const prose =
+    args.proseKeys.size > 0
+      ? ` The prose keys removed were: ${[...args.proseKeys].sort().join(", ")}.`
+      : "";
+  return (
+    "READ THIS FIRST — THIS PAYLOAD IS COMPLETE JSON BUT IT IS NOT THE WHOLE " +
+    `RESULT. The app returned ${args.fullChars} characters, above this ` +
+    `handler's ${MAX_OUTPUT_CHARS}-character cap, so whole keys were deleted, ` +
+    "cheapest first, until it fit. NOTHING WAS RECOMPUTED, ROUNDED OR " +
+    "SUMMARISED — every number still here is the app's own, and no string was " +
+    "truncated. Removed, in order: " +
+    args.applied.map((item, i) => `(${i + 1}) ${item}`).join("; ") +
+    "." +
+    prose +
+    " A key whose value is now a `[… dropped by the local tool handler …]` " +
+    "string was PRESENT AND NON-EMPTY; it is not absent and not zero. The " +
+    "complete payload is on the machine that ran this handler at " +
+    `${args.outFile} — the sandbox cannot read that path, so ask the operator ` +
+    "for it rather than re-running the scan, which costs Modal credits."
+  );
+}
+
+function withNote(parsed: JsonObject, note: string): string {
+  // `_handler_note` FIRST, never last: JSON.stringify emits string keys in
+  // insertion order, and the explanation of a reduction must not be the first
+  // thing any downstream size limit deletes.
+  return JSON.stringify({ _handler_note: note, ...parsed });
+}
+
+function sizeCensus(parsed: JsonObject): string {
+  return Object.entries(parsed)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)?.length ?? 0}`)
+    .sort()
+    .join(", ");
+}
+
+/**
+ * Fit the payload under the cap by deleting whole keys, or refuse.
+ *
+ * `outFile` is named in the note purely as provenance: the handler runs
+ * off-sandbox, so the file is readable by the operator and NOT by the agent.
+ * It is a pointer for a human, never a retrieval route for the model.
+ */
+function reduceScanPayload(text: string, outFile: string): string {
+  let parsed: JsonObject;
+  try {
+    parsed = JSON.parse(text) as JsonObject;
+  } catch (error) {
+    throw new Error(
+      `modal run wrote ${text.length} characters to ${outFile}, above this ` +
+        `handler's ${MAX_OUTPUT_CHARS}-character cap, and that text is not ` +
+        "JSON, so it cannot be reduced key by key. Returning a truncated copy " +
+        "would hand you a document that parses as nothing, so this handler " +
+        "refuses instead. The file is intact on the operator's machine.\n\n" +
+        `--- first 2000 characters ---\n${text.slice(0, 2000)}`,
+      { cause: error }
+    );
+  }
+  const applied: string[] = [];
+  const proseKeys = new Set<string>();
+  for (const rung of REDUCTION_LADDER) {
+    const hits = rung.apply(parsed, proseKeys);
+    if (hits > 0) {
+      applied.push(rung.what);
+    }
+    const candidate = withNote(
+      parsed,
+      handlerNote({ applied, fullChars: text.length, outFile, proseKeys })
+    );
+    // Re-measured after EVERY rung. The old version measured once, before
+    // reducing, and returned whatever came out.
+    if (candidate.length <= MAX_OUTPUT_CHARS) {
+      return candidate;
+    }
+  }
+  const remaining = withNote(parsed, "").length;
+  throw new Error(
+    `the pocket_scan payload is ${text.length} characters and every reduction ` +
+      `this handler has still leaves ${remaining}, above the ` +
+      `${MAX_OUTPUT_CHARS}-character cap. It is NOT being truncated: a JSON ` +
+      "document cut mid-string parses as nothing and would read as a failed " +
+      "scan rather than a wide one, so this is a refusal, not a result. " +
+      `Everything already removed: ${applied.join("; ")}. Top-level key sizes ` +
+      `in what is left: ${sizeCensus(parsed)}. The complete payload is intact ` +
+      `at ${outFile} on the machine running this handler (the sandbox cannot ` +
+      "read it). Re-run with a smaller `pdb_ids` list, or split the stages — " +
+      "one call with `run_mdpocket` for rule 4b's `mdpocket.sites` and one " +
+      "with `partner_structures` for rule 2b's `pocket_vs_interface` — and " +
+      "say in `tractability.caveat` that the axis was assembled from two runs."
+  );
 }
 
 /**
@@ -718,7 +943,9 @@ function readScanPayload(outFile: string, result: RunResult): string {
   if (existsSync(outFile)) {
     const text = readFileSync(outFile, "utf8");
     if (text.trim().length > 0) {
-      return text.length > MAX_OUTPUT_CHARS ? reduceScanPayload(text) : text;
+      return text.length > MAX_OUTPUT_CHARS
+        ? reduceScanPayload(text, outFile)
+        : text;
     }
   }
   throw new Error(
@@ -897,6 +1124,107 @@ async function resolveStructure(value: string): Promise<string> {
   }
   writeFileSync(target, Buffer.from(await response.arrayBuffer()));
   return target;
+}
+
+// ---------------------------------------------------------------------------
+// Assembly chain names vs the PDB format's one-character column
+//
+// `resolveStructure` downloads `<ID>-assembly1.cif`, and an assembly CIF names
+// chains in ways the PDB format cannot hold: RCSB disambiguates symmetry copies
+// with a suffix (1ALU: `A`, `A-2`) and renames large assemblies to multi-letter
+// ids (7NXZ: `AAA`). `neighbour_precedent.py`'s `count_chains` converts to PDB
+// before anything else runs, so both entries died on arrival:
+//
+//   1ALU: chain name too long for the PDB format: A-2
+//   7NXZ: chain name too long for the PDB format: AAA
+//
+// WHY NOT THE ASYMMETRIC UNIT. The standing rule is the biological assembly,
+// never the ASU, and it still holds here — the ASU is the wrong input for a
+// Foldseek query specifically, because the multimer search runs only when the
+// file has more than one chain, and an ASU that happens to be one protomer of a
+// dimeric assembly would silently route a multimer query down the single-chain
+// path and return neighbours of a monomer. What has to change is the chain
+// NAMES, and only the names: Foldseek's own `target_id` is a filename blob whose
+// chain token the parser already strips, so no downstream number is keyed on
+// them. `gemmi.Structure.shorten_chain_names()` is the operation the format
+// conversion needs and it renames nothing else — coordinates, residues,
+// entities and the assembly's chain count are untouched.
+//
+// Scoped to `neighbour_precedent` on purpose. `cryptic_analysis` takes
+// `--holo-chains`/`--apo-chains` as deposited chain ids, so renaming underneath
+// it would silently re-point a caller's chain selection at a different protomer.
+// ---------------------------------------------------------------------------
+
+const PDB_CHAIN_RENAME = `
+import json, sys
+import gemmi
+src, dst = sys.argv[1], sys.argv[2]
+st = gemmi.read_structure(src)
+st.setup_entities()
+before = [ch.name for ch in st[0]]
+if all(len(n) <= 1 for n in before):
+    print(json.dumps({"renamed": None}))
+else:
+    st.shorten_chain_names()
+    after = [ch.name for ch in st[0]]
+    st.make_mmcif_document().write_file(dst)
+    print(json.dumps({"renamed": dict(zip(before, after))}))
+`;
+
+type ChainRename = { path: string; renamed: Record<string, string> | null };
+
+/**
+ * Return a copy of `path` whose chain names fit the PDB format's one character,
+ * or `path` itself when they already do.
+ */
+async function pdbSafeChainNames(path: string): Promise<ChainRename> {
+  mkdirSync(STRUCTURE_CACHE, { recursive: true });
+  const base = path.split("/").pop() ?? "structure.cif";
+  const dst = join(STRUCTURE_CACHE, `${base.replace(/\.[^.]+$/, "")}-pdbchains.cif`);
+  const result = await run(
+    micromamba(),
+    [
+      "run",
+      "-n",
+      analysisEnvName(),
+      "python",
+      "-c",
+      PDB_CHAIN_RENAME,
+      path,
+      dst,
+    ],
+    { timeoutSeconds: DEFAULT_TIMEOUT_S }
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      `could not read chain names out of ${path} with gemmi, so this handler ` +
+        "cannot tell whether the file will survive the CIF→PDB conversion " +
+        "`neighbour_precedent.py` does before it searches. This is a broken " +
+        `analysis environment ("${analysisEnvName()}"), NOT unavailability of ` +
+        "the structural-neighbour axis and NOT a target with no neighbours — " +
+        "do not null the axis for it.\n\n" +
+        `--- stderr ---\n${clip(result.stderr)}`
+    );
+  }
+  const parsed = JSON.parse(result.stdout.trim()) as {
+    renamed: Record<string, string> | null;
+  };
+  return parsed.renamed
+    ? { path: dst, renamed: parsed.renamed }
+    : { path, renamed: null };
+}
+
+/** A CIF→PDB chain-name death, which rule 13 must NOT be applied to. */
+const CHAIN_NAME_TOO_LONG = /chain name too long for the PDB format/i;
+
+/** Put a note in front of a JSON result without breaking the parse. */
+function noteOnJson(text: string, note: string): string {
+  try {
+    const parsed = JSON.parse(text) as JsonObject;
+    return JSON.stringify({ _handler_note: note, ...parsed }, null, 2);
+  } catch {
+    return `${note}\n\n${text}`;
+  }
 }
 
 const crypticAnalysis: CustomToolSpec = {
@@ -1124,8 +1452,16 @@ const neighbourPrecedent: CustomToolSpec = {
     "Three Foldseek column caveats are already handled inside the script and you should not re-correct them: remote mode mislabels columns so `evalue` is really the probability and `bit_score` is really the E-value, a TM-score only exists via tmalign mode, and `target_id` is a filename-plus-title blob rather than an ID. The load-bearing caveat is in the output: ligands are attributed at entry level, so every holo count comes back twice — an entry-level upper bound and a single-protein-entry lower bound — and you must report the gap rather than picking one. " +
     "If it returns a `ModuleNotFoundError` for `proto_tools`, that is unavailability of the whole axis: null `structural_neighbour_precedent`, record it in `not_found`, and never write it up as `no structural neighbours found`.",
   async handler(input) {
+    const requested = requiredStr(input, "structure");
+    // Assembly CIFs carry chain names the PDB format cannot hold, and
+    // `count_chains` converts to PDB before the search runs. Normalise the
+    // names here — same assembly, same coordinates — or 1ALU and 7NXZ die
+    // before Foldseek is ever called. See pdbSafeChainNames.
+    const structure = await pdbSafeChainNames(
+      await resolveStructure(requested)
+    );
     const argv = [
-      await resolveStructure(requiredStr(input, "structure")),
+      structure.path,
       requiredStr(input, "accession"),
       "--env-file",
       envFileArg(),
