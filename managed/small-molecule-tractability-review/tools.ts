@@ -971,11 +971,92 @@ function dropBulkLists(root: JsonObject): number {
   return n;
 }
 
+/**
+ * Rung for `cryptic_analysis`: `displacement.per_residue`.
+ *
+ * One record per compared residue. Every figure rule 5 reads off this block is
+ * computed by the script and sits beside the list — `max_ca_displacement`,
+ * `max_ca_displacement_at`, `ca_rmsd`, `n_residues`, `n_residues_compared` —
+ * so the cryptic-mechanism classification survives this rung intact.
+ */
+function dropPerResidueDisplacement(root: JsonObject): number {
+  const block = root.displacement as JsonObject | undefined;
+  if (!block) {
+    return 0;
+  }
+  return dropKey(
+    block,
+    "per_residue",
+    "per-residue C-alpha displacement records (max_ca_displacement, max_ca_displacement_at, ca_rmsd and n_residues_compared are computed from these and are still here)"
+  );
+}
+
+/** The two clash reports `cryptic_analysis` emits, at 2.0 A and at 2.5 A. */
+const CONTACT_BLOCKS = ["contacts", "contacts_wide"];
+
+/**
+ * Rung for `cryptic_analysis`: the per-residue contact lists.
+ *
+ * `contact_pairs`, `n_ligand_atoms`, `n_protein_atoms`, `min_distance` and
+ * `by_category` stay on each block, and the backbone / side-chain /
+ * displaced-chain split rule 5 attributes clashes with is a separate top-level
+ * `counts` key that this rung does not touch.
+ */
+function dropContactResidueLists(root: JsonObject): number {
+  let n = 0;
+  for (const key of CONTACT_BLOCKS) {
+    const block = root[key] as JsonObject | undefined;
+    if (block) {
+      n += dropKey(
+        block,
+        "residues",
+        `contacting residues in \`${key}\` (contact_pairs, by_category and min_distance are still here, and the backbone/sidechain/displaced_chain split is the top-level \`counts\` key)`
+      );
+    }
+  }
+  return n;
+}
+
+/**
+ * Rung for `neighbour_precedent`: per-neighbour `rejected_ligands`.
+ *
+ * `ligand_filter`'s diagnostics saying why a candidate component was not
+ * counted as drug-like. The four fields the axis is actually read from —
+ * `has_druglike_holo`, `ligands`, `holo_determined` and `undetermined_ligands`,
+ * which are what separate a real apo call from a failed lookup — are untouched.
+ */
+function dropRejectedLigands(root: JsonObject): number {
+  const neighbours = root.neighbours;
+  if (!Array.isArray(neighbours)) {
+    return 0;
+  }
+  let n = 0;
+  for (const entry of neighbours) {
+    if (entry && typeof entry === "object") {
+      n += dropKey(
+        entry as JsonObject,
+        "rejected_ligands",
+        "rejected-ligand diagnostics (holo_determined, undetermined_ligands, has_druglike_holo and ligands are untouched, so `n_holo = 0` is still readable against `n_undetermined`)"
+      );
+    }
+  }
+  return n;
+}
+
 type Rung = {
   apply: (root: JsonObject, names: Set<string>) => number;
   what: string;
 };
 
+/**
+ * One ladder for every handler, ordered cheapest-first.
+ *
+ * Each rung looks for keys only some payloads have and returns 0 on the rest,
+ * so `pocket_scan`, `cryptic_analysis` and `neighbour_precedent` share this
+ * list rather than keeping one apiece. That is deliberate: a duplicated
+ * reducer drifts, and the rung that deletes the note explaining the deletion
+ * is the one nobody notices drifting.
+ */
 const REDUCTION_LADDER: Rung[] = [
   {
     apply: dropProse,
@@ -985,7 +1066,19 @@ const REDUCTION_LADDER: Rung[] = [
     apply: dropInterfacePerStructure,
     what: "`pocket_vs_interface.per_structure` (duplicated into structures.<ID>.pocket_vs_interface and per_structure_consensus)",
   },
+  {
+    apply: dropPerResidueDisplacement,
+    what: "`displacement.per_residue` (its max, argmax, RMSD and residue counts are computed by the script and are still here)",
+  },
   { apply: dropPocketLists, what: "`by_clustering.<D>.pockets`" },
+  {
+    apply: dropContactResidueLists,
+    what: "`contacts.residues` and `contacts_wide.residues` (contact_pairs, by_category, min_distance and the top-level backbone/sidechain/displaced_chain `counts` are still here)",
+  },
+  {
+    apply: dropRejectedLigands,
+    what: "per-neighbour `rejected_ligands` (holo_determined and undetermined_ligands are untouched)",
+  },
   {
     apply: dropPerRankClassification,
     what: "`structures.<ID>.pocket_vs_interface.<D>.by_fpocket_rank` — THIS ONE COSTS RULE 2b's per-pocket classification; the selected site pocket's classification is still there",
@@ -996,11 +1089,27 @@ const REDUCTION_LADDER: Rung[] = [
   },
 ];
 
+/**
+ * What a reduction or a refusal needs to know about the handler it is for.
+ *
+ * `provenance` is named purely as a pointer for a human: every handler here
+ * runs off-sandbox, so the complete payload is readable by the operator and
+ * NOT by the agent. It is never a retrieval route for the model.
+ */
+type FitTarget = {
+  /** Named in the note and in every refusal. */
+  label: string;
+  /** Where the complete payload is. Reads after "The complete payload is on". */
+  provenance: string;
+  /** How to make the next call smaller. Appended to every refusal. */
+  advice: string;
+};
+
 function handlerNote(args: {
   fullChars: number;
   applied: string[];
   proseKeys: Set<string>;
-  outFile: string;
+  target: FitTarget;
 }): string {
   const prose =
     args.proseKeys.size > 0
@@ -1008,19 +1117,32 @@ function handlerNote(args: {
       : "";
   return (
     "READ THIS FIRST — THIS PAYLOAD IS COMPLETE JSON BUT IT IS NOT THE WHOLE " +
-    `RESULT. The app returned ${args.fullChars} characters, above this ` +
-    `handler's ${MAX_OUTPUT_CHARS}-character cap, so whole keys were deleted, ` +
-    "cheapest first, until it fit. NOTHING WAS RECOMPUTED, ROUNDED OR " +
-    "SUMMARISED — every number still here is the app's own, and no string was " +
-    "truncated. Removed, in order: " +
+    `RESULT. ${args.target.label} returned ${args.fullChars} characters, ` +
+    `above this handler's ${MAX_OUTPUT_CHARS}-character cap, so whole keys ` +
+    "were deleted, cheapest first, until it fit. NOTHING WAS RECOMPUTED, " +
+    "ROUNDED OR SUMMARISED — every number still here is the tool's own, and " +
+    "no string was truncated. Removed, in order: " +
     args.applied.map((item, i) => `(${i + 1}) ${item}`).join("; ") +
     "." +
     prose +
     " A key whose value is now a `[… dropped by the local tool handler …]` " +
     "string was PRESENT AND NON-EMPTY; it is not absent and not zero. The " +
-    "complete payload is on the machine that ran this handler at " +
-    `${args.outFile} — the sandbox cannot read that path, so ask the operator ` +
-    "for it rather than re-running the scan, which costs Modal credits."
+    `complete payload is on ${args.target.provenance}. ${args.target.advice}`
+  );
+}
+
+/**
+ * The reduction did not have to delete anything — the payload was only over
+ * the cap because it pretty-prints. Say so, so nobody reads a note as a loss.
+ */
+function whitespaceNote(fullChars: number, target: FitTarget): string {
+  return (
+    "READ THIS FIRST — THIS PAYLOAD IS COMPLETE AND NOTHING WAS DELETED. " +
+    `${target.label} returned ${fullChars} characters, above this handler's ` +
+    `${MAX_OUTPUT_CHARS}-character cap, only because it pretty-prints its ` +
+    "JSON. It has been re-serialised without the indentation and now fits. No " +
+    "key was dropped, no string was truncated and no number was recomputed — " +
+    "the only bytes removed are insignificant whitespace."
   );
 }
 
@@ -1038,38 +1160,58 @@ function sizeCensus(parsed: JsonObject): string {
     .join(", ");
 }
 
+/** A plain JSON object. An array or a scalar cannot carry `_handler_note`. */
+function asJsonObject(value: unknown): JsonObject | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : undefined;
+}
+
 /**
- * Fit the payload under the cap by deleting whole keys, or refuse.
+ * Fit an already-parsed payload under the cap by deleting whole keys, or refuse.
  *
- * `outFile` is named in the note purely as provenance: the handler runs
- * off-sandbox, so the file is readable by the operator and NOT by the agent.
- * It is a pointer for a human, never a retrieval route for the model.
+ * `lead` is a note that must reach the model whether or not anything was
+ * reduced (the chain-rename note); it is written FIRST for exactly the reason
+ * the reduction note is.
  */
-function reduceScanPayload(text: string, outFile: string): string {
-  let parsed: JsonObject;
-  try {
-    parsed = JSON.parse(text) as JsonObject;
-  } catch (error) {
-    throw new Error(
-      `modal run wrote ${text.length} characters to ${outFile}, above this ` +
-        `handler's ${MAX_OUTPUT_CHARS}-character cap, and that text is not ` +
-        "JSON, so it cannot be reduced key by key. Returning a truncated copy " +
-        "would hand you a document that parses as nothing, so this handler " +
-        "refuses instead. The file is intact on the operator's machine.\n\n" +
-        `--- first 2000 characters ---\n${text.slice(0, 2000)}`,
-      { cause: error }
-    );
-  }
+function fitParsed(args: {
+  parsed: JsonObject;
+  fullChars: number;
+  target: FitTarget;
+  lead?: string;
+}): string {
+  const { parsed, fullChars, target } = args;
   const applied: string[] = [];
   const proseKeys = new Set<string>();
+  const emit = (note: string | undefined, indent: number) => {
+    const joined = [args.lead, note].filter(Boolean).join(" ");
+    return JSON.stringify(
+      joined ? { _handler_note: joined, ...parsed } : parsed,
+      null,
+      indent
+    );
+  };
+
+  // Rung 0 — whitespace. Deletes nothing, so it runs before any rung that
+  // deletes a key. `cryptic_analysis` prints with indent=2 and roughly halves
+  // on this rung alone.
+  const pretty = emit(undefined, 2);
+  if (pretty.length <= MAX_OUTPUT_CHARS) {
+    return pretty;
+  }
+  const compact = emit(whitespaceNote(fullChars, target), 0);
+  if (compact.length <= MAX_OUTPUT_CHARS) {
+    return compact;
+  }
+
   for (const rung of REDUCTION_LADDER) {
     const hits = rung.apply(parsed, proseKeys);
     if (hits > 0) {
       applied.push(rung.what);
     }
-    const candidate = withNote(
-      parsed,
-      handlerNote({ applied, fullChars: text.length, outFile, proseKeys })
+    const candidate = emit(
+      handlerNote({ applied, fullChars, proseKeys, target }),
+      0
     );
     // Re-measured after EVERY rung. The old version measured once, before
     // reducing, and returned whatever came out.
@@ -1079,19 +1221,106 @@ function reduceScanPayload(text: string, outFile: string): string {
   }
   const remaining = withNote(parsed, "").length;
   throw new Error(
-    `the pocket_scan payload is ${text.length} characters and every reduction ` +
-      `this handler has still leaves ${remaining}, above the ` +
+    `the ${target.label} payload is ${fullChars} characters and every ` +
+      `reduction this handler has still leaves ${remaining}, above the ` +
       `${MAX_OUTPUT_CHARS}-character cap. It is NOT being truncated: a JSON ` +
       "document cut mid-string parses as nothing and would read as a failed " +
-      "scan rather than a wide one, so this is a refusal, not a result. " +
-      `Everything already removed: ${applied.join("; ")}. Top-level key sizes ` +
-      `in what is left: ${sizeCensus(parsed)}. The complete payload is intact ` +
-      `at ${outFile} on the machine running this handler (the sandbox cannot ` +
-      "read it). Re-run with a smaller `pdb_ids` list, or split the stages — " +
-      "one call with `run_mdpocket` for rule 4b's `mdpocket.sites` and one " +
-      "with `partner_structures` for rule 2b's `pocket_vs_interface` — and " +
-      "say in `tractability.caveat` that the axis was assembled from two runs."
+      "run rather than a wide one, so this is a refusal, not a result. " +
+      `Everything already removed: ${applied.join("; ") || "nothing — no rung on this handler's ladder matched a key in this payload"}. ` +
+      `Top-level key sizes in what is left: ${sizeCensus(parsed)}. The ` +
+      `complete payload is on ${target.provenance}. ${target.advice}`
   );
+}
+
+/**
+ * THE INVARIANT, for any handler: reduce to a document that still parses, or
+ * throw with the size. Never return a payload cut mid-string.
+ *
+ * A payload that is not a JSON object has no key to delete, so it is refused
+ * outright with its byte count. That is the correct answer and not a
+ * degradation: a truncated line-oriented listing reads exactly like a complete
+ * shorter one, which on this agent is the single error the dossier cannot
+ * survive — a failed retrieval wearing the costume of a finding.
+ */
+function fitText(text: string, target: FitTarget): string {
+  let parsed: JsonObject | undefined;
+  try {
+    parsed = asJsonObject(JSON.parse(text));
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed) {
+    throw new Error(
+      `${target.label} returned ${text.length} characters, above this ` +
+        `handler's ${MAX_OUTPUT_CHARS}-character cap, and that text is not a ` +
+        "JSON object, so it cannot be reduced key by key. THIS IS A REFUSAL, " +
+        "NOT AN EMPTY RESULT AND NOT A SHORT ONE. Returning a copy cut " +
+        "mid-line would hand you a listing indistinguishable from a complete " +
+        "shorter listing, so the handler refuses instead. The complete " +
+        `output is on ${target.provenance}. ${target.advice}\n\n` +
+        `--- first 2000 characters ---\n${text.slice(0, 2000)}`
+    );
+  }
+  return fitParsed({ parsed, fullChars: text.length, target });
+}
+
+/**
+ * The never-truncate output path for a completed local run.
+ *
+ * A NON-ZERO exit still goes through `report`, which clips, and that asymmetry
+ * is deliberate: a failure dump is a stdout/stderr transcript for a human to
+ * read, not a document anything parses, and clipping it behind its own marker
+ * keeps the error text reachable where refusing would delete it. `pocket_scan`
+ * has always done the same — see `readScanPayload`.
+ */
+function fitReport(result: RunResult, target: FitTarget): string {
+  if (result.code !== 0) {
+    return report(target.label, result);
+  }
+  const text = result.stdout || result.stderr || "(no output)";
+  return text.length > MAX_OUTPUT_CHARS ? fitText(text, target) : text;
+}
+
+const CRYPTIC_FIT: FitTarget = {
+  advice:
+    "Narrow the comparison rather than re-running it whole: pass `holo_chains` and `apo_chains` to compare one protomer pair instead of the entire assembly, or set `no_free_volume`.",
+  label: "cryptic_analysis.py",
+  provenance:
+    "the machine that ran this handler, which did not save it to a file — the sandbox cannot see it, so ask the operator to re-run the script there",
+};
+
+const INTERFACE_FIT: FitTarget = {
+  advice:
+    "Ask for one accession at a time. `selftest_dir` output is a diagnostic harness dump and is never evidence about a target, so never widen the cap for it.",
+  label: "interface_analysis.py",
+  provenance:
+    "the machine that ran this handler, which did not save it to a file — the sandbox cannot see it, so ask the operator to re-run the script there",
+};
+
+const DISORDER_FIT: FitTarget = {
+  advice:
+    "Send fewer accessions per call — the output is one line per accession, so splitting the list loses nothing at all.",
+  label: "disorder.py",
+  provenance:
+    "the machine that ran this handler, which did not save it to a file — the sandbox cannot see it, so ask the operator to re-run the script there",
+};
+
+const NEIGHBOUR_FIT: FitTarget = {
+  advice:
+    "Lower `max_neighbours`, or raise `min_alignment_length`, and say in `not_found` that the neighbour list was capped by this handler rather than by the fold — a capped list is not a count of neighbours.",
+  label: "neighbour_precedent.py",
+  provenance:
+    "the machine that ran this handler, which did not save it to a file — the sandbox cannot see it, so ask the operator to re-run the script there",
+};
+
+/** Fit the `pocket_scan` payload under the cap by deleting whole keys, or refuse. */
+function reduceScanPayload(text: string, outFile: string): string {
+  return fitText(text, {
+    advice:
+      "Re-run with a smaller `pdb_ids` list, or split the stages — one call with `run_mdpocket` for rule 4b's `mdpocket.sites` and one with `partner_structures` for rule 2b's `pocket_vs_interface` — and say in `tractability.caveat` that the axis was assembled from two runs.",
+    label: "pocket_scan",
+    provenance: `${outFile} on the machine running this handler (the sandbox cannot read that path), so ask the operator for it rather than re-running the scan, which costs Modal credits`,
+  });
 }
 
 /**
@@ -1391,14 +1620,87 @@ async function pdbSafeChainNames(path: string): Promise<ChainRename> {
 /** A CIF→PDB chain-name death, which rule 13 must NOT be applied to. */
 const CHAIN_NAME_TOO_LONG = /chain name too long for the PDB format/i;
 
-/** Put a note in front of a JSON result without breaking the parse. */
-function noteOnJson(text: string, note: string): string {
-  try {
-    const parsed = JSON.parse(text) as JsonObject;
-    return JSON.stringify({ _handler_note: note, ...parsed }, null, 2);
-  } catch {
-    return `${note}\n\n${text}`;
+/**
+ * `query_structure` must be the ENTRY, not the file the script was handed.
+ *
+ * `neighbour_precedent.py` reports `"query_structure": str(structure_path)`,
+ * which was defensible when the caller passed a path and is not any more: this
+ * handler fetches biological assembly 1 into a temp directory and then caches a
+ * chain-renamed copy beside it, so the script now echoes
+ * `/var/folders/.../1ALU-assembly1-pdbchains.cif` — a path that is not the
+ * entry, names a rename the deposited file never had, and is unreadable from
+ * the sandbox anyway. The dossier's `structural_neighbour_precedent.query_structure`
+ * wants `1ALU`.
+ *
+ * The handler knows which entry it was called with, so it echoes that and moves
+ * the script's path to `query_structure_file`, where it survives as provenance
+ * and cannot be mistaken for an ID. A caller who passed a path gets that path
+ * back verbatim in both places — there is no entry to recover, and inventing
+ * one would be worse than the bug.
+ */
+function stampQueryStructure(doc: JsonObject, requested: string): void {
+  const echoed = PDB_ID.test(requested) ? requested.toUpperCase() : requested;
+  const scriptValue = doc.query_structure;
+  doc.query_structure = echoed;
+  if (typeof scriptValue === "string" && scriptValue !== echoed) {
+    doc.query_structure_file = scriptValue;
   }
+}
+
+function renameNote(
+  requested: string,
+  renamed: Record<string, string>
+): string {
+  return (
+    `${requested}'s biological assembly names its chains ` +
+    `${Object.keys(renamed).join(", ")}, which the PDB format this script ` +
+    "converts to cannot hold, so the local handler renamed them to " +
+    `${Object.values(renamed).join(", ")} with gemmi.shorten_chain_names(). ` +
+    "SAME ASSEMBLY, SAME COORDINATES, SAME CHAIN COUNT — only the labels " +
+    "changed, and no reported number is keyed on them. If you quote a chain " +
+    "id from this result, say it is the handler's relabelling of the " +
+    "deposited id."
+  );
+}
+
+/**
+ * Render a successful `neighbour_precedent` run: stamp the entry into
+ * `query_structure`, attach the chain-rename note when there was one, and put
+ * the whole thing through the same never-truncate ladder every other handler
+ * uses.
+ *
+ * The order matters. The stamp and the note are applied to the PARSED document
+ * before it is measured, so a reduced payload is measured as it will actually
+ * be sent — re-serialising a reduced document afterwards to add a note is how
+ * a handler ships something over the cap while believing it fits.
+ */
+function renderNeighbourPayload(
+  text: string,
+  requested: string,
+  renamed: Record<string, string> | null
+): string {
+  const lead = renamed ? renameNote(requested, renamed) : undefined;
+  let parsed: JsonObject | undefined;
+  try {
+    parsed = asJsonObject(JSON.parse(text));
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed) {
+    // Not the JSON document. Never fabricate one around it, and never cut it:
+    // if it is also oversized, `fitText` refuses with the byte count.
+    if (text.length > MAX_OUTPUT_CHARS) {
+      return fitText(text, NEIGHBOUR_FIT);
+    }
+    return lead ? `${lead}\n\n${text}` : text;
+  }
+  stampQueryStructure(parsed, requested);
+  return fitParsed({
+    fullChars: text.length,
+    lead,
+    parsed,
+    target: NEIGHBOUR_FIT,
+  });
 }
 
 const crypticAnalysis: CustomToolSpec = {
@@ -1445,7 +1747,7 @@ const crypticAnalysis: CustomToolSpec = {
       pythonArgv(join(SKILLS_DIR, "pocket-scan", "cryptic_analysis.py"), argv),
       { timeoutSeconds: DEFAULT_TIMEOUT_S }
     );
-    return report("cryptic_analysis.py", result);
+    return fitReport(result, CRYPTIC_FIT);
   },
   input_schema: {
     properties: {
@@ -1530,7 +1832,7 @@ const interfaceAnalysis: CustomToolSpec = {
       ),
       { timeoutSeconds: DEFAULT_TIMEOUT_S }
     );
-    return report("interface_analysis.py", result);
+    return fitReport(result, INTERFACE_FIT);
   },
   input_schema: {
     properties: {
@@ -1578,7 +1880,7 @@ const disorderScan: CustomToolSpec = {
       ],
       { timeoutSeconds: DEFAULT_TIMEOUT_S }
     );
-    return report("disorder.py", result);
+    return fitReport(result, DISORDER_FIT);
   },
   input_schema: {
     properties: {
@@ -1625,6 +1927,7 @@ const neighbourPrecedent: CustomToolSpec = {
     "Records without SMILES classify as `unknown`, and `unknown` is not `druglike`, so a record source with no SMILES silently renders every neighbour apo. The sources that carry it are RCSB REST `data.rcsb.org/rest/v1/core/chemcomp/<ID>`, Paperclip `pdb_v.chemcomps` (this script's own source) and the CCD ligand file; an entry's own mmCIF `_chem_comp` block does not. " +
     "Three Foldseek column caveats are already handled inside the script and you should not re-correct them: remote mode mislabels columns so `evalue` is really the probability and `bit_score` is really the E-value, a TM-score only exists via tmalign mode, and `target_id` is a filename-plus-title blob rather than an ID. The load-bearing caveat is in the output: ligands are attributed at entry level, so every holo count comes back twice — an entry-level upper bound and a single-protein-entry lower bound — and you must report the gap rather than picking one. " +
     "PASS THE 4-CHARACTER PDB ID AND NOTHING ELSE. The handler fetches biological assembly 1 and, when that assembly names its chains in a way the PDB format cannot hold (1ALU deposits `A` and `A-2`; 7NXZ deposits `AAA`), renames them with gemmi before the script's CIF-to-PDB conversion sees them. Both entries used to die on arrival with `chain name too long for the PDB format`. Same assembly, same coordinates, same chain count, different labels — and a run that was renamed says so in a `_handler_note` at the top of its result. " +
+    "`query_structure` COMES BACK AS THE ENTRY YOU ASKED FOR, e.g. `1ALU`, and it is what `structural_neighbour_precedent.query_structure` takes verbatim. The script itself reports the file it was handed, which since the assembly fetch and the chain-rename cache is a temp path like `/var/folders/.../1ALU-assembly1-pdbchains.cif` — not an entry, and not readable from the sandbox — so this handler overwrites it with the requested ID and keeps the script's path beside it in `query_structure_file` as provenance. Never copy `query_structure_file` into the dossier. " +
     "TWO DIFFERENT FAILURES, ONLY ONE OF THEM IS RULE 13. A `ModuleNotFoundError` for `proto_tools` is unavailability of the whole axis: null `structural_neighbour_precedent`, record it in `not_found`, and never write it up as `no structural neighbours found`. A chain-name or file-format error is NOT that case — the tool is available and one input could not be read — so it throws with that distinction spelled out, and the answer is another entry for the same target (recorded in `not_found` as a substitution), not a nulled axis.",
   async handler(input) {
     const requested = requiredStr(input, "structure");
@@ -1691,21 +1994,13 @@ const neighbourPrecedent: CustomToolSpec = {
           `--- stderr ---\n${clip(result.stderr)}`
       );
     }
-    const rendered = report("neighbour_precedent.py", result);
-    if (result.code !== 0 || !structure.renamed) {
-      return rendered;
+    if (result.code !== 0) {
+      return report("neighbour_precedent.py", result);
     }
-    return noteOnJson(
-      rendered,
-      `${requested}'s biological assembly names its chains ` +
-        `${Object.keys(structure.renamed).join(", ")}, which the PDB format ` +
-        "this script converts to cannot hold, so the local handler renamed " +
-        `them to ${Object.values(structure.renamed).join(", ")} with ` +
-        "gemmi.shorten_chain_names(). SAME ASSEMBLY, SAME COORDINATES, SAME " +
-        "CHAIN COUNT — only the labels changed, and no reported number is " +
-        "keyed on them. Report `query_structure` as the entry you asked for; " +
-        "if you quote a chain id from this result, say it is the handler's " +
-        "relabelling of the deposited id."
+    return renderNeighbourPayload(
+      result.stdout || result.stderr || "(no output)",
+      requested,
+      structure.renamed
     );
   },
   input_schema: {

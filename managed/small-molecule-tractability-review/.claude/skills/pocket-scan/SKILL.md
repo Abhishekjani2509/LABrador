@@ -425,8 +425,11 @@ Diagnosis with `-i 5`: the channel fragments into alpha-sphere clusters of 15,
 12 spheres — below fpocket's default `-i 15` minimum — so it is **discarded
 silently**. The same site at `-D 2.4` scores 0.346, rank 2 of 14, Jaccard 0.74.
 
-Sweep. Report the range. A volume above ~1000 A^3 means sites have merged;
-"not detected" at one D and present at another means fragmentation, not absence.
+Sweep. Report the range **within one structure across the D sweep** — that is
+the range this section is about, and it is the only druggability range there is;
+a range across structures is the type error above. A volume above ~1000 A^3 means
+sites have merged; "not detected" at one D and present at another means
+fragmentation, not absence.
 
 ### VOID: the 651-fold druggability spread across five apo TNF-alpha trimers
 
@@ -882,7 +885,8 @@ Two details worth carrying:
 
 - **The count gated is `n_fitted_ca`, not `n_equivalent_ca`.** The floor asks how
   many positions the fit stood on, not how many were equivalent before the
-  exclusions.
+  exclusions. The floor itself scales with the smaller mapped chain — see
+  *The Cα floor SCALES with the smaller mapped chain* below.
 - **This route is latent, not live.** Reaching it needs `fit_residue_range` or
   `exclude_residues` and `pocket_scan` exposes neither. It is not hypothetical
   either: `auto_trim` writes the same `n_excluded_ca` on its own, so on a hinged
@@ -934,21 +938,52 @@ recover such a pair.** `fit_residue_range` / `exclude_residues` live on
 them would also expose the narrowed-fit failure above. So a hinge is currently
 **refused rather than measured**, and that is a known gap, not a verdict.
 
-#### The ≥ 20 Cα floor has never been exercised against a legitimately small target
+#### The Cα floor SCALES with the smaller mapped chain — the debt above is paid
 
-Every pair in the regression carried **162 to 476** equivalent Cα (135 to 422
-*fitted*), so this floor has only ever been tested far from itself. On a genuine
-peptide target or a single small domain it would refuse a **valid** comparison,
-and nothing measured says where it should sit.
-`superposition_gate.min_equivalent_ca_status` carries this. Treat a refusal
-citing only that line, on a target that is legitimately small, as an untested
-threshold rather than a finding.
+**Superseded: this section previously said the floor was an absolute 20, that it
+had never been exercised against a legitimately small target, and that moving the
+gated count to `n_fitted_ca` had taken on a debt rather than paying it. The debt
+is now paid and that framing is void.** Gating `n_fitted_ca` rather than
+`n_equivalent_ca` stays — it is the fix for the narrowed-fit exploit, where a fit
+restricted to one domain turns every check green while the pair sits 25.6 Å out
+of frame — but an *absolute* 20 on the fitted count refuses valid small pairs,
+because `auto_trim`'s `min_fit_fraction` is 0.5 and a 30-residue pair can present
+15 fitted. Those are real cases here: TL1A's entries run 111–270 residues and
+interface partners 25–63.
 
-**And the count now gated is `n_fitted_ca`, which is the smaller number.**
-`auto_trim`'s `min_fit_fraction` is 0.5, so a pair with 30 equivalent Cα can
-present as few as 15 fitted and refuse where it used to pass. On the regression
-that changes nothing. It does move the floor **closer** to a legitimately small
-target, not further away, and that is a debt this fix took on rather than paid.
+The floor is now **`min(20, max(8, 0.5 × the smaller MAPPED CHAIN's Cα))`**:
+
+| smaller mapped chain | floor | effect |
+| --- | --- | --- |
+| ≥ 40 Cα | **20** | **identical to before** — the entire regression set (162–476 equivalent, 135–422 fitted) lives here, so no validated result moves |
+| 30 | 15 | a 30-residue pair at the trim limit now **passes** |
+| 25 | 12 | S1PR1's CD69 mis-mapping still **refuses** at 5 fitted |
+| ≤ 16 | 8 | hard bottom: three points determine a rigid body exactly, so a handful of Cα reports a near-zero RMSD by construction |
+
+**Scaled on the CHAIN, never on `n_equivalent_ca`** — the equivalent count is
+itself a product of the mapping, and the S1PR1 failure was *5 equivalent
+positions onto a 25-residue peptide*, which a self-referential floor would have
+waved through at 5 of 5. Chain sizes are read from the two coordinate files with
+gemmi (they are mmCIF at this point, so a fixed-column PDB reader silently
+returns `{}` and the scaling never happens).
+
+**Constructed and measured, not reasoned about.** KRAS 4OBE/6OIM truncated to a
+single small segment of chain A, run through the real gate:
+
+| construct | chain Cα | equivalent | fitted | floor | old absolute 20 | now |
+| --- | --- | --- | --- | --- | --- | --- |
+| residues 60–83 | 24 | 23 | 22 | 12 | pass | pass |
+| **residues 60–79** | **20** | **20** | **19** | **10** | **REFUSED** | **passes**, core RMSD 2.37 Å, 9.56 Å displacement |
+| **residues 64–81** | **18** | **17** | **16** | **9** | **REFUSED** | **passes**, core RMSD 0.77 Å |
+| full chain (control) | 167 | 162+ | 135+ | 20 | pass | pass, unchanged |
+
+`superposition_gate` now carries `n_smaller_mapped_chain_ca`, `min_fitted_ca`,
+`min_fitted_ca_basis` (prose saying which of the three regimes applied),
+`min_fitted_ca_ceiling`, `min_fitted_ca_chain_fraction` and
+`min_fitted_ca_hard_bottom`. `min_equivalent_ca` is kept as an alias and now
+carries the floor **that was actually applied**, which is what a reader of a
+refusal needs. The 0.5 fraction and the bottom of 8 are **PROPOSED, NOT
+CALIBRATED**; the bottom rests on a geometric argument, not a measurement.
 
 **And whatever drops a structure from the call must drop it from every statistic
 derived from it — at every level that reprints them.** After the NLRP3 re-run the
@@ -1279,6 +1314,127 @@ Three things to know about the rule:
 **Off-target pockets are still returned**, with their fractions, in `pockets`. A
 cavity inside an antibody is a real cavity. It is just not this target's site and
 must never be quoted as its volume.
+
+### The seven values of `site_pocket_selected_by`, and the four that do not identify a site
+
+| value | what it means | poolable? |
+| --- | --- | --- |
+| `ligand_site_jaccard` | the pocket overlaps a drug-like co-crystallised ligand's contact shell | **yes** — same-site without qualification |
+| `site_signature_overlap` | matched on shared residue NUMBERS from a donor's site | yes, if `collapsed_by` is 0 and `foreign_polymer_residues_dropped` is 0 |
+| `site_signature_unreliable_homooligomer` | the numbers collapse across identical protomers | **no** |
+| `site_signature_unreliable_foreign_polymer` | the numbers came from a DIFFERENT polymer | **no** |
+| `no_pocket_matched_site_signature` | nothing matched | no site |
+| `no_on_target_pocket` | no pocket sits on the target's own chains | no site |
+| `max_druggability_no_ligand_site` | "the most druggable pocket anywhere on the target" | **no** |
+
+**`site_signature_unreliable_foreign_polymer` is new and it counts a different
+failure from the homo-oligomer one.** `collapsed_by` counts residue numbers lost
+to **identical protomers**; `foreign_polymer_residues_dropped` counts numbers
+**imported from a different polymer**, and only the first was ever guarded. The
+site signature is a set of residue numbers with chain identity discarded, so a
+second polymer in the file contributes its own numbering: on 8QFZ the contact
+shell of `LFI` is **13 residues, 9 of them (11, 12, 13, 14, 17, 18, 19, 21, 22)
+belonging to a 12-mer bicyclic peptide numbered from 1**, and those numbers also
+exist on TSLP and mean something else entirely. Matched chain-agnostically they
+land on a different part of the protein — `max_radius_difference_a` 33.52 Å,
+per-structure site ranks 5/7/22/1/36 — while `collapsed_by` reported **0** and
+the homo-oligomer guard correctly did not fire.
+
+The signature is now filtered to the **target entity's chains** at both places it
+is built, and the basis becomes `site_signature_unreliable_foreign_polymer` when
+**≥⅓ of the donor residues were foreign or fewer than 6 survive** (8QFZ: 13 in,
+9 foreign, 4 left). Chain-agnostic matching stays right for an inter-subunit site
+on ONE protein — TNF-alpha's axial channel — and is wrong across two proteins.
+Both counts are in `ensemble.site_signature`, beside `collapsed_by`.
+
+### `lining_by_chain` is on every pocket, always — read it first
+
+Every pocket carries `lining_by_chain` (`{chain: n lining residues}`) and
+`lining_fraction_non_target`, unconditionally, whether or not the accession
+resolver succeeded. It is the cheapest field in the payload and it is the one
+that makes a wrong-protein pocket visible instead of invisible:
+
+| case | what `lining_by_chain` shows |
+| --- | --- |
+| MYC 6G6J, the retracted 188 Å³ anchor | `{"B": 6}` — pocket 3 at 187.8 Å³, **zero MYC atoms**; chain B is MAX (P61244) |
+| IL-13 3L5X | the largest pocket, 302.3 Å³, is `{"L": 8}` — entirely inside the antibody light chain |
+| 8QFZ | the anchored pocket is `{"A": 4, "B": 6}` — **6 of 10 lining residues are the peptide** |
+
+It is **necessary and not sufficient**, and the limit is worth stating: it
+catches a pocket sitting on the *wrong chain of a mixed file*. It cannot catch a
+**wrong PDB ID** whose every chain is the wrong protein — IL-11's 6O4P (sole
+entity Q14626, the receptor) and RORgt's 6C1P (sole entity A8EVM5, an ion
+channel) show one chain each and look ordinary. Those two are caught by the
+accession check, which now **refuses** them outright (`entry does not contain
+P20809`). Read both fields; they fail in different directions.
+
+### A polymer LIGAND is stripped before scoring, and the result is reported as a PAIR
+
+Rule 4 says strip every ligand before scoring. `_prep` kept `het_flag == 'A'`,
+which is *every* polymer, so a peptide, a nanobody or a designed mini-binder was
+never stripped and lined the pocket it was being scored in.
+
+**How prep tells a ligand chain from a partner chain** — four cases, decided in
+this order, and the order matters because chemistry and the caller's assertion
+both outrank size:
+
+| class | test | scored file |
+| --- | --- | --- |
+| `target` | its `_struct_ref` accession is the run's target | **keep** |
+| `caller_asserted` | named in the `chains` argument (rule 2b) | **keep** |
+| `polymer_ligand` | non-target **and** (hosts a component `ligand_filter` called `polymer_conjugate`, **or** ≤50 monomers, **or** lines ≥25% of the anchored pocket) | **strip** |
+| `partner` | anything else non-target | **keep**, and its lining share is reported |
+
+Homo-oligomers are safe **by construction** — TNF-alpha's three subunits are the
+same entity with the same accession, so all three are `target` and the trimer
+axis survives — and an unverified chain set strips **nothing**, because a chain
+that cannot be shown to be non-target must not be deleted.
+
+**Report the PAIR. Never one number.** `structures.<PDB>.polymer_ligand_control`
+carries `volume_a3_stripped` (**the reported value**, and what fills
+`pocket_volume_a3.primary_d1_6_a3`), `volume_a3_with_polymer_ligand` beside it,
+`lining_fraction_from_polymer_ligand`, and `induced_fit_signal`.
+
+**A site that collapses when its polymer ligand is removed is an INDUCED-FIT
+signal, not a low number.** This project already has the calibration: KRAS
+switch-II is druggability 0.708 on holo 6OIM and **0.000 on apo 4OBE at the same
+site**, and reading the apo number as a verdict is the thirty-year KRAS error. On
+8QFZ the pair is **283.6 Å³ with the peptide and no site at all without it** —
+one pocket in the whole protein, 147.8 Å³, 15-18 Å away — and the pair is far
+more informative than either number. **`induced_fit_signal: true` forces
+`cryptic_pocket_risk: high`** and a `tractability.caveat` saying the geometric
+number cannot be read in either direction without a holo *small-molecule*
+structure. On 8QFZ the honest verdict is `insufficient_evidence`, for better
+reasons than the run originally had.
+
+### The covalent context, and the file it must come from
+
+`ligand_filter` only applies its covalent rules when it is handed a
+`StructureContext`, and `pocket_scan` now builds one per entry and passes it at
+all three call sites — the site donor, **the signature-donor loop**, and the
+per-structure pass. The signature-donor loop is the one that matters most: it is
+where `dl[0]` picks the component whose contact shell becomes the site signature
+for the whole ensemble.
+
+**Build it from `files.rcsb.org/header/<ID>.cif`, never from the assembly file.**
+RCSB strips `_struct_conn` from assembly files exactly as it strips `_struct_ref`
+— verified on 8QFZ, whose `-assembly1.cif` carries ~22 categories and neither. A
+context built from the coordinate file this module already holds returns an empty
+link table that is **indistinguishable from "nothing is covalently bonded"**, and
+`LFI` goes straight back to `druglike`: measured, the assembly-built context
+gives `druglike` with flags `multi_electrophile_may_be_a_crosslinking_reagent`
+and `struct_conn_absent_from_context`, while the header-built context gives
+`polymer_conjugate`. The header is already fetched once per entry for the
+accession, so this costs **no extra network call**. `holo_call.context_applied`
+and `has_struct_conn_category` say whether the rules could run at all; treat any
+verdict reached with them false as unestablished.
+
+`holo_call.polymer_conjugates` and `holo_call.polymer_ligand_precedent` are
+carried into the payload verbatim. The second is a deliverable, not a diagnostic:
+on 8QFZ it names the peptide, its length and its sequence
+(`CHWLENCWRGFC`, 12 monomers, modality `peptide`), and that belongs in the
+dossier's **peptide** precedent block under rule 1. 8QFZ *is* evidence — of a
+different modality.
 
 ### Failing open on the accession is what let the selector loose
 
@@ -1725,10 +1881,33 @@ chain IDs, overlap with any annotated or ligand-derived site,
 could not see. Include the method block — tool, version, every D value swept,
 and which PDB entries formed the ensemble.
 
-`pocket_druggability.min`/`max` stay populated for consumers that read them, and
-`_comparability` must say whether the range is **within one structure across the
-D sweep** (legitimate) or **pooled across structures** (not a measurement — do
-not build one).
+**`ensemble.druggability.min`/`max`/`fold_range` NO LONGER EXIST, and the
+sentence that used to stand here — "they stay populated for consumers that read
+them, and `_comparability` must say which range you built" — is VOID.** It kept a
+type error alive behind a label. Pooling a within-structure-normalised quantity
+across structures is not a weak measurement, it is the wrong operation: fpocket
+min-max normalises the score's dominant term over the *current structure's own*
+pocket list (`pocket.c:736-756`; the hardcoded constants at `:780` are the
+single-pocket branch and never fire at 4-324 pockets), so RORgt scores 0.827 at
+its site in 4NB6 and 0.009 at the same site in 6C1P purely on which other pockets
+co-existed in each file. A caveat beside the number did not stop the number being
+quoted; a real run of the TNF-alpha pair emitted `fold_range: 195.7` with two
+warning strings attached to it.
+
+Two keys replace them, and both are legal by construction:
+
+- **`ensemble.druggability.site_pocket_rank_by_structure`** — `{PDB@D: {fpocket,
+  prank, n_pockets, structure_pdb_id, selected_by, druggability_score}}`. This is
+  what fills the dossier's `tractability.site_pocket_rank`. The same object is
+  also emitted per structure per clustering value at
+  `by_clustering.<D>.site_pocket_rank`, which is where to read it when you are
+  already looking at one structure.
+- **`ensemble.druggability.druggability_range_within_structure_across_d`** — a
+  min/max/fold_range **within one structure across the D sweep**, which is the
+  only range the quantity supports.
+
+`ensemble.volume_a3.min`/`max`/`spread_pct` are unaffected and stay: volume is an
+absolute physical quantity and it does travel between structures.
 
 When the ensemble number came through mdpocket, the method block also carries
 **how the site was established** (grid definition, not residue matching), the

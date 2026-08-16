@@ -2366,7 +2366,143 @@ CRYPTIC_MAX_CORE_CA_RMSD_A = 5.0
 # A fit on a handful of atoms has a low RMSD because it has nothing to
 # disagree with. S1PR1's receptor was mapped onto a 25-residue peptide and
 # fitted on FIVE equivalent C-alpha; RMSD alone would never have caught it.
+#
+# THIS IS NOW A CEILING ON THE FLOOR, NOT THE FLOOR. See
+# `_min_fitted_ca_floor`: an absolute 20 was never exercised against a small
+# target — every pair in the regression carried 162-476 equivalent C-alpha and
+# 135-422 fitted — and moving the gated count from `n_equivalent_ca` to
+# `n_fitted_ca` took it closer to biting, because auto_trim's `min_fit_fraction`
+# is 0.5 and a 30-residue pair can present 15 fitted. A 30-residue peptide and a
+# single small domain are real cases in this set (TL1A's entries are 111-270
+# residues; interface partners run 25-63), so the floor scales with the smaller
+# of the two MAPPED CHAINS below 40 residues and is 20 at or above it.
 CRYPTIC_MIN_EQUIVALENT_CA = 20
+
+# Below `CRYPTIC_MIN_EQUIVALENT_CA` the floor becomes this fraction of the
+# SMALLER MAPPED CHAIN — not of `n_equivalent_ca`, which is the exploitable one:
+# S1PR1's bad mapping produced 5 equivalent positions onto a 25-residue peptide,
+# and scaling by that would have made 5 of 5 pass. Chain sizes are read from the
+# two coordinate files and cannot be narrowed by the fit.
+CRYPTIC_MIN_FITTED_CA_CHAIN_FRACTION = 0.5
+
+# And a hard bottom, whatever the chains are. PROPOSED, NOT CALIBRATED, on a
+# geometric argument rather than a measurement: three points determine a rigid
+# body exactly, so a fit on a handful of C-alpha reports an RMSD near zero by
+# construction and measures nothing. Eight positions is 24 coordinates against
+# six degrees of freedom.
+CRYPTIC_ABS_MIN_FITTED_CA = 8
+
+
+def _ca_counts_by_chain(path) -> dict[str, int]:
+    """{chain -> amino-acid C-alpha count} for a PDB **or mmCIF** file.
+
+    THROUGH gemmi, NOT BY COLUMN. The two paths the cryptic gate hands this are
+    the raw mmCIF entries (`cif_by_pid`, `donor["cif"]`), not the prepared PDB —
+    a fixed-column reader returns `{}` on them, the floor silently falls back to
+    the absolute 20, and the scaling this exists for never happens. Read with
+    the same library `cryptic_analysis._load_structure` uses so the chain names
+    match the `chain_mapping` they are looked up by.
+    """
+    import gemmi
+
+    out: dict[str, int] = {}
+    p = Path(path)
+    if not p.exists():
+        return out
+    try:
+        st = gemmi.read_structure(str(p))
+        st.setup_entities()
+        st.remove_waters()
+    except Exception:  # noqa: BLE001
+        return out
+    for ch in st[0]:
+        n = sum(
+            1 for res in ch
+            if res.find_atom("CA", "*") is not None
+            and (gemmi.find_tabulated_residue(res.name) or None)
+            and gemmi.find_tabulated_residue(res.name).is_amino_acid()
+        )
+        if n:
+            out[ch.name] = n
+    return out
+
+
+def _smaller_mapped_chain_ca(holo_path, apo_path, mapping: dict | None) -> int | None:
+    """C-alpha count of the SMALLER of the two chains that were superposed.
+
+    `chain_mapping` is {holo_chain: apo_chain}. Sums each side over the mapped
+    chains and returns the smaller total, so a multi-chain mapping is measured
+    as the two assemblies actually fitted. None when it cannot be established,
+    and None must fall back to the absolute floor rather than to no floor.
+    """
+    if not mapping:
+        return None
+    h_counts, a_counts = _ca_counts_by_chain(holo_path), _ca_counts_by_chain(apo_path)
+    if not h_counts or not a_counts:
+        return None
+    h = sum(h_counts.get(c, 0) for c in mapping)
+    a = sum(a_counts.get(c, 0) for c in mapping.values())
+    if not h or not a:
+        return None
+    return min(h, a)
+
+
+def _min_fitted_ca_floor(n_smaller_chain_ca: int | None) -> tuple[int, str]:
+    """How many fitted C-alpha this pair must carry. Returns (floor, basis).
+
+    A DEBT THAT WAS RECORDED AND IS NOW PAID. The count gate reads
+    `n_fitted_ca`, which is right — scoring the floor on `n_equivalent_ca` let a
+    narrowed fit clear every check while the pair sat 25.6 A out of frame — but
+    an ABSOLUTE floor of 20 on the fitted count refuses a legitimately small
+    target: 30 equivalent C-alpha through auto_trim's `min_fit_fraction` of 0.5
+    is 15 fitted, and 15 < 20. That is a valid comparison on a real case (a
+    30-residue peptide, a single small domain), refused by a threshold that has
+    never been exercised anywhere near itself.
+
+    So the floor is `min(20, max(8, 0.5 x smaller mapped chain))`:
+
+        smaller chain   floor   effect
+        >= 40           20      IDENTICAL to today. The whole regression set
+                                (162-476 equivalent, 135-422 fitted) is here, so
+                                this change cannot move a validated result.
+        30              15      a 30-residue pair at the trim limit now PASSES
+        25              12      S1PR1's CD69 mis-mapping still REFUSES at 5
+        <= 16           8       the hard bottom takes over; a fit this small is
+                                not a superposition whatever the chains are
+
+    Scaled on the CHAIN, never on `n_equivalent_ca`: the equivalent count is
+    itself a product of the mapping, and the S1PR1 failure was 5 equivalent onto
+    a 25-residue peptide, which a self-referential floor would have waved
+    through at 5 of 5.
+    """
+    if not n_smaller_chain_ca:
+        return CRYPTIC_MIN_EQUIVALENT_CA, (
+            f"absolute floor {CRYPTIC_MIN_EQUIVALENT_CA}: the mapped chains' "
+            "sizes could not be read, so the floor is not scaled"
+        )
+    scaled = round(CRYPTIC_MIN_FITTED_CA_CHAIN_FRACTION * n_smaller_chain_ca)
+    floor = min(CRYPTIC_MIN_EQUIVALENT_CA, max(CRYPTIC_ABS_MIN_FITTED_CA, scaled))
+    if floor == CRYPTIC_MIN_EQUIVALENT_CA:
+        basis = (
+            f"absolute floor {CRYPTIC_MIN_EQUIVALENT_CA}; the smaller mapped "
+            f"chain has {n_smaller_chain_ca} C-alpha, so the scaled floor "
+            f"({scaled}) does not bind"
+        )
+    elif floor == CRYPTIC_ABS_MIN_FITTED_CA:
+        basis = (
+            f"hard bottom {CRYPTIC_ABS_MIN_FITTED_CA}: the smaller mapped chain "
+            f"has only {n_smaller_chain_ca} C-alpha and "
+            f"{CRYPTIC_MIN_FITTED_CA_CHAIN_FRACTION:.0%} of it ({scaled}) is "
+            "below the point where a rigid-body fit is over-determined at all"
+        )
+    else:
+        basis = (
+            f"{CRYPTIC_MIN_FITTED_CA_CHAIN_FRACTION:.0%} of the smaller mapped "
+            f"chain ({n_smaller_chain_ca} C-alpha) = {floor}; the absolute "
+            f"{CRYPTIC_MIN_EQUIVALENT_CA} would refuse a legitimately small "
+            "target that auto_trim has fitted at its own 0.5 limit"
+        )
+    return floor, basis
 
 # Fraction of fitted positions allowed to name a different residue in the two
 # entries. The same S1PR1 fit carried 15 name mismatches out of 5 positions'
@@ -2758,11 +2894,20 @@ def _cryptic_block(
             f"{n_fitted}, with {sup.get('n_excluded_ca')} excluded); the fit "
             "describes a fragment, not the pair"
         )
-    if n_equiv is not None and n_equiv < CRYPTIC_MIN_EQUIVALENT_CA:
+    # THE FLOOR SCALES WITH THE SMALLER MAPPED CHAIN. An absolute 20 on the
+    # FITTED count refuses a legitimately small target — 30 equivalent C-alpha
+    # at auto_trim's own 0.5 limit is 15 fitted — and it has never been
+    # exercised against one. See `_min_fitted_ca_floor`; at 40 residues and
+    # above, which is the entire regression set, nothing changes.
+    n_smaller_chain = _smaller_mapped_chain_ca(
+        holo_path, apo_path, sup.get("chain_mapping")
+    )
+    ca_floor, ca_floor_basis = _min_fitted_ca_floor(n_smaller_chain)
+    if n_equiv is not None and n_equiv < ca_floor:
         gate_fails.append(
-            f"only {n_equiv} C-alpha were fitted "
-            f"({CRYPTIC_MIN_EQUIVALENT_CA} needed); this is a fit onto the "
-            "wrong chain, not a superposition"
+            f"only {n_equiv} C-alpha were fitted ({ca_floor} needed — "
+            f"{ca_floor_basis}); this is a fit onto the wrong chain, not a "
+            "superposition"
         )
     if n_overlap and n_mismatch / n_overlap > CRYPTIC_MAX_NAME_MISMATCH_FRACTION:
         gate_fails.append(
@@ -2824,22 +2969,41 @@ def _cryptic_block(
             "n_excluded_ca": sup.get("n_excluded_ca"),
             "n_equivalent_ca": n_equivalent,
             "n_ca_gated": n_equiv,
-            "min_equivalent_ca": CRYPTIC_MIN_EQUIVALENT_CA,
+            "n_smaller_mapped_chain_ca": n_smaller_chain,
+            "min_fitted_ca": ca_floor,
+            "min_fitted_ca_basis": ca_floor_basis,
+            "min_fitted_ca_ceiling": CRYPTIC_MIN_EQUIVALENT_CA,
+            "min_fitted_ca_chain_fraction": CRYPTIC_MIN_FITTED_CA_CHAIN_FRACTION,
+            "min_fitted_ca_hard_bottom": CRYPTIC_ABS_MIN_FITTED_CA,
+            # Back-compatible alias. The key used to name the constant; it now
+            # names the floor that was actually applied, which is the number a
+            # reader of a refusal needs.
+            "min_equivalent_ca": ca_floor,
             "min_equivalent_ca_status": (
-                "PROPOSED, NOT CALIBRATED, AND NEVER EXERCISED AGAINST A SMALL "
-                "TARGET. Every pair in the regression carried 162 to 476 "
-                "equivalent C-alpha, so this floor has only ever been tested "
-                "far away from itself. On a genuine peptide target or a single "
-                "small domain it would refuse a VALID comparison, and nothing "
-                "measured says where it should sit. Treat a refusal that cites "
-                "only this line, on a target that is legitimately small, as an "
-                "untested threshold rather than a finding. NOTE ALSO THAT THE "
-                "GATED COUNT IS NOW n_fitted_ca, WHICH IS SMALLER: auto_trim's "
-                "min_fit_fraction is 0.5, so a pair with 30 equivalent C-alpha "
-                "can present as few as 15 fitted and refuse where it used to "
-                "pass. On the regression that changes nothing (the smallest "
-                "fitted count measured is 135), but it moves the floor closer "
-                "to a legitimately small target, not further away."
+                "SCALED, NOT ABSOLUTE, AS OF THIS VERSION. The floor is "
+                "min(20, max(8, 0.5 x the smaller MAPPED CHAIN's C-alpha)). It "
+                "was an absolute 20 and it was never exercised against a small "
+                "target: every pair in the regression carried 162-476 "
+                "equivalent C-alpha and 135-422 fitted, so the threshold had "
+                "only ever been tested far away from itself, and moving the "
+                "gated count to n_fitted_ca (correctly — a narrowed fit could "
+                "otherwise turn every check green while the pair sat 25.6 A out "
+                "of frame) took it CLOSER to biting, since auto_trim's "
+                "min_fit_fraction of 0.5 lets a 30-residue pair present 15 "
+                "fitted. A 30-residue peptide and a single small domain are "
+                "real cases here — TL1A's entries run 111-270 residues and "
+                "interface partners 25-63 — so refusing them was wrong. At 40 "
+                "residues and above the floor is still exactly 20 and nothing "
+                "in the regression moves. Scaling is on the CHAIN and never on "
+                "n_equivalent_ca, because the equivalent count is a product of "
+                "the mapping: S1PR1's receptor mapped onto a 25-residue peptide "
+                "gave FIVE equivalent positions, and a self-referential floor "
+                "would have passed 5 of 5. Scaled on the chain it needs 13 and "
+                "still refuses. The 0.5 fraction and the hard bottom of 8 are "
+                "PROPOSED, NOT CALIBRATED; the bottom rests on a geometric "
+                "argument (three points determine a rigid body exactly, so a "
+                "handful of C-alpha reports a near-zero RMSD by construction), "
+                "not on a measurement."
             ),
             "n_residue_name_mismatches": n_mismatch,
             "name_mismatch_denominator": n_overlap,
@@ -5423,6 +5587,27 @@ def pocket_scan(
                     "_why": tgt_info["reason"],
                 }
                 continue
+            # ---- THE POLYMER LIGAND, AND THE PAIRED MEASUREMENT ------------
+            # What the site is anchored on, for the control's pocket matching:
+            # the caller's code, else this entry's own drug-like ligand, else —
+            # and this is the 8QFZ case — the covalent constituent of the
+            # polymer ligand, which is no longer `druglike` and therefore no
+            # longer anchors anything by itself.
+            _dl = [lig for lig in ligs if lig["druglike"]]
+            _anchor = (
+                next((lig["comp_id"] for lig in ligs
+                      if ligand_codes and lig["comp_id"] in ligand_codes), None)
+                or (_dl[0]["comp_id"] if _dl else None)
+                or next(iter(holo_call.get("polymer_conjugates") or []), None)
+            )
+            polymer_control = _polymer_ligand_control(
+                st, work, pid, want, holo_call, ctx, tgt_chains,
+                tgt_info["verified"], want, renamed, _anchor,
+            )
+            lig_chains = (polymer_control or {}).get("polymer_ligand_chains") or []
+            prepped, used_chains, dropped_chains = _prep(
+                st, work, pid, want, drop_chains=lig_chains
+            )
             homo = _homo_oligomer(st, tgt_chains)
             # THE FILE'S OWN CHAIN COUNT, beside the target's. The guard runs
             # over target chains, which is right, but reporting only that count
@@ -5724,6 +5909,26 @@ def pocket_scan(
                     # 651.0 — the withdrawn claim reproducing itself from the
                     # identical defect. The guard is load-bearing where it fires.
                     basis = "site_signature_unreliable_homooligomer"
+                elif signature_foreign_dropped and (
+                    signature_foreign_dropped >= 0.33 * signature_n_residues_in
+                    or len(site_signature) < 6
+                ):
+                    # THE SIGNATURE WAS NEVER THIS PROTEIN'S. 8QFZ: 13 residues
+                    # in, 9 of them the bicyclic peptide's, 4 left. A 4-number
+                    # signature matched chain-agnostically will hit something in
+                    # every structure and that hit means nothing. Reported per
+                    # structure, never pooled, exactly like the homo-oligomer
+                    # case — and it counts a DIFFERENT failure: `collapsed_by`
+                    # counts numbers lost to IDENTICAL protomers, this counts
+                    # numbers imported from a DIFFERENT polymer, and only the
+                    # first was ever guarded.
+                    basis = "site_signature_unreliable_foreign_polymer"
+            elif signature_foreign_dropped:
+                # Every residue of the donor's contact shell belonged to another
+                # polymer, so there is no signature left at all. Contributing
+                # nothing is the honest outcome; the alternative branch below
+                # would contribute "the most druggable pocket anywhere".
+                best, basis = None, "site_signature_unreliable_foreign_polymer"
             else:
                 # "The most druggable pocket ANYWHERE" — now at least anywhere
                 # ON THE TARGET. This branch is the one that produced every
@@ -5789,6 +5994,36 @@ def pocket_scan(
             anchored = [p for p in returned if p.get("anchor_labels")]
             per_d[str(d)] = {
                 "n_pockets": len(pockets),
+                # THE REPORTABLE FORM OF DRUGGABILITY, in one object, at the
+                # level a consumer reads. All four parts already existed and
+                # none of them were together: the fpocket rank was nested inside
+                # `site_pocket`, the PRANK rank beside it, the count here, and
+                # the PDB ID was only the enclosing dict's KEY. The dossier
+                # template's `tractability.site_pocket_rank` therefore had no
+                # single source to read, which is the same shape of gap that let
+                # `ligand_site_jaccard` be computed, used and thrown away. The
+                # value may travel INSIDE this object; it may not travel out of
+                # it into a cross-structure comparison.
+                "site_pocket_rank": {
+                    "fpocket": best["rank"] if best else None,
+                    "prank": best.get("prank_rank") if best else None,
+                    "n_pockets": len(pockets),
+                    "structure_pdb_id": pid,
+                    "clustering_d": d,
+                    "druggability_score": (
+                        best.get("druggability_score") if best else None
+                    ),
+                    "_why": (
+                        "'rank 1 of 30 in 6OIM' is the claim. fpocket rank and "
+                        "PRANK rank are two WITHIN-STRUCTURE orderings on the "
+                        "same footing (PRANK at n=70 ligand-anchored promotes "
+                        "the true site in 79% and demotes in 1%, the one "
+                        "demotion being 6OIM at D=1.6); report both, replace "
+                        "neither. The druggability VALUE beside them is "
+                        "normalised over this file's own pocket list and must "
+                        "not be compared to another structure's."
+                    ),
+                },
                 # ---- THE DISTRIBUTION IS THE PRIMARY OUTPUT ----------------
                 # One compact row per returned pocket. Read this before
                 # `site_pocket`: a single elected number can silently be a
@@ -6035,6 +6270,12 @@ def pocket_scan(
                 src_marker.read_text() if src_marker.exists() else "unknown"
             ),
             "chains_used": used_chains,
+            # WHAT CAME OUT OF THE fpocket INPUT AND WHY. Rule 4 says strip
+            # every ligand before scoring; `het_flag == 'A'` kept every polymer,
+            # so a peptide, nanobody or designed mini-binder was never stripped
+            # and lined the pocket it was being scored in.
+            "chains_dropped_as_polymer_ligand": dropped_chains,
+            "polymer_ligand_control": polymer_control,
             "missing_residues": missing_res,
             "ligands": ligs,
             "cofactors_present": cofactors,
@@ -6752,9 +6993,14 @@ def pocket_scan(
             }
 
     # Ensemble spread — volume is the reproducible quantity, druggability is not.
-    vols, drugs = [], []
+    vols: list[float] = []
     jaccards: dict[str, float] = {}
     n_ligand_confirmed, n_pooled, n_signature_unreliable = 0, 0, 0
+    n_signature_foreign = 0
+    polymer_ligand_controls = {
+        pid: r["polymer_ligand_control"] for pid, r in results.items()
+        if r.get("polymer_ligand_control")
+    }
     prank_status_counts: dict[str, int] = {}
     # {clustering value: [(pdb_id, centroid, radius), ...]}
     centroids: dict[str, list[tuple[str, list[float], float | None]]] = {}
@@ -6783,10 +7029,19 @@ def pocket_scan(
                     == "site_signature_unreliable_homooligomer"
                 ):
                     n_signature_unreliable += 1
+                elif (
+                    d["site_pocket_selected_by"]
+                    == "site_signature_unreliable_foreign_polymer"
+                ):
+                    n_signature_foreign += 1
                 if sp.get("volume"):
                     vols.append(sp["volume"])
-                if sp.get("druggability_score") is not None:
-                    drugs.append(sp["druggability_score"])
+                # AND NOT THE DRUGGABILITY SCORE. There used to be a `drugs`
+                # list here, accumulated in exactly the same shape as `vols`
+                # one line apart, and that visual symmetry is the whole reason
+                # the type error looked like a measurement. Volume is absolute
+                # and pools; druggability is normalised inside each file and
+                # does not. See ensemble.druggability._removed_pooled_min_max.
 
     # THE CONTROL. A pocket-matching step is a measurement and needs one: two
     # pockets sharing residue numbers can be 12 A apart and no overlap fraction
@@ -6862,6 +7117,16 @@ def pocket_scan(
             "site_pockets_pooled": n_pooled,
             "site_pockets_ligand_confirmed": n_ligand_confirmed,
             "site_pockets_signature_unreliable_homooligomer": n_signature_unreliable,
+            "site_pockets_signature_unreliable_foreign_polymer": n_signature_foreign,
+            # THE PAIR, PER STRUCTURE. Never one number: a site that exists only
+            # while its polymer ligand is present is an induced-fit / occluded
+            # site, not an absent one, and `induced_fit_signal` true must force
+            # `cryptic_pocket_risk: high`. See `_polymer_ligand_control`.
+            "polymer_ligand_control": polymer_ligand_controls,
+            "induced_fit_signal_structures": sorted(
+                pid for pid, c in polymer_ligand_controls.items()
+                if c.get("induced_fit_signal")
+            ),
             # The jaccard VALUES, not just the count of structures selected by
             # them. `tractability.ligand_site_jaccard` in the dossier had no
             # source to read: the number was computed per pocket, used to pick
@@ -6888,6 +7153,19 @@ def pocket_scan(
                     if signature_n_residues_in
                     else None
                 ),
+                "foreign_polymer_residues_dropped": signature_foreign_dropped,
+                "foreign_polymer_residues": signature_foreign_residues,
+                "_why_foreign": (
+                    "collapsed_by counts numbers lost to IDENTICAL protomers. "
+                    "This counts numbers imported from a DIFFERENT polymer. "
+                    "They are different failures and only the first one was "
+                    "guarded. 8QFZ:LFI reported collapsed_by 0 while 9 of its "
+                    "13 signature residues belonged to a bicyclic peptide, "
+                    "numbered from 1, whose numbers 11-22 also exist on TSLP "
+                    "and mean something else. Downstream that produced a "
+                    "max_radius_difference_a of 33.52 A and per-structure site "
+                    "ranks of 5/7/22/1/36."
+                ),
                 "donor_homo_oligomer": signature_donor_homo,
                 "_warning": (
                     "The signature is a set of residue NUMBERS with chain "
@@ -6895,9 +7173,10 @@ def pocket_scan(
                     "triplicate every number, so a C3-symmetric site cannot be "
                     "resolved in principle and any pocket carrying those "
                     "numbers matches. Structures whose basis is "
-                    "site_signature_unreliable_homooligomer must not be pooled "
-                    "as one site; check site_centroid_control before quoting a "
-                    "spread over them."
+                    "site_signature_unreliable_homooligomer or "
+                    "site_signature_unreliable_foreign_polymer must not be "
+                    "pooled as one site; check site_centroid_control before "
+                    "quoting a spread over them."
                 ),
             },
             "prank_status_counts": prank_status_counts,
@@ -6972,12 +7251,86 @@ def pocket_scan(
                 ),
             },
             "druggability": {
-                "min": min(drugs) if drugs else None,
-                "max": max(drugs) if drugs else None,
-                "fold_range": (
-                    round(max(drugs) / min(drugs), 1)
-                    if drugs and min(drugs) > 0
-                    else None
+                # min / max / fold_range ARE GONE. They pooled a
+                # WITHIN-STRUCTURE-NORMALISED quantity across structures, which
+                # is a type error and not a weak measurement — see
+                # `_removed_pooled_min_max`. What replaces them is the same
+                # information in the only two forms the quantity supports: the
+                # rank within each structure, and the range across the D SWEEP
+                # WITHIN one structure.
+                "_removed_pooled_min_max": (
+                    "REMOVED, and deliberately not replaced by nulls. `min`, "
+                    "`max` and `fold_range` pooled fpocket's druggability score "
+                    "across structures AND across clustering values. That score "
+                    "is normalised INSIDE each file: pocket.c:736-756 min-max "
+                    "normalises its dominant term, mean_loc_hyd_dens_norm, over "
+                    "the CURRENT STRUCTURE'S OWN pocket list whenever "
+                    "n_pockets > 1, and the hardcoded (mlhd-8.23)/(24.20-8.23) "
+                    "at pocket.c:780 is the single-pocket branch that never "
+                    "fires here (4-324 pockets per structure); pscoring.c:325 "
+                    "feeds it to the logistic. So the number answers 'how does "
+                    "this pocket rank against the others in this file' and "
+                    "nothing else, and pooling it across files is a TYPE ERROR "
+                    "rather than a noisy measurement. RORgt proves it on one "
+                    "protein at one site: 4NB6's site MLHD of 30.722 IS that "
+                    "structure's maximum, normalises to 1.0 and scores 0.827, "
+                    "while 6C1P's 19.0 against a maximum of 52.767 normalises "
+                    "to 0.36 and scores 0.009 — a 90-fold gap from which other "
+                    "pockets happened to co-exist in the file. This is also the "
+                    "operation that manufactured the withdrawn 651-fold "
+                    "TNF-alpha spread, with no matcher error required, and a "
+                    "run of this very ensemble emitted fold_range 195.7 while "
+                    "the two _warning strings beside it argued against it. A "
+                    "caveat next to a number does not stop the number being "
+                    "quoted; removing the number does. Read "
+                    "`site_pocket_rank_by_structure` (rank + n_pockets + PDB "
+                    "ID) and, if you need a range, "
+                    "`druggability_range_within_structure_across_d`, which is "
+                    "the one range that is legitimate. VOLUME is unaffected and "
+                    "is still pooled above: it is an absolute physical quantity "
+                    "and it does travel between structures."
+                ),
+                # THE TWO LEGITIMATE FORMS.
+                "site_pocket_rank_by_structure": {
+                    f"{pid}@D{dkey}": {
+                        "fpocket": (dd.get("site_pocket") or {}).get("rank"),
+                        "prank": (dd.get("site_pocket") or {}).get("prank_rank"),
+                        "n_pockets": dd.get("n_pockets"),
+                        "structure_pdb_id": pid,
+                        "selected_by": dd.get("site_pocket_selected_by"),
+                        "druggability_score": (
+                            (dd.get("site_pocket") or {}).get("druggability_score")
+                        ),
+                    }
+                    for pid, rr in results.items()
+                    for dkey, dd in (rr.get("by_clustering") or {}).items()
+                    if dd.get("site_pocket")
+                },
+                "druggability_range_within_structure_across_d": {
+                    pid: {
+                        "min": min(vv), "max": max(vv),
+                        "fold_range": (
+                            round(max(vv) / min(vv), 1) if min(vv) > 0 else None
+                        ),
+                        "n_clustering_values": len(vv),
+                    }
+                    for pid, vv in (
+                        (pid, [
+                            (dd.get("site_pocket") or {}).get("druggability_score")
+                            for dd in (rr.get("by_clustering") or {}).values()
+                            if (dd.get("site_pocket") or {}).get(
+                                "druggability_score") is not None
+                        ])
+                        for pid, rr in results.items()
+                    )
+                    if len(vv) > 1
+                },
+                "_why_rank": (
+                    "'rank 1 of 30 in 6OIM' is the claim. The value may sit "
+                    "beside the rank; the rank is what is asserted. fpocket's "
+                    "own rank and PRANK's are TWO WITHIN-STRUCTURE ORDERINGS on "
+                    "the same footing — report both, replace neither, and "
+                    "report a disagreement as a disagreement."
                 ),
                 "_warning": (
                     "Druggability is NOT reproducible across structures or "
@@ -6994,9 +7347,16 @@ def pocket_scan(
                     "~1pp as a difference between sites. The improvement is "
                     "real; the third digit is not. NOTE the CV above was "
                     "measured on site_from_density, which is not the ligand "
-                    "site; see mdpocket.sites. Report druggability as a range; "
-                    "never drive a verdict from a single value. Volume is the "
-                    "more reliable number."
+                    "site; see mdpocket.sites. REPORT DRUGGABILITY AS A RANK "
+                    "AMONG THAT STRUCTURE'S POCKETS, WITH THE POCKET COUNT AND "
+                    "THE PDB ID — an earlier version of this line said 'report "
+                    "druggability as a range', which is void: a range pooled "
+                    "across structures is the type error described in "
+                    "_removed_pooled_min_max, and only the D-sweep range within "
+                    "ONE structure is a range at all. Never drive a verdict "
+                    "from the value. Volume is the more reliable number and the "
+                    "only one of the two that may be compared across "
+                    "structures."
                 ),
                 "_retracted": (
                     "An earlier version of this warning carried a large "
