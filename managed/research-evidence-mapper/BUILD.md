@@ -1,4 +1,4 @@
-# research-evidence-mapper — build plan
+# Research Evidence Mapper — build plan
 
 One deployed Managed Agent. Question in, knowledge graph out, state kept between
 rounds. Contract is `SCHEMA.md`.

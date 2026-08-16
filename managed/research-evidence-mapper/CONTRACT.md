@@ -1,4 +1,4 @@
-# research-evidence-mapper — deliverables contract
+# Research Evidence Mapper — deliverables contract
 
 Nothing gets built until this is agreed. Every row below is a thing someone can
 pick up and own.

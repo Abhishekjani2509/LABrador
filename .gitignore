@@ -1,9 +1,15 @@
 node_modules/
 .env
+.claude/settings.local.json
+# Claude Code agent worktrees (nested biome roots break `bun run check`)
+.claude/worktrees/
 .eve/
 .output/
 *.log
 .DS_Store
+
+__pycache__/
+*.pyc
 
 # Agents you build stay untracked by default: fixtures often carry real
 # customer data, and manifest.json carries live deployment IDs. Both sides of
@@ -13,5 +19,8 @@ node_modules/
 # delete it.
 managed/*
 !managed/.gitkeep
+# trial-recruitment-forecaster is deliberately visible: fixtures are public CT.gov
+# data and there is no manifest.json with live deployment IDs yet.
+!managed/trial-recruitment-forecaster
 agent/tools/*
 !agent/tools/workflow.ts

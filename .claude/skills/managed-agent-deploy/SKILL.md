@@ -121,7 +121,7 @@ is authored where eve looks.
 | `managed/<name>/manifest.json`                | Schema below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `managed/<name>/tools.ts`                     | Custom tool handlers (omit when there are none). Template below. When the prototype has runnable local scripts, handlers **shell out to those exact scripts** (repo-root-relative paths) — never reimplement their logic in TypeScript; a reimplementation is a second, untested copy. And when the deployed sandbox lacks an affordance the skill's prose assumes (reading a local file, running a local script, hitting the founder's network), **add a thin custom tool that provides it** and bridge the skill's language to that tool in `CLAUDE.md` — don't leave the gap for the smoke test to trip on. |
 | `managed/<name>/acl.ts`                       | The Phase 3 access answer. Template below; the wrapper imports it and `lib/access.ts` enforces it once auth is wired.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `agent/tools/<name>.ts`                       | eve tool wrapper — this file's name is the router-facing tool name. Template below; substitute the name, and include the `tools` import and its `runTask` argument **only when the agent has custom tools** — omit both otherwise (a bare `tools` reference with no import fails typecheck).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `agent/tools/<name>.ts`                       | eve tool wrapper — this file's name is the router-facing tool name. Template below; substitute the name, and include the `tools` import and its `streamTask` argument **only when the agent has custom tools** — omit both otherwise (a bare `tools` reference with no import fails typecheck).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 Then append one dispatch entry to `agent/instructions.md` under
 `## Specialists`: tool name, one line on when to dispatch to it.
@@ -259,12 +259,19 @@ the per-caller visibility gating in `lib/access.ts` applies, driven by this
 agent's own `acl.ts`. Keep `execute` inline inside `defineTool`;
 `execute: importedFn` breaks on durable replay.
 
+`execute` is an async *generator*: eve publishes every non-final `yield` as an
+`action.partial` stream event (last-write-wins snapshot, visible to channels
+and clients but never to the model), and only the final yield becomes the tool
+result. `streamTask` yields `TaskProgress` snapshots as the managed agent
+works and returns the `RunTaskResult`, so the wrapper forwards progress and
+finishes by yielding the final text.
+
 ```ts
 import { defineDynamic, defineTool } from "eve/tools";
 import { defineState } from "eve/context";
 import { allowed } from "@/lib/access.ts";
 import { acl } from "@/managed/<name>/acl.ts";
-import { loadManagedAgent, runTask } from "@/lib/claude-managed-agent.ts";
+import { loadManagedAgent, streamTask } from "@/lib/claude-managed-agent.ts";
 // Only when the agent has custom tools — static import so eve's bundler sees it:
 // import { tools } from "@/managed/<name>/tools.ts";
 
@@ -277,7 +284,7 @@ export default defineDynamic({
         ? defineTool({
             description:
               "<agent description>. Provide a complete, self-contained task; the " +
-              "specialist runs remotely and returns its final answer.",
+              "specialist runs remotely, streams progress, and returns its final answer.",
             inputSchema: {
               type: "object",
               properties: {
@@ -285,15 +292,27 @@ export default defineDynamic({
               },
               required: ["task"],
             },
-            async execute(input) {
+            async *execute(input) {
               // skipToolImport: tools come from the static import above (or none);
               // dynamic import() inside eve's bundled runtime is not reliable.
               const { manifest, rubric } = await loadManagedAgent("<name>", { skipToolImport: true });
               const previous = manifest.session_policy === "reuse" ? sessionIdState.get() : undefined;
               // `tools` only for tool-bearing agents (the static import above); omit otherwise.
-              const result = await runTask({ manifest, tools, rubric, task: String(input.task), sessionId: previous });
+              const run = streamTask({ manifest, tools, rubric, task: String(input.task), sessionId: previous });
+              let result;
+              for (;;) {
+                // biome-ignore lint/performance/noAwaitInLoops: draining a generator is inherently sequential
+                const next = await run.next();
+                if (next.done) {
+                  result = next.value;
+                  break;
+                }
+                // Preliminary snapshot: replaced by each later yield, never sent to the model.
+                yield { status: "running", ...next.value };
+              }
               if (manifest.session_policy === "reuse") sessionIdState.update(() => result.sessionId);
-              return result.text;
+              // Final yield = the tool result the model sees.
+              yield result.text;
             },
           })
         : null,
