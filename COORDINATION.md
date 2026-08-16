@@ -69,8 +69,8 @@ are dead — do not create files under them.
   tractability) and nominates UniProt targets from it; handles `no_effect`,
   `hedged_only`, failed-graph status, and gene-vs-protein kinds.
 
-**Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-16 early)*
-- **Live Managed Agent**: `agent_015feTqKz3Bmtec2RaWaE2sW` v3, three skills
+**Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-16, agent v7)*
+- **Live Managed Agent**: `agent_015feTqKz3Bmtec2RaWaE2sW` v7, three skills
   uploaded, memory store `memstore_01NGZC8ti7PMqpqzUKcxuiaY`, Paperclip MCP
   attached as an `mcp_toolset` (`always_allow`), credential in vault
   `vlt_011Ce5SbT8uAxY9LgM3eTZpS`. Second deployed agent in the repo.
@@ -98,6 +98,32 @@ are dead — do not create files under them.
   off a hub. Ranking now weights basis, paper-independence, a hub penalty and
   multi-route implication → 12 distinct scores, top gap becomes a real
   missing edge (PF-06650833 vs tofacitinib, never directly compared).
+- **All four ask types verified in production.** `new_question`, `test_gap`,
+  `resolve_link` and `expand_node` have each run against the deployed agent.
+  `expand_node` sweeps the node's name and every alias as separate queries.
+- **Figure path works, and the gate was the whole cause.** A/B on an identical
+  `resolve_link` request: v3 made 21 MCP calls and zero `ask-image`; v4 read a
+  figure and produced a `section: "figure_caption"` finding — *"Fig. 2
+  Ad-shIRAK4 alleviated the degree of synovitis in the osteoarthritis rabbit
+  model"* — carrying the condition data `explain_disagreement` compares. The
+  fix was framing: a permission ("only, and only when…") reads as a reason not
+  to; an expectation with a budget reads as an instruction.
+- **Entity merging on UniProt accession**, with a coalesce pass that repairs
+  duplicates ALREADY stored, not just arriving ones. Exact, auditable,
+  species-safe (Q9NWZ3 vs Q8R4K2 are different keys), and it refuses to merge
+  on a contested identity. A similarity/vector approach was considered and
+  rejected: it fails in both directions here — KIC-0101 and PF-06650833 are
+  maximally dissimilar strings meaning the same thing, IL-6 and IL-6R are
+  near-identical strings meaning different molecules.
+- **Every intervention links to its target — verified, 0 orphans.** 7 nodes / 2
+  edges before, 8 nodes / 8 edges after. Compounds stay distinct (for "what
+  inhibits IRAK4?", eight compounds IS the answer) while evidence pools along
+  the mechanism path. Accession merging could not have done this: small
+  molecules have no accession.
+- **`assemble.py` has a CLI and a copyable `example-round.json`**, so a round
+  is one command instead of a hand-authored driver. Confirmed materialized in
+  the sandbox and `cat`-ed by the agent. Call ratio moved from 16 MCP / 41
+  local to 42 MCP / 36 local.
 - **Fixtures written** (BUILD.md step 1) — three corpus-validated questions,
   each grading something specific rather than demonstrating success:
   EGFR/TKI (`deep`, dense consensus; sets traps for text-only sponsorship
@@ -194,72 +220,31 @@ are dead — do not create files under them.
 
 **Soliman**
 
-*Done items moved to §3 per §7.6 — this list is open work only.*
+*§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
-- [ ] **`expand_node` has never executed** — the last unexercised ask type.
-- [x] **Figure path fires, and the gate was the whole cause.** A/B on an
-      identical `resolve_link` request, only the gate changed: v3 made 21 MCP
-      calls and zero `ask-image`; v4 read a figure and produced a
-      `section: "figure_caption"` finding with a verbatim quote —
-      *"Fig. 2 Ad-shIRAK4 alleviated the degree of synovitis in the
-      osteoarthritis rabbit model"* — carrying `where: osteoarthritis rabbit
-      model synovium`, which is exactly the condition data
-      `explain_disagreement` compares. `coverage.figures_read` now reports it.
-      The fix was framing: "read figures on X only, and only for a paper
-      that…" reads as a reason not to; "reading figures is expected, with a
-      budget of 6 per round" reads as an instruction.
-- [x] **`resolve_link` did not move its target — root cause fixed at both ends.**
-      The graph had FOUR nodes for one concept (adenoviral knockdown, KIC-0101,
-      PF-06650833, kinase-deficient mice), so new evidence always arrived under
-      a different `from` node and the target could not move by construction. It
-      also understated confidence everywhere, since scoring is per link.
-      Prevention: nodes are the intervention class, reagents go in `where`.
-      Repair: `resolve_entities` now merges on UniProt accession first, and a
-      new coalesce pass collapses duplicates ALREADY in the graph, returning an
-      id remap so findings and links follow.
-      Rejected along the way: a similarity/vector-DB merge. It fails in both
-      directions here — KIC-0101 and PF-06650833 are maximally dissimilar as
-      strings while being the same concept, and IL-6 vs IL-6R are nearly
-      identical strings while being different molecules. Accessions are exact,
-      auditable and species-safe (Q9NWZ3 vs Q8R4K2 are different keys).
-      Two pre-existing defects fell out of the testing: the module's OWN
-      docstring example was false (`normalize_name` gave "K-Ras" -> `k ra` and
-      "KRAS" -> `kra`, which never matched), and de-pluralization was eating
-      the trailing letter of gene symbols. Both fixed with a compact-name index
-      and a symbol guard.
 - [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
       the MCP; which header it accepts for a **long-lived API key** is still
       untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth
-      only). Credential rotation is a one-call vault update, so this is not
-      blocking — but the deployed agent's searches stop whenever the token
-      behind the vault entry lapses.
-- [x] **Interventions link to their target — verified, 0 orphans.** Before
-      (v6): 7 intervention nodes, 2 with a target edge, 5 floating. After (v7):
-      8 nodes, 8 edges, `coverage.interventions_without_target: []`. Every
-      compound now reaches IRAK4, so evidence pools along the mechanism path
-      while the compounds stay distinct — the graph answers "what inhibits
-      IRAK4?" with eight compounds AND lets resolve_link on one reach the
-      others' evidence. Collapsing into a class node would have destroyed the
-      first to buy the second.
-      Accession merging alone could not have done this: small molecules have no
-      UniProt accession, so it structurally could not touch the nodes that were
-      fragmented. It fixed proteins, which were not the problem.
-- [ ] **`how` verb drift, for the §6 enum discussion.** Seven of the eight
-      target edges came back as `decreases` and only one as `inhibits`. "KT-474
-      decreases IRAK4" is semantically off — these inhibit activity, not
-      abundance. It does not break pooling, since the edge exists either way,
-      but it is concrete evidence for the `how` enum already on the ratification
-      agenda (§6 item 6). Raising there rather than fixing unilaterally, since
-      `how` is shared vocabulary.
-- [ ] **The missing-tool liveness path has only ever been exercised by
-      accident** — twice, when the vault token lapsed and the platform exposed
-      no Paperclip tool at all. The rule now covers it (stop, report, do not go
-      hunting for a local CLI), but it deserves a deliberate test before anyone
-      relies on it.
-- [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node —
+      only). Rotation is a one-call vault update so it is not blocking, but the
+      deployed agent stops searching whenever the token behind the vault entry
+      lapses — observed twice.
+- [ ] **`how` verb drift, for the §6 enum discussion.** Seven of eight
+      intervention→target edges came back as `decreases`, one as `inhibits`.
+      "KT-474 decreases IRAK4" is semantically off — these inhibit activity,
+      not abundance. Pooling is unaffected, but it is concrete evidence for the
+      `how` enum already on the ratification agenda. Raising there rather than
+      changing shared vocabulary unilaterally.
+- [ ] **The missing-tool liveness path has only ever fired by accident** —
+      twice, when the vault token lapsed and the platform exposed no Paperclip
+      tool at all, and the agent went hunting for a local CLI. The rule now
+      covers it (stop, report, do not search the filesystem), but it deserves a
+      deliberate test before anyone relies on it.
+- [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
+      The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
+      `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
+      and its `supported_by` / `contested_by` / `rests_on_gap` wiring, which is
       a contract change against a LIVE consumer (Rafal's `graph-intake` already
-      reads mapper graphs), so it needs his sign-off rather than a unilateral
-      schema edit. See §5.
+      reads mapper graphs) and needs his sign-off. See §5.
 
 **Moamen**
 - [ ] Nothing owed. Optional high-leverage favor: add `clinicaltrials.gov`
