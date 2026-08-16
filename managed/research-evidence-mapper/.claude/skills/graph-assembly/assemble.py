@@ -612,8 +612,9 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
     papers, pmap = dedupe_papers(new_papers or [], prior.get("papers") or [])
     things, tmap = resolve_entities(new_things or [], prior.get("things") or [])
 
-    kept, discarded = [], 0
+    kept, discarded, duplicates = [], 0, 0
     src = {p.get("id"): p for p in papers}
+    seen_content, seen_ids = {}, set()
     for f in list(prior.get("findings") or []) + list(new_findings or []):
         f = dict(f)
         f["paper"] = pmap.get(f.get("paper"), f.get("paper"))
@@ -624,6 +625,31 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
         for side in ("from", "to"):
             if f.get(side) in tmap:
                 f[side] = tmap[f[side]]
+
+        # Dedupe by CONTENT, not by id. A round that is retried -- after a
+        # timeout, a dropped stream, a re-run -- re-extracts the same sentences
+        # from the same papers. Appending them again would double every
+        # affected link's yes/no counts, which inflates `agreement` and
+        # `independence` and quietly corrupts confidence. The prior copy wins so
+        # ids and round numbers stay stable.
+        key = (
+            f.get("paper"), f.get("from"), f.get("how"), f.get("to"),
+            f.get("says"), _fold(f.get("quote") or ""),
+        )
+        if key in seen_content:
+            duplicates += 1
+            continue
+        # An id collision with DIFFERENT content is a different problem: two
+        # rows sharing an id would break "every id resolves". Rename the newcomer.
+        fid = f.get("id")
+        if fid in seen_ids:
+            n = 1
+            while "%s_%d" % (fid, n) in seen_ids:
+                n += 1
+            fid = "%s_%d" % (fid, n)
+            f["id"] = fid
+        seen_ids.add(fid)
+        seen_content[key] = fid
         kept.append(f)
     kept.sort(key=lambda f: (str(f.get("from")), str(f.get("to")), str(f.get("paper")), str(f.get("quote"))[:80]))
 
@@ -667,6 +693,8 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
 
     cov = dict(coverage or {})
     cov["no_quote_discarded"] = cov.get("no_quote_discarded", 0) + discarded
+    if duplicates:
+        cov["duplicates_dropped"] = cov.get("duplicates_dropped", 0) + duplicates
 
     rounds = list(prior.get("rounds") or [])
     rounds.append({
