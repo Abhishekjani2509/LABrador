@@ -122,8 +122,14 @@ MACROCYCLE_RING_SIZE = 12
 
 #: Fraction of heavy atoms belonging to the peptide backbone. Guards the
 #: residue count against a small molecule that happens to string amides
-#: together. IL-17C peptides sit at 0.42-0.55; small molecules with 4+ amide
+#: together. IL-17C peptides sit at 0.41-0.51; small molecules with 4+ amide
 #: linkages sit far below.
+#:
+#: Glycopeptides are the documented exception and are handled separately, not
+#: by lowering this: VANCOMYCIN sits at 0.248 and ORITAVANCIN at 0.20 because
+#: the appended sugars dilute the backbone by construction. Tuning the floor
+#: to admit them would be fitting to two points; the glycopeptide rule below
+#: keys on the sugar instead, which is the actual cause.
 MIN_PEPTIDE_BACKBONE_FRACTION = 0.25
 
 #: Small-molecule sanity bounds. A structure outside these is not called a
@@ -282,7 +288,16 @@ def classify_smiles(smiles: str) -> Verdict:
 
     # --- polymer of amino acids -------------------------------------------
     links = max(f["alpha_residue_links"], f["beta_residue_links"])
-    is_peptide = (
+
+    # Glycopeptide: an amino-acid backbone carrying glycosidically-attached
+    # sugar. The sugar depresses backbone_fraction below the peptide floor by
+    # construction, so it gets its own gate. VANCOMYCIN (6 links, 0.248
+    # backbone, 1 sugar ring) and ORITAVANCIN (6 links, 0.20, 1 sugar) are
+    # both typed `Small molecule` by ChEMBL and are both glycopeptide
+    # antibiotics -- they are the reason this branch exists.
+    is_glycopeptide = links >= MIN_PEPTIDE_RESIDUE_LINKS and f["sugar_rings"] >= 1
+
+    is_peptide = is_glycopeptide or (
         links >= MIN_PEPTIDE_RESIDUE_LINKS
         and f["backbone_fraction"] >= MIN_PEPTIDE_BACKBONE_FRACTION
     )
@@ -397,8 +412,26 @@ def classify_compound(
     st = (structure_type or "").strip() or None
 
     if mt in _CHEMBL_BIOLOGIC:
+        coarse = _CHEMBL_BIOLOGIC[mt]
+        # ChEMBL has no `Peptide` value, so every peptide drug it does type
+        # lands in `Protein` -- CYCLOSPORINE, OCTREOTIDE, LEUPROLIDE,
+        # CARFILZOMIB and ROMIDEPSIN are all `Protein`. Where a structure
+        # exists, let it supply the finer label. Both labels sit outside
+        # `target_precedent`, so this refines the report without moving any
+        # compound into the small-molecule block.
+        if coarse == PROTEIN and smiles:
+            s = classify_smiles(smiles)
+            if s.modality in (PEPTIDE, MACROCYCLIC_PEPTIDE):
+                return Verdict(
+                    s.modality,
+                    "structure",
+                    "high",
+                    f"{s.reason}; ChEMBL molecule_type = {mt} "
+                    f"(ChEMBL has no 'Peptide' value)",
+                    s.features,
+                )
         return Verdict(
-            _CHEMBL_BIOLOGIC[mt],
+            coarse,
             "molecule_type",
             "high",
             f"ChEMBL molecule_type = {mt}",
@@ -419,15 +452,32 @@ def classify_compound(
             )
         return v
 
-    # Structure could not decide.
+    # Structure could not decide. Two very different reasons for that, and
+    # conflating them is what let VANCOMYCIN and ORITAVANCIN through as small
+    # molecules in the first version of this module.
+    #
+    #   basis == "structure": we READ the structure and it came back
+    #       ambiguous -- peptidomimetic, or out of small-molecule bounds.
+    #       That is positive evidence against `Small molecule`, not an
+    #       absence of evidence. molecule_type must NOT rescue it.
+    #   basis == "none": there was no structure to read at all. Only here is
+    #       molecule_type the best available witness.
+    if v.basis == "structure":
+        v.disagreement = (
+            f"ChEMBL molecule_type = '{mt}' but the structure is ambiguous: "
+            f"{v.reason}. Not counted as a small molecule."
+        ) if mt == "Small molecule" else v.disagreement
+        return v
+
     if mt == "Small molecule":
         if st in ("MOL", "BOTH"):
             return Verdict(
                 SMALL_MOLECULE,
                 "molecule_type",
                 "medium",
-                "no usable SMILES here, but molecule_type = Small molecule "
-                f"with structure_type = {st} (ChEMBL holds a molfile)",
+                "no SMILES retrieved here, but molecule_type = Small molecule "
+                f"with structure_type = {st} (ChEMBL holds a molfile). "
+                "Retrieve the structure and re-check if this compound matters.",
                 v.features,
             )
         return Verdict(
@@ -436,7 +486,7 @@ def classify_compound(
             "low",
             f"molecule_type = 'Small molecule' but structure_type = {st or 'NULL'} "
             "and no parsable SMILES -- the claim cannot be corroborated. "
-            "This is the ICOTROKINRA signature (an oral peptide typed "
+            "This is the ICOTROKINRA signature (an oral IL-23R peptide typed "
             "'Small molecule'); 5,191 ChEMBL molecules share it.",
             v.features,
         )
