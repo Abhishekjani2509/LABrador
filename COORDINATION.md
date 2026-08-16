@@ -267,6 +267,28 @@ are dead — do not create files under them.
 
 *§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
+- [x] **URGENT data-loss bug fixed (round-local id collision).** Reproduced
+      exactly as reported, including with the shipped `example-round.json`
+      verbatim. `dedupe_papers` returns an id map for INCOMING rows and `main()`
+      was applying it to every finding including stored ones, so a stored
+      finding pointing at stored `p1` got repointed to whatever the incoming
+      `p1` became, its quote failed against the wrong paper's text, and it was
+      discarded as unverifiable. It presented as the system working —
+      `no_quote_discarded` incremented, which reads as quote hygiene rather than
+      evidence destruction. Fix: stored findings take only the coalesce remap,
+      incoming findings take the round map. Verified three ways (synthetic
+      collision, the reporter's own repro, and a permanent `--selftest` case).
+      SKILL.md now states that round ids are local and translation is the
+      assembler's job.
+- [x] **findings/r<N>.json is append-only again.** Every round had rewritten the
+      whole findings set into that round's file, so a reload counted prior
+      findings once per round — the source of the fictitious
+      `duplicates_dropped` figures I had been quoting as evidence the dedupe
+      worked. Each round's file now holds only its own findings.
+- [x] **Schema drift closed**: findings and papers now carry `round`, findings
+      carry `flags`.
+- [x] **`suppresses` in the enum** and **committed session id scrubbed** — both
+      were already shipped before the feedback arrived.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block
