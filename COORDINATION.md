@@ -535,3 +535,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:19 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fixtures (BUILD.md step 1), and what resolve_link revealed in production — typecheck+check green.
 
 - **2026-08-16 01:21 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: drop an unused helper from run_intake — typecheck+check green.
+
+- **2026-08-16 01:25 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: give assemble.py a CLI, so a round is one command instead of a program — typecheck+check green.
