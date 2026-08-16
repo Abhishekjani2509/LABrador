@@ -40,7 +40,7 @@ adapters A and B are both built (§5) and await their upstream owners' review.
 | Moamen | `moamen` | ~~`sandbox-capability-probe`~~ — **deleted from repo** ("delete useless spike", 2026-08-15 late): throwaway that served its purpose; findings preserved in research-evidence-mapper's CONTRACT.md | ✅ (then removed) |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
 | Vince | `vaalessi/hypothesis-highlander` | `hypothesis-highlander` (meta-search ABOVE the pipeline) | ✅ |
-| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | `managed/hypothesis-generator/` — hypothesis node: graph-in → candidate programs out, own valuation adapter, managed-agent scaffolding | ✅ (2026-08-16) |
+| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | `managed/hypothesis-generator/` — hypothesis node: graph-in → candidate programs out, own valuation adapter — **DEPLOYED 2026-08-16 (agent_01QTYQZz37Rca61VHPWrbr79 v1, smoke-tested: full tool round-trip on the IPF fixture)** | ✅ (2026-08-16) |
 | Cyrus | works on `main` | infra, merges, renames, README | — |
 
 Note: Cyrus renamed all node dirs on 2026-08-15 (`d6b8451`). Old names

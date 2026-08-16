@@ -105,6 +105,7 @@ round that moved it — never silently overwritten.
 
 ## Specialists
 
+- **hypothesis-generator** — dispatch when someone has an evidence graph and wants ranked, actionable hypotheses out of it (with the Stage 1 asks that would settle them), or wants a slate turned into program briefs for valuation. It runs a deterministic local generator; it does not invent claims beyond the graph.
 - **research-evidence-mapper** — dispatch any question about the scientific literature that wants evidence structure rather than prose: what is known, what conflicts, and what nobody has tested. Returns the full graph JSON; pass it through, do not summarize it away.
 - `small-molecule-tractability-review` — dispatch when someone asks whether a protein target
   can be drugged with a small molecule, or wants the evidence behind that
