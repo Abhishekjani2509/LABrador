@@ -215,13 +215,33 @@ function appendMergeLog(cwd: string, entries: string[]): void {
   sh('git commit -m "COORDINATION.md: merge log (auto-integrate)"', cwd);
 }
 
+/**
+ * The watcher session monitors main for OTHER people's pushes; stamping the
+ * pushed sha into its state file keeps our own pushes from ringing the bell.
+ */
+function stampMainWatcher(cwd: string): void {
+  const sha = trySh("git rev-parse HEAD", cwd);
+  if (sha.ok) {
+    try {
+      writeFileSync("/tmp/labrador-main-state.txt", `${sha.out}\n`);
+    } catch {
+      // Watcher not running on this machine — nothing to stamp.
+    }
+  }
+}
+
 function push(cwd: string): boolean {
   if (trySh("git push origin main", cwd).ok) {
+    stampMainWatcher(cwd);
     return true;
   }
   // Someone pushed concurrently: replay our merge commits on the new tip once.
   const rebase = trySh("git pull --rebase origin main", cwd);
-  return rebase.ok && trySh("git push origin main", cwd).ok;
+  if (rebase.ok && trySh("git push origin main", cwd).ok) {
+    stampMainWatcher(cwd);
+    return true;
+  }
+  return false;
 }
 
 const work = mkdtempSync(join(tmpdir(), "labrador-integrate-"));
