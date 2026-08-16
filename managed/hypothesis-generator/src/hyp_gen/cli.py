@@ -15,7 +15,7 @@ import json
 import sys
 from pathlib import Path
 
-from hyp_gen import report, valuation, verify
+from hyp_gen import report, valuation, verify, webui
 from hyp_gen.evidence import build_pack
 from hyp_gen.graph import GraphIndex, KnowledgeGraph
 from hyp_gen.llm import Judge
@@ -106,6 +106,13 @@ def _dry_run(generator: Generator) -> None:
     if not shortlist:
         print("(nothing survived selection — loosen the params or check the graph)")
     print(f"\n{len(shortlist)} shortlisted. No model calls made.")
+
+
+def _emit_webui(slate: Slate, target: Path) -> None:
+    """Write the web UI payload. Pure over the slate, like the report modes."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(webui.emit(slate).model_dump_json(indent=2))
+    print(f"wrote {target} (webui payload)")
 
 
 def _emit_programs(slate: Slate, frame_path: Path | None, out: Path) -> int:
@@ -228,8 +235,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="SLATE",
         help=(
             "re-render from an existing slate.json and exit, in whichever "
-            "--report-mode(s) you ask for. Rendering is a pure function of the "
-            "slate, so this costs no model calls"
+            "--report-mode(s) and/or --emit-webui you ask for. Rendering is a "
+            "pure function of the slate, so this costs no model calls"
+        ),
+    )
+    parser.add_argument(
+        "--emit-webui",
+        type=Path,
+        metavar="FILE",
+        help=(
+            "also write the web UI payload JSON: one card per hypothesis with "
+            "the trace string, support/novelty/testability metrics, and "
+            "id-referenced one-liner highlights"
         ),
     )
     args = parser.parse_args(argv)
@@ -239,15 +256,19 @@ def main(argv: list[str] | None = None) -> int:
         # makes a short report.md safe as the default: nothing is lost by not
         # printing a view, only by not keeping slate.json.
         slate = Slate.model_validate(json.loads(args.report_from.read_text()))
-        modes = args.report_mode or ["prose"]
+        # --emit-webui alone means the caller wants the payload, not a report
+        # they never asked for.
+        modes = args.report_mode or ([] if args.emit_webui else ["prose"])
         if args.out:
             args.out.mkdir(parents=True, exist_ok=True)
             for mode in modes:
                 path = args.out / report.FILENAMES[mode]
                 path.write_text(to_markdown(slate, mode=mode))
                 print(f"wrote {path} ({mode})")
-        else:
+        elif modes:
             print("\n\n".join(to_markdown(slate, mode=m) for m in modes))
+        if args.emit_webui:
+            _emit_webui(slate, args.emit_webui)
         return 0
 
     if args.emit_programs_from:
@@ -326,8 +347,12 @@ def main(argv: list[str] | None = None) -> int:
             path.write_text(to_markdown(slate, mode=mode))
             print(f"\nwrote {path} ({mode})")
         print(f"wrote {args.out / 'slate.json'}")
+
     elif not args.dry_run:
         print(to_markdown(slate))
+
+    if args.emit_webui:
+        _emit_webui(slate, args.emit_webui)
 
     if args.emit_programs:
         return _emit_programs(slate, args.frame, args.emit_programs)
