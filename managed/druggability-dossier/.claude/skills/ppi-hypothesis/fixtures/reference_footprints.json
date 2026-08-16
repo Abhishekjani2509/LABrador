@@ -2,6 +2,10 @@
  "7UWM": {
   "ligand_acc": "Q16552",
   "partner_acc": "Q96F46",
+  "offset_ligand": 0,
+  "offset_partner": 0,
+  "ca_pairs_8a": 72,
+  "bsa_total_a2": 4378.6,
   "ligand_footprint_uniprot": [
    42,
    43,
@@ -117,13 +121,15 @@
    297,
    298,
    299
-  ],
-  "offset_ligand": 0,
-  "offset_partner": 0
+  ]
  },
  "3ALQ": {
   "ligand_acc": "P01375",
   "partner_acc": "P20333",
+  "offset_ligand": 76,
+  "offset_partner": 22,
+  "ca_pairs_8a": 42,
+  "bsa_total_a2": 2470.3,
   "ligand_footprint_uniprot": [
    93,
    96,
@@ -192,13 +198,15 @@
    136,
    138,
    141
-  ],
-  "offset_ligand": 76,
-  "offset_partner": 22
+  ]
  },
  "3K51": {
   "ligand_acc": "O95150",
   "partner_acc": "O95407",
+  "offset_ligand": 67,
+  "offset_partner": 0,
+  "ca_pairs_8a": 30,
+  "bsa_total_a2": 2048.6,
   "ligand_footprint_uniprot": [
    101,
    102,
@@ -259,8 +267,6 @@
    126,
    127,
    128
-  ],
-  "offset_ligand": 67,
-  "offset_partner": 0
+  ]
  }
 }

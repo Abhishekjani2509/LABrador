@@ -2,10 +2,15 @@
 
 Read the SKILL.md next to this file before using any function here. The short
 version: nothing in this module decides that a predicted interface is real. It
-measures five signals, applies a gate that was fitted on a *measured* control
-panel, and emits a graph ask in the four-verb schema `graph-intake` already
-uses. The gate is deliberately hard to pass and the failure-modes section of
-the SKILL.md says why.
+measures the interface, applies a gate whose every check is a *reproducibility*
+or *novelty* test fitted on the 15-case control panel in
+`fixtures/panel_results.json`, and emits an ask in the four-verb schema
+`graph-intake` already uses.
+
+On that panel the gate recovered 3/3 deposited positives, admitted 0/11
+negatives, and issued **zero asks** — the positives are training data and the
+one novel pair that passed was already a link in the graph. If you are running
+this expecting an ask, read "The hard question" in the SKILL.md first.
 
 Plain Python, run under the proto-tools interpreter (the one that has
 `proto_tools`, `gemmi` and `numpy`). Cofolding is reached through
@@ -27,7 +32,7 @@ import numpy as np
 
 # ---------------------------------------------------------------------------
 # Constants that are thresholds, and are labelled as such.
-# Every one of these was set from the control panel in `panel_results.json`.
+# Every one of these was set from the control panel in `fixtures/panel_results.json`.
 # None of them is a literature value. See SKILL.md "Where the gate came from".
 # ---------------------------------------------------------------------------
 CA_CONTACT_CUTOFF_A = 8.0      # matches cofold-check's _inter_chain_ca_contacts
