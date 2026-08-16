@@ -62,13 +62,6 @@ CLAUDE_MD = HERE.parents[2] / "CLAUDE.md"
 # A leaf that is deliberately absent on one side, FOREVER, and why. Empty is the
 # goal. An entry here is a standing decision, not a to-do.
 EXEMPTIONS: dict[str, str] = {
-    "as_of_leakage": (
-        "validator-only fallback. `_has_leakage_flag` looks for a leakage "
-        "registry at the top level as well as at `<block>.as_of_leakage`, so a "
-        "hand-written dossier can put one there. The template deliberately "
-        "sites the registry at `target_precedent.as_of_leakage` (rule 8) and "
-        "there is no reason to offer two places to write the same thing."
-    ),
     "drug_name": (
         "validator-only alias. `_names()` accepts `name`, `drug_name` or "
         "`program` so it can read a hand-written or fixture-derived entry; the "
@@ -462,13 +455,23 @@ class TestTemplateMatchesValidator(unittest.TestCase):
         """
         have = template_paths(load_template())
         leaves = {p.rsplit(".", 1)[-1] for p in have}
+        # Recompute both scans with the tables ignored. An exemption is still
+        # needed exactly when its key is something a scan would otherwise
+        # report — asking "is the key in the template" instead conflates a
+        # top-level PATH with a LEAF NAME of the same spelling, which
+        # `as_of_leakage` is (exempted at the top level, present at
+        # `target_precedent.as_of_leakage`).
+        would_report = {p for p in validator_paths() if p not in have}
+        would_report |= {n for n in validator_leaf_reads() if n not in leaves}
         for label, table in (("EXEMPTIONS", EXEMPTIONS), ("PENDING", PENDING)):
-            for path, reason in table.items():
-                with self.subTest(table=label, path=path):
+            for key, reason in table.items():
+                with self.subTest(table=label, key=key):
                     self.assertTrue(reason.strip(), "an exemption must state a reason")
-                    self.assertFalse(
-                        path in have or path in leaves,
-                        f"{path!r} is in the template now — delete its {label} entry",
+                    self.assertIn(
+                        key,
+                        would_report,
+                        f"{key!r} no longer needs an exemption — delete its "
+                        f"{label} entry",
                     )
 
 
@@ -534,8 +537,21 @@ class TestFilledTemplatePasses(unittest.TestCase):
         self.assertIn("tractability.pocket_volume_a3.primary_d1_6_a3", named)
         self.assertIn("tractability.pocket_volume_a3.clustering_d", named)
 
-        # Behavioural half: `load_bearing` and `_false_negative_rate` are read
-        # with `drug.get(...)` inside a rule body, so ONLY this half sees them.
+        # Leaf half: `load_bearing` and `_false_negative_rate` are read with
+        # `drug.get(...)` inside a rule body, so the PATH scan cannot see them.
+        # This scan is what closes that hole — before it existed these two were
+        # caught only behaviourally, as a violation to read rather than a key to
+        # add.
+        leaves = {p.rsplit(".", 1)[-1] for p in have}
+        by_leaf = sorted(
+            n
+            for n in validator_leaf_reads()
+            if n not in leaves and n not in EXEMPTIONS and n not in PENDING
+        )
+        self.assertIn("load_bearing", by_leaf)
+        self.assertIn("_false_negative_rate", by_leaf)
+
+        # Behavioural half: all four, as violations.
         v = validate_dossier(fill_template(t))
         fired = {x.path for x in v}
         self.assertIn("tractability.pocket_druggability.load_bearing", fired)
