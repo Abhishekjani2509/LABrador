@@ -500,3 +500,5 @@ economics-bridge → economics engine, traced by the glassbox
 (5 of 7 stations). Missing from the full chain: tractability (item 5) and a
 thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:15 UTC** — merged `AbrehamT/Hypothesis_Generator` (9bf1682, tier-2: biome format fix on his JSON fixtures) — hyp_gen lands, 212 tests pass; §11 wiring map added per Abhishek — typecheck+check green.
+
+- **2026-08-16 01:15 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: one command from graph_id to dossier inputs — typecheck+check green.
