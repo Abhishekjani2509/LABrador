@@ -216,6 +216,20 @@ function bool(input: Record<string, unknown>, key: string): boolean {
   return input[key] === true;
 }
 
+/**
+ * Tri-state read for a switch whose *default is on*. `bool` cannot express the
+ * three stage switches (`run_disorder`/`run_cryptic`/`run_mdpocket`): they
+ * default to true in `modal_app.py`, so "absent" and "false" must not collapse.
+ * Only an explicit `false` may emit a `--no-…` flag.
+ */
+function optBool(
+  input: Record<string, unknown>,
+  key: string
+): boolean | undefined {
+  const value = input[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function list(input: Record<string, unknown>, key: string): string[] {
   const value = input[key];
   if (Array.isArray(value)) {
@@ -227,6 +241,63 @@ function list(input: Record<string, unknown>, key: string): string[] {
         .map((item) => item.trim())
         .filter((item) => item.length > 0)
     : [];
+}
+
+const NUM_SEPARATOR = /[\s,]+/;
+
+/** Residue numbers, accepted as an array or as a comma/space-separated string. */
+function numList(input: Record<string, unknown>, key: string): number[] {
+  const value = input[key];
+  let raw: unknown[] = [];
+  if (Array.isArray(value)) {
+    raw = value;
+  } else if (typeof value === "string") {
+    raw = value.split(NUM_SEPARATOR);
+  }
+  return raw
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item));
+}
+
+/**
+ * Render the `chains` mapping into the CLI's own encoding.
+ *
+ * `modal_app.py`'s local entrypoint takes one string and splits it on `;` then
+ * `=`: `{"1TNF": ["A","B"], "2ZJC": ["A"]}` becomes `1TNF=A,B;2ZJC=A`. The
+ * model sends the object because that is the shape `pocket_scan()` itself
+ * documents; a pre-formatted string is accepted too so a caller reading the
+ * SKILL.md's shell example can paste it straight through.
+ */
+function chainSpec(
+  input: Record<string, unknown>,
+  key: string
+): string | undefined {
+  const value = input[key];
+  if (typeof value === "string") {
+    return value.trim().length > 0 ? value.trim() : undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return;
+  }
+  const parts = Object.entries(value as Record<string, unknown>)
+    .map(([pdbId, picked]) => {
+      const ids = Array.isArray(picked)
+        ? picked.map(String)
+        : String(picked).split(",");
+      const clean = ids
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+      return clean.length > 0 ? `${pdbId.trim()}=${clean.join(",")}` : "";
+    })
+    .filter((part) => part.length > 0);
+  return parts.length > 0 ? parts.join(";") : undefined;
+}
+
+/** Append `flag value` only when there is a value. Keeps argv builders flat. */
+function pushFlag(argv: string[], flag: string, value: string | undefined) {
+  if (value) {
+    argv.push(flag, value);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -578,12 +649,98 @@ function modalProfile(): string {
   return profile;
 }
 
+/** Stage switches, in the order `modal_app.py`'s entrypoint declares them. */
+const POCKET_SCAN_STAGES = ["run_disorder", "run_cryptic", "run_mdpocket"];
+
+/**
+ * Drop the per-structure pocket lists when the payload will not fit.
+ *
+ * Measured: one 1TNF structure with the cryptic and mdpocket stages OFF is
+ * 87 kB, because `by_clustering.<D>.pockets` carries the top 30 pockets at each
+ * of two clustering values. A six-structure ensemble with every stage on is
+ * several times MAX_OUTPUT_CHARS, and `clip` would then hand the model a JSON
+ * document cut off mid-object — which parses as nothing and reads as a broken
+ * run rather than as a wide one.
+ *
+ * So when it does not fit, drop the one thing that is bulk (`pockets`) and keep
+ * everything the dossier's numbers come from. This is selection, not
+ * computation: no value is recomputed, rounded or summarised. It is lossy in
+ * exactly one way, and that way is named in the returned `_handler_note` —
+ * rule 2b's per-pocket interface classification cannot be satisfied from a
+ * reduced payload, and the fix is to split the ensemble across calls.
+ */
+function reduceScanPayload(text: string): string {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return clip(text);
+  }
+  const structures = parsed.structures as Record<string, unknown> | undefined;
+  let dropped = 0;
+  for (const entry of Object.values(structures ?? {})) {
+    const byClustering = (entry as Record<string, unknown>)?.by_clustering as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    for (const block of Object.values(byClustering ?? {})) {
+      if (Array.isArray(block.pockets)) {
+        dropped += block.pockets.length;
+        block.pockets = `[${block.pockets.length} pocket objects dropped by the local tool handler]`;
+      }
+    }
+  }
+  parsed._handler_note =
+    `The full payload was ${text.length} characters, above this handler's ` +
+    `${MAX_OUTPUT_CHARS}-character cap, so ${dropped} per-pocket objects were ` +
+    "dropped from `by_clustering.<D>.pockets`. NOTHING WAS RECOMPUTED — every " +
+    "number still here is the app's own. What is lost is rule 2b's per-pocket " +
+    "interface classification and the `pockets_omitted` audit. If you need " +
+    "those, re-run with a smaller `pdb_ids` list rather than treating this as " +
+    "the complete result.";
+  return clip(JSON.stringify(parsed));
+}
+
+/**
+ * Retrieve the payload `--out` wrote.
+ *
+ * The CLI no longer puts the JSON on stdout, and this is not a preference:
+ * `modal run` frames stdout with its own progress banner and a trailing
+ * "Stopping app…", so the old handler's `report()` of stdout returned banner
+ * text with a JSON body embedded in it — or, once the entrypoint moved the
+ * payload to stderr, no payload at all on a *successful* run. A clean exit with
+ * nothing in the file is therefore a hard failure here rather than an empty
+ * string that reads like a scan finding no pockets.
+ */
+function readScanPayload(outFile: string, result: RunResult): string {
+  if (result.code !== 0) {
+    return report("modal run modal_app.py", result);
+  }
+  if (existsSync(outFile)) {
+    const text = readFileSync(outFile, "utf8");
+    if (text.trim().length > 0) {
+      return text.length > MAX_OUTPUT_CHARS ? reduceScanPayload(text) : text;
+    }
+  }
+  throw new Error(
+    "modal run exited 0 but wrote no JSON to its --out file. This is NOT an " +
+      "empty scan result and must not be recorded as one — the run either " +
+      "never reached the entrypoint's write, or Modal killed it after the " +
+      "function returned.\n\n" +
+      `--- stdout ---\n${clip(result.stdout)}\n\n--- stderr ---\n${clip(result.stderr)}`
+  );
+}
+
 const pocketScan: CustomToolSpec = {
   description:
-    "Run the whole computed-tractability half of the dossier in one Modal invocation: fpocket + PRANK at every clustering value, plus the disorder, cryptic, interface and mdpocket stages. " +
+    "Run the whole computed-tractability half of the dossier in one Modal invocation: fpocket + PRANK at D = 1.6 and 2.4 (the sweep is done for you — there is no clustering_d argument; read `clustering_swept` in the method block), plus the disorder, cryptic, interface and mdpocket stages. " +
     "Use it for every pocket measurement — fpocket and mdpocket are conda-forge binaries that exist only inside this Modal image, so there is no other way to get a volume, a druggability range, or a site fixed by construction. " +
     "Pass the full ensemble at once (`pdb_ids`) rather than one structure per call: one invocation pays one cold start, and same-site tracking only works when a holo structure sits in the same run as the apo ones it anchors. " +
-    "Caveats that decide how you read the result: `ligand_codes` is an override and not a requirement (naming one code across four structures left three falling back to the weaker signature path and moved 7JRA from 0.000/306.9 A^3 to 0.926/1542.9 A^3), `mdpocket.sites` returns up to two definitions of which only `site_from_ligand` is the ligand site — read `distance_to_donor_ligand_centroid_a` on every entry before quoting a number — and every stage after fpocket is non-fatal and reports its own `<stage>_status`, so check those before treating a missing block as a null result. A run takes minutes and costs real credits; do not re-run it to retry a formatting question.",
+    "READ VOLUME, NOT DRUGGABILITY. `pocket_volume_a3` at D=1.6 is the primary number (target-level AUC 1.000 over 15 targets); fpocket's druggability score does NOT separate druggable from hard — AUC 0.720 with a 95% CI of 0.44-0.94 at D=1.6 and 0.520 (chance) at D=2.4, and on 37 holo structures with a drug-like ligand physically bound 41% score below 0.1 (EGFR with osimertinib in it scores 0.013). Report it as a range, never let it carry a verdict, and do not substitute persistence (AUC 0.500) for it. mdpocket's druggability field is null BY DESIGN, not by failure: fpocket's score is min-max normalised across the other pockets of the same structure, and a fixed grid has a population of one, so the quantity is undefined there. " +
+    "CHAIN SELECTION IS THE ARGUMENT THAT CHANGES THE ANSWER, so assert it. `chains` takes `{\"1TNF\": [\"A\",\"B\"]}` and `site_residues` takes residue numbers; together they express rule 2b directly. KRAS 4OBE gives druggability 0.442 at rank 1 on chain A and 0.257 at rank 6 on chains A+B — same structure, same clustering, different verdict. They also unlock the subunit-removed control: TNF-alpha's SPD304 site measures 0.00 A^3 intact and ~280-550 A^3 with one protomer deleted, which is the experiment that separates 'the cavity is too small' from 'a protomer is standing in it'. A chain flag alone is not always enough — 3V2Y's T4-lysozyme fusion sits INSIDE chain A at 1002-1161 beside the receptor at 16-330, which needs `site_residues`. Record what you passed in `tractability.method.chains_used`. " +
+    "PASS `uniprot_accession` OR THE DISORDER NUMBER IS ABOUT A DIFFERENT MOLECULE. Without it the stage can fall back to the crystallised construct, which is the ordered part of the protein by selection: IRAK4 came back 0.0 over 284 residues against a true 0.1413 over 460, and a bare 0.0 in `disorder_fraction` reads as 'no disorder', not as 'not measured'. A construct-scoped number is reported in `construct_disorder_fraction` with `is_full_length_sequence: false`, never in `disorder_fraction` — if you see that key, you omitted the accession. Carry `disorder.method` beside any fraction you quote; metapredict and the MobiDB fallback differ by 23% on the same target. " +
+    "HOLO/APO IS DECIDED FROM SMILES, AND WITHOUT SMILES IT FAILS SILENTLY. Ligands are classified on their SMILES graph, so a record source with no SMILES returns `unknown` for every component, nothing is `druglike`, and the whole ensemble comes back apo-free and holo-free while every `<stage>_status` still says ok. Sources that carry SMILES: RCSB REST `data.rcsb.org/rest/v1/core/chemcomp/<ID>` (this image's source), Paperclip `pdb_v.chemcomps`, and the CCD ligand file. The entry's OWN mmCIF `_chem_comp` block does NOT — it carries id, type, name, formula and formula_weight and nothing else, and it is the obvious one to reach for because the file is already on disk. This app refuses such a source with a run-killing `LigandSourceError`, so that error is a misconfiguration, never a result. " +
+    '`unknown` IS NOT `apo`, AND A LOOKUP TIMEOUT IS NOT A CHEMISTRY MISS. Read `holo_call(ids)["determined"]` before calling anything apo; components whose lookup failed carry `lookup_failed` and land in `["undetermined"]`, a third tier. A genuine CCD 404 caches as absent and is not an error. ' +
+    "Remaining caveats that decide how you read the result: `ligand_codes` is an override and not a requirement (naming one code across four structures left three falling back to the weaker signature path and moved 7JRA from 0.000/306.9 A^3 to 0.926/1542.9 A^3), `mdpocket.sites` returns up to two definitions of which only `site_from_ligand` is the ligand site — read `distance_to_donor_ligand_centroid_a` on every entry before quoting a number — `site_pocket_selected_by` says whether a spread describes one site at all, and every stage after fpocket is non-fatal and reports its own `<stage>_status`, so check those before treating a missing block as a null result. A run takes minutes and costs real credits; do not re-run it to retry a formatting question.",
   async handler(input) {
     const pdbIds = list(input, "pdb_ids");
     if (pdbIds.length === 0) {
@@ -593,36 +750,59 @@ const pocketScan: CustomToolSpec = {
     }
     const modal = modalBin();
     const profile = modalProfile();
+    const outFile = join(
+      mkdtempSync(join(tmpdir(), "pocket-scan-")),
+      "scan.json"
+    );
     const argv = [
       "run",
       join(SKILLS_DIR, "pocket-scan", "modal_app.py"),
       "--pdb-ids",
       pdbIds.join(","),
+      // The payload no longer reaches stdout at all; see readScanPayload.
+      "--out",
+      outFile,
     ];
+    pushFlag(argv, "--chains", chainSpec(input, "chains"));
+    const siteResidues = numList(input, "site_residues");
+    pushFlag(
+      argv,
+      "--site-residues",
+      siteResidues.length > 0 ? siteResidues.join(",") : undefined
+    );
     const ligandCodes = list(input, "ligand_codes");
-    if (ligandCodes.length > 0) {
-      argv.push("--ligand-codes", ligandCodes.join(","));
-    }
-    const accession = str(input, "uniprot_accession");
-    if (accession) {
-      argv.push("--uniprot-accession", accession);
-    }
+    pushFlag(
+      argv,
+      "--ligand-codes",
+      ligandCodes.length > 0 ? ligandCodes.join(",") : undefined
+    );
+    pushFlag(argv, "--uniprot-accession", str(input, "uniprot_accession"));
     const partners = list(input, "partner_structures");
-    if (partners.length > 0) {
-      argv.push("--partner-structures", partners.join(","));
-    }
-    const donor = str(input, "mdpocket_site_donor");
-    if (donor) {
-      argv.push("--mdpocket-site-donor", donor);
+    pushFlag(
+      argv,
+      "--partner-structures",
+      partners.length > 0 ? partners.join(",") : undefined
+    );
+    pushFlag(argv, "--mdpocket-site-donor", str(input, "mdpocket_site_donor"));
+    for (const stage of POCKET_SCAN_STAGES) {
+      if (optBool(input, stage) === false) {
+        argv.push(`--no-${stage.replaceAll("_", "-")}`);
+      }
     }
     const result = await run(modal, argv, {
       env: { ...process.env, MODAL_PROFILE: profile },
       timeoutSeconds: POCKET_SCAN_TIMEOUT_S,
     });
-    return report("modal run modal_app.py", result);
+    return readScanPayload(outFile, result);
   },
   input_schema: {
     properties: {
+      chains: {
+        additionalProperties: { items: { type: "string" }, type: "array" },
+        description:
+          'Chains to keep, per PDB entry: `{"1TNF": ["A","B"], "2ZJC": ["A","B"]}`. This is rule 2b\'s chain selection and it changes the answer (KRAS 4OBE: 0.442 at rank 1 on chain A, 0.257 at rank 6 on A+B), so assert it rather than defaulting to the whole assembly. Deleting a protomer here IS the subunit-removed control. Omit only when no mechanism hypothesis was supplied, and say so in `tractability.caveat`.',
+        type: "object",
+      },
       ligand_codes: {
         description:
           'Optional chemical component IDs used to anchor the site, e.g. `["MOV"]`. An override, not a requirement: a structure carrying its own drug-like ligand anchors itself when no supplied code matches.',
@@ -631,7 +811,7 @@ const pocketScan: CustomToolSpec = {
       },
       mdpocket_site_donor: {
         description:
-          "A holo PDB ID used ONLY to define the mdpocket site, not added to the ensemble. This is how a pure-apo ensemble gets a ligand-anchored site.",
+          "A holo PDB ID used ONLY to define the mdpocket site, not added to the ensemble. This is how a pure-apo ensemble gets a ligand-anchored site. It also donates the site signature to the fpocket pass and the holo half of the cryptic comparison.",
         type: "string",
       },
       partner_structures: {
@@ -646,9 +826,30 @@ const pocketScan: CustomToolSpec = {
         items: { type: "string" },
         type: "array",
       },
+      run_cryptic: {
+        description:
+          "Defaults to true. Set false only to skip the apo/holo superposition stage; it is non-fatal either way and reports `cryptic_status`.",
+        type: "boolean",
+      },
+      run_disorder: {
+        description:
+          "Defaults to true. Set false only to skip the disorder stage — never as a substitute for supplying `uniprot_accession`.",
+        type: "boolean",
+      },
+      run_mdpocket: {
+        description:
+          "Defaults to true. Set false to skip the fixed-grid stage, which is the slowest one and the only source of `mdpocket.sites`.",
+        type: "boolean",
+      },
+      site_residues: {
+        description:
+          "Residue numbers defining the site signature, e.g. `[57,58,59,60,61]`. Use when a chain flag cannot express the selection — a fusion chaperone inside the same chain (3V2Y: T4 lysozyme at 1002-1161, receptor at 16-330), or an allosteric domain picked by range. Matched chain-agnostically, so it is unreliable on a homo-oligomer, where the run reports `site_signature_unreliable_homooligomer`.",
+        items: { type: "integer" },
+        type: "array",
+      },
       uniprot_accession: {
         description:
-          "Drives the disorder stage. Strongly preferred over the structure-derived fallback, because a deposited construct is the ordered part of the protein by selection.",
+          "REQUIRED IN PRACTICE. Drives the disorder stage. Without it the module can measure the crystallised construct instead of the protein — IRAK4 returned 0.0 over 284 residues against a true 0.1413 over 460 — and that 0.0 is a wrong number, not a null.",
         type: "string",
       },
     },
@@ -703,13 +904,18 @@ const crypticAnalysis: CustomToolSpec = {
     "Classify the cryptic-pocket mechanism from one apo/holo structure pair: core C-alpha superposition excluding the mobile region, max backbone displacement at the site, clash attribution split into backbone / side-chain / displaced-subunit, a self-control against the holo structure itself, and the ligand's free-volume fraction in the apo frame. " +
     "Run it whenever both an apo and a holo structure exist, because `cryptic_pocket_risk` must be measured rather than set from structure tier. " +
     "Classify on C-alpha displacement and NOT on which atoms clash: KRAS switch-II moves 8.8 A yet zero of its 12 clashing atoms at 2.0 A are backbone, so keying on clash composition labels the canonical nanomolar target as side-chain occlusion and hands it a micromolar prognosis. " +
-    "Read the self-control first — it must come back near zero, and if it does not, the superposition or the ligand placement is broken and every other number in the result is meaningless. `apo` and `holo` are paths to structure files (PDB or mmCIF) that this process can read; download the biological assembly you want before calling.",
+    "Read the self-control first — it must come back near zero, and if it does not, the superposition or the ligand placement is broken and every other number in the result is meaningless. " +
+    "PASS PDB IDs, NOT PATHS. This handler runs off-sandbox and cannot see a file you downloaded there; a 4-character ID has biological assembly 1 fetched for you on the machine that actually runs the script. A path is accepted only when it is readable by that machine.",
   async handler(input) {
     const argv = [
       await resolveStructure(requiredStr(input, "apo")),
       await resolveStructure(requiredStr(input, "holo")),
       requiredStr(input, "ligand_comp_id"),
     ];
+    const exclude = numList(input, "exclude");
+    if (exclude.length > 0) {
+      argv.push("--exclude", ...exclude.map(String));
+    }
     const holoChains = list(input, "holo_chains");
     if (holoChains.length > 0) {
       argv.push("--holo-chains", ...holoChains);
@@ -743,12 +949,18 @@ const crypticAnalysis: CustomToolSpec = {
     properties: {
       apo: {
         description:
-          "Apo structure: a 4-character PDB ID (biological assembly 1 is fetched automatically) or a path to a PDB/mmCIF file this process can read.",
+          "Apo structure: a 4-character PDB ID (biological assembly 1 is fetched automatically on the machine running the script) or a path readable by that machine. A sandbox path is not readable here.",
         type: "string",
       },
       apo_chains: {
         description: "Chain IDs to keep from the apo structure.",
         items: { type: "string" },
+        type: "array",
+      },
+      exclude: {
+        description:
+          "Residue numbers to exclude from the superposition fit by hand, when `exclude_radius` cannot express the mobile region.",
+        items: { type: "integer" },
         type: "array",
       },
       exclude_radius: {
@@ -758,7 +970,7 @@ const crypticAnalysis: CustomToolSpec = {
       },
       holo: {
         description:
-          "Holo structure: a 4-character PDB ID (biological assembly 1 is fetched automatically) or a path to a PDB/mmCIF file this process can read.",
+          "Holo structure: a 4-character PDB ID (biological assembly 1 is fetched automatically on the machine running the script) or a path readable by that machine. A sandbox path is not readable here.",
         type: "string",
       },
       holo_chains: {
@@ -842,7 +1054,8 @@ const disorderScan: CustomToolSpec = {
     "Predict the intrinsic-disorder fraction for one or more UniProt accessions and report, per target, the fraction, the method that produced it, a confidence flag and the disordered regions. " +
     "Use it to fill `tractability.disorder_fraction` when you are not already running `pocket_scan` (whose disorder stage is the preferred source, because the Modal image carries metapredict). " +
     "A disorder fraction is not comparable to any other disorder fraction unless you carry `method` beside it: the Modal image returned 0.3419 on a target where a local environment without metapredict fell back to MobiDB and returned 0.277 — a 23% difference from the method alone. " +
-    "The cardinal rule of this module is that a folded protein and a failed prediction must never look identical: 0.000 is a real answer (CDK2 and KRAS both score it) and failure is reported as FAILED, so never read a missing number as zero.",
+    "The cardinal rule of this module is that a folded protein and a failed prediction must never look identical: 0.000 is a real answer (CDK2 and KRAS both score it) and failure is reported as FAILED, so never read a missing number as zero. " +
+    "IT TAKES ACCESSIONS AND ONLY ACCESSIONS, WHICH IS THE POINT. A disorder fraction measured on a crystallised construct is an answer to a different question, not a smaller version of the same one — a deposited construct is the ordered part of the protein by selection. IRAK4 measured on its construct gives 0.0 over 284 residues against 0.1413 over 460 full-length, and that 0.0 reads as `no disorder` rather than `not measured`. So supply `uniprot_accession` to `pocket_scan` too; if its output carries `construct_disorder_fraction` and `is_full_length_sequence: false` instead of `disorder_fraction`, the accession was missing and the number must not go into `tractability.disorder_fraction`.",
   async handler(input) {
     const accessions = list(input, "accessions");
     if (accessions.length === 0) {
@@ -905,15 +1118,22 @@ const neighbourPrecedent: CustomToolSpec = {
   description:
     "Structural-neighbour precedent: Foldseek the query structure, then ask Paperclip whether any neighbour fold has ever had a drug-like small molecule put into it, filling the dossier's `structural_neighbour_precedent` axis. " +
     "Use it to answer 'what other folds look like mine and has anyone drugged one', which is a different and much stronger question than Pfam family membership — TNF-alpha and IL-17A are both cytokines and share nothing mechanically. " +
-    "`structure` must be a path to a PDB/CIF file this process can read, never a PDB ID or a URL, and `accession` is excluded from its own results. " +
-    "Three Foldseek column caveats are already handled inside the script and you should not re-correct them: remote mode mislabels columns so `evalue` is really the probability and `bit_score` is really the E-value, a TM-score only exists via tmalign mode, and `target_id` is a filename-plus-title blob rather than an ID. The load-bearing caveat is in the output: ligands are attributed at entry level, so every holo count comes back twice — an entry-level upper bound and a single-protein-entry lower bound — and you must report the gap rather than picking one.",
+    "`structure` takes a 4-character PDB ID — biological assembly 1 is fetched on the machine that runs the script, because a file you downloaded in the sandbox is not readable there — or a path that machine can already read. `accession` is excluded from its own results. " +
+    "ZERO HOLO NEIGHBOURS IS A FINDING; A FAILED LOOKUP WEARING THAT COSTUME IS THE WORST CONFUSION AVAILABLE ON THIS AXIS. Holo is decided by `ligand_filter` from each component's SMILES graph, so read `neighbour_entry_summary.n_undetermined` and `undetermined_pdb_ids` — and per neighbour, `holo_determined` and `undetermined_ligands` — before writing `no drug-like ligand among the fold neighbours`. A component whose lookup failed carries `lookup_failed` and lands in `undetermined`, which is a THIRD tier and not apo. `n_holo = 0` is only a finding when `n_undetermined = 0` beside it. " +
+    "Records without SMILES classify as `unknown`, and `unknown` is not `druglike`, so a record source with no SMILES silently renders every neighbour apo. The sources that carry it are RCSB REST `data.rcsb.org/rest/v1/core/chemcomp/<ID>`, Paperclip `pdb_v.chemcomps` (this script's own source) and the CCD ligand file; an entry's own mmCIF `_chem_comp` block does not. " +
+    "Three Foldseek column caveats are already handled inside the script and you should not re-correct them: remote mode mislabels columns so `evalue` is really the probability and `bit_score` is really the E-value, a TM-score only exists via tmalign mode, and `target_id` is a filename-plus-title blob rather than an ID. The load-bearing caveat is in the output: ligands are attributed at entry level, so every holo count comes back twice — an entry-level upper bound and a single-protein-entry lower bound — and you must report the gap rather than picking one. " +
+    "If it returns a `ModuleNotFoundError` for `proto_tools`, that is unavailability of the whole axis: null `structural_neighbour_precedent`, record it in `not_found`, and never write it up as `no structural neighbours found`.",
   async handler(input) {
     const argv = [
-      requiredStr(input, "structure"),
+      await resolveStructure(requiredStr(input, "structure")),
       requiredStr(input, "accession"),
       "--env-file",
       envFileArg(),
     ];
+    const multimer = str(input, "multimer");
+    if (multimer) {
+      argv.push("--multimer", multimer);
+    }
     const maxNeighbours = num(input, "max_neighbours");
     if (maxNeighbours !== undefined) {
       argv.push("--max-neighbours", String(maxNeighbours));
@@ -963,6 +1183,12 @@ const neighbourPrecedent: CustomToolSpec = {
           "Override the alignment-length floor. Leave unset for the verified default of 120 with automatic relaxation on short queries.",
         type: "number",
       },
+      multimer: {
+        description:
+          "`auto` (default) runs a multimer search when the file has more than one chain; `yes`/`no` force it. Set `no` when a fetched assembly's extra chains are symmetry copies you do not want matched.",
+        enum: ["auto", "yes", "no"],
+        type: "string",
+      },
       no_tm: {
         description:
           "Skip the tmalign pass. Faster, but then no TM-score is available at all.",
@@ -970,7 +1196,7 @@ const neighbourPrecedent: CustomToolSpec = {
       },
       structure: {
         description:
-          "Path to the query chain or assembly as a PDB/CIF file. Never a PDB ID or a URL.",
+          "The query: a 4-character PDB ID (biological assembly 1 is fetched on the machine running the script) or a path that machine can read. A sandbox path is not readable here.",
         type: "string",
       },
     },
@@ -1051,6 +1277,27 @@ export async function preflight(): Promise<void> {
           "so cryptic_analysis, interface_analysis and neighbour_precedent cannot run. " +
           "Create it, or set DRUGGABILITY_ENV to the env that has them. " +
           `(${clip(probe.stderr).split("\n").slice(-3).join(" ").trim()})`
+      );
+    }
+    // `proto_tools` is a WARNING, not a problem, and the asymmetry is
+    // deliberate. CLAUDE.md rule 13 says a missing `proto_tools` nulls the
+    // structural-neighbour axis with a stated reason, which is a legal dossier
+    // — so failing preflight on it would refuse runs the agent is specified to
+    // complete. But discovering it at the point of use looks identical to
+    // "this fold has no neighbours", so it is worth saying at second zero.
+    const proto = await run(
+      micromambaPath,
+      ["run", "-n", analysisEnvName(), "python", "-c", "import proto_tools"],
+      { timeoutSeconds: 120 }
+    );
+    if (proto.code !== 0) {
+      console.error(
+        `druggability-dossier preflight WARNING: "${analysisEnvName()}" cannot ` +
+          "import proto_tools, so `neighbour_precedent` will return a " +
+          "ModuleNotFoundError. That is UNAVAILABILITY of the " +
+          "structural_neighbour_precedent axis, which rule 13 says to null " +
+          "with a reason in not_found — it must never be written up as 'no " +
+          "structural neighbours found'. Not fatal; the run can complete."
       );
     }
   }

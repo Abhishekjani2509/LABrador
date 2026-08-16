@@ -68,14 +68,161 @@ DIRECT_CONTEXTS = ["biochemical", "cell-free", "cell free", "purified", "in vitr
 
 NS_WORD = re.compile(r"[^a-z0-9]+")
 
+# The five lists SCHEMA.md guarantees, plus `rounds`. A missing list is not the
+# same as an empty one and neither is `null`: `status: empty` with `things: []`
+# is a real answer, a graph with no `things` key at all is a malformed file, and
+# both used to produce the same silent zero-nomination output.
+GRAPH_LISTS = ("things", "papers", "findings", "links", "gaps", "rounds")
+
+
+class GraphShapeError(Exception):
+    """A structural defect that must stop the run rather than degrade it."""
+
+
+def _reject_constant(name):
+    raise GraphShapeError(
+        f"graph contains the JSON-invalid constant {name}. Python accepts it on "
+        "read and re-emits it on write, so it would leave here as JSON no strict "
+        "parser downstream can read."
+    )
+
+
+def read_list(graph, name, require_id=True):
+    """Fetch one top-level list, refusing the shapes that silently zero us out.
+
+    `rounds` rows are keyed by `n`, not `id`, so they are read with
+    require_id=False.
+    """
+    if name not in graph:
+        raise GraphShapeError(
+            f"`{name}` is absent. SCHEMA.md v1.1 makes all five lists (plus "
+            f"`rounds`) mandatory -- an exhausted search writes `{name}: []`, it "
+            f"does not omit the key. An absent list and an empty one produce the "
+            f"same zero nominations, so this is refused rather than reported."
+        )
+    val = graph[name]
+    if val is None:
+        raise GraphShapeError(
+            f"`{name}` is null. SCHEMA.md note 7: failure is still a graph and "
+            f"the lists are empty, never null. Treating null as empty would read "
+            f"a broken producer as an absence of literature."
+        )
+    if not isinstance(val, list):
+        raise GraphShapeError(
+            f"`{name}` is {type(val).__name__}, not a list."
+        )
+    for i, row in enumerate(val):
+        if not isinstance(row, dict):
+            raise GraphShapeError(
+                f"`{name}[{i}]` is {type(row).__name__}, not an object."
+            )
+        if require_id and "id" not in row:
+            raise GraphShapeError(f"`{name}[{i}]` has no `id`.")
+    return val
+
 
 def index(graph):
+    idx = {}
+    dupes = []
+    for key in ("things", "papers", "findings", "links", "gaps"):
+        rows = read_list(graph, key)
+        seen = {}
+        for row in rows:
+            rid = row["id"]
+            if rid in seen:
+                dupes.append({
+                    "list": key,
+                    "id": rid,
+                    "kept": _identity(key, row),
+                    "discarded": _identity(key, seen[rid]),
+                })
+            seen[rid] = row
+        idx[key] = seen
+    idx["_duplicate_ids"] = dupes
+    return idx
+
+
+def _identity(key, row):
+    """Enough of a row to see that two rows sharing an id are not the same row."""
+    if key == "things":
+        return {"name": row.get("name"), "kind": row.get("kind")}
+    if key == "links":
+        return {"from": row.get("from"), "how": row.get("how"), "to": row.get("to")}
+    if key == "findings":
+        return {"quote": (row.get("quote") or "")[:80], "paper": row.get("paper")}
+    if key == "papers":
+        return {"title": (row.get("title") or "")[:80], "year": row.get("year")}
+    return {"missing": row.get("missing")}
+
+
+def integrity(graph, idx):
+    """Every id that does not resolve, and every finding no link references.
+
+    SCHEMA.md's guarantees section promises `from`, `to`, `paper` and the ids
+    inside `yes`/`no`/`no_effect`/`implied_by` all resolve. That promise is not
+    enforced upstream -- the one real graph we have (g_1a4f) carries
+    `rounds[1].target: "g3"` against a gaps list holding g1, g2, g4. So the
+    promise is checked here, and a dangling id is reported rather than dropped.
+    Before this, a link whose `to` did not resolve vanished from every output:
+    no nomination, no rejection, no adjudication, exit 0.
+    """
+    dangling, orphans = [], []
+    things, papers = idx["things"], idx["papers"]
+    findings, links, gaps = idx["findings"], idx["links"], idx["gaps"]
+
+    def check(kind, rid, field, value, table, tname):
+        if value is None or value in table:
+            return
+        dangling.append({"in": kind, "id": rid, "field": field,
+                         "unresolved": value, "expected_in": tname})
+
+    for lid, l in links.items():
+        check("link", lid, "from", l.get("from"), things, "things")
+        check("link", lid, "to", l.get("to"), things, "things")
+        for arr in ("yes", "no", "no_effect"):
+            for fid in l.get(arr) or []:
+                check("link", lid, arr, fid, findings, "findings")
+
+    for fid, f in findings.items():
+        check("finding", fid, "paper", f.get("paper"), papers, "papers")
+        # SCHEMA.md v1.1 puts from/how/to on findings as well as on links; the
+        # real graph populates them. They are not read for classification, but a
+        # dangling one is still a broken row.
+        for field in ("from", "to"):
+            if field in f:
+                check("finding", fid, field, f.get(field), things, "things")
+
+    for gid, gp in gaps.items():
+        for tid in gp.get("missing") or []:
+            check("gap", gid, "missing", tid, things, "things")
+        for lid in gp.get("implied_by") or []:
+            check("gap", gid, "implied_by", lid, links, "links")
+
+    reachable = {"expand_node": things, "resolve_link": links, "test_gap": gaps}
+    for r in read_list(graph, "rounds", require_id=False):
+        tgt, verb = r.get("target"), r.get("ask")
+        if tgt and verb in reachable and tgt not in reachable[verb]:
+            dangling.append({"in": "round", "id": r.get("n"), "field": "target",
+                             "unresolved": tgt, "expected_in": verb + " index"})
+
+    cited = {fid for l in links.values() for arr in ("yes", "no", "no_effect")
+             for fid in (l.get(arr) or [])}
+    for fid in sorted(set(findings) - cited):
+        orphans.append({"finding": fid, "paper": findings[fid].get("paper"),
+                        "quote": (findings[fid].get("quote") or "")[:120]})
+
     return {
-        "things": {t["id"]: t for t in graph.get("things", [])},
-        "papers": {p["id"]: p for p in graph.get("papers", [])},
-        "findings": {f["id"]: f for f in graph.get("findings", [])},
-        "links": {l["id"]: l for l in graph.get("links", [])},
-        "gaps": {g["id"]: g for g in graph.get("gaps", [])},
+        "dangling_ids": dangling,
+        "duplicate_ids": idx["_duplicate_ids"],
+        "findings_referenced_by_no_link": orphans,
+        "note": (
+            "SCHEMA.md guarantees every id resolves. It is not enforced upstream "
+            "-- g_1a4f ships a dangling rounds[].target. A dangling id used to be "
+            "dropped silently; a duplicate id used to overwrite last-wins, which "
+            "relabels a whole evidence neighbourhood with another protein's name. "
+            "Neither is a parse error, so neither stops the run -- but a "
+            "nomination touching one of these rows is not trustworthy."
+        ) if (dangling or idx["_duplicate_ids"] or orphans) else None,
     }
 
 
@@ -207,6 +354,53 @@ def neighbourhood(thing_id, idx):
     return {k: v for k, v in tiers.items() if v}
 
 
+def signal_reading(sig):
+    """Which way the QUOTES point, independent of the verb. Mechanical.
+
+    Returns `direct`, `downstream` or `silent`. This is not a verdict and it does
+    not override anything -- it exists so that a verb and its own evidence
+    disagreeing becomes visible instead of being decided by the verb alone.
+
+    `silent` is the common case and it is deliberately not an answer: a blank
+    means the field was blank far more often than it means the experiment was
+    absent (see SKILL.md's signals table).
+    """
+    direct = bool(sig["direct_terms_in_quotes"]) or bool(sig["direct_context"])
+    downstream = bool(sig["downstream_terms_in_quotes"])
+    if direct and not downstream:
+        return "direct"
+    if downstream and not direct:
+        return "downstream"
+    return "silent"
+
+
+def contested_packet(link, idx, cls, reading, obj, things):
+    return {
+        "link": link["id"],
+        "how": link.get("how"),
+        "why_contested": (
+            f"verb {link.get('how')!r} classifies as {cls}, but the quotes on this "
+            f"edge read as {reading}. The verb and its own evidence disagree."
+        ),
+        "verb_class": cls,
+        "quote_reading": reading,
+        "subject": {"id": link.get("from"),
+                    "name": things.get(link.get("from"), {}).get("name")},
+        "object": {"id": link.get("to"), "name": obj.get("name"),
+                   "kind": obj.get("kind")},
+        "eligible_kind": obj.get("kind") in TARGET_KINDS,
+        "signals": signals(link, idx),
+        "findings": [r for r in (expand(f, link, idx)
+                                 for f in link_findings(link)) if r],
+        "decide": (
+            "Is this a direct action on a target, or a downstream effect on a "
+            "readout? SKILL.md 'Adjudicating an unknown verb' applies unchanged -- "
+            "read the quotes first, the signals only as corroboration. Refusing is "
+            "allowed; guessing is not."
+        ),
+    }
+
+
 def nominate(graph, idx):
     """A thing is a target candidate if its kind is protein or gene AND either
 
@@ -215,6 +409,23 @@ def nominate(graph, idx):
 
     (b) is what carries the undrugged candidates. Without it the intake can only
     ever return targets somebody already made a molecule against.
+
+    Two things this deliberately does NOT do any more:
+
+    A direct-action verb no longer nominates on its own when the quotes on that
+    same edge read downstream, and a downstream verb no longer rejects on its own
+    when the quotes read direct. `classify()` is a pure function of (subject
+    kind, verb) and the quote never reached it, so `blocks IL-6 secretion`
+    nominated a cytokine as a target and `suppresses IRAK4 catalytic activity,
+    Ki 1.1 nM` rejected a kinase as a readout -- both silently. Those now go to
+    `needs_adjudication` where the existing procedure decides them.
+
+    A gap no longer erases a rejection. Upstream `gaps` are structural open
+    triangles (assemble.py `find_gaps`: A-B and B-C exist, A-C does not), not a
+    curated list of undrugged candidates -- run their generator over our own RA
+    fixture and it emits `missing: [IRAK4, IL-6]`, because both connect to
+    zimlovisertib. The old `rejected.pop(tid)` then deleted IL-6's "readout, not
+    target" reason and nominated it. A thing that is both is now reported as both.
     """
     things = idx["things"]
     nominated, rejected, adjudicate = {}, {}, []
@@ -223,7 +434,17 @@ def nominate(graph, idx):
         cls = classify(link, things)
         obj = things.get(link.get("to"), {})
         if not obj:
+            # `to` does not resolve. Reported by integrity(); not silently gone.
             continue
+        reading, sig = None, None
+        if cls in ("direct_action", "downstream_effect"):
+            sig = signals(link, idx)
+            reading = signal_reading(sig)
+            if (cls == "direct_action" and reading == "downstream") or \
+               (cls == "downstream_effect" and reading == "direct"):
+                adjudicate.append(
+                    contested_packet(link, idx, cls, reading, obj, things))
+                continue
         if cls == "direct_action":
             if obj.get("kind") not in TARGET_KINDS:
                 rejected.setdefault(obj["id"], []).append(
@@ -231,8 +452,43 @@ def nominate(graph, idx):
                     f"'{obj.get('kind')}', not one of {sorted(TARGET_KINDS)}"
                 )
                 continue
+            # `says` has three values and a link has three arrays to match. A
+            # direct-action edge whose findings ALL say `no` is the literature
+            # reporting that the compound does not act on this thing, and it used
+            # to produce a nomination indistinguishable from a positive one.
+            support = {
+                "yes": len(link.get("yes") or []),
+                "no": len(link.get("no") or []),
+                "no_effect": len(link.get("no_effect") or []),
+            }
             nominated.setdefault(obj["id"], []).append({
                 "via": link["id"],
+                "evidence_class": "direct_action_edge",
+                "support": support,
+                # The quote reading travels WITH the nomination, including when
+                # it is `silent`. A silent reading is the residual boundary: the
+                # quote carries no vocabulary either way, so nothing but the verb
+                # supports this nomination. `targets IL-6 driven inflammation in
+                # synovium` reads silent and nominates a cytokine -- the verb is
+                # doing all the work and the agent has to know that.
+                "quote_reading": reading,
+                "quote_reading_note": (
+                    "Quotes corroborate a direct action." if reading == "direct" else
+                    "NO quote on this edge carries direct-binding vocabulary. The "
+                    "verb alone put this thing forward as a target. Read the quotes "
+                    "(SKILL.md step 2) before accepting it -- this is the shape "
+                    "that turns a readout into a target."
+                ),
+                "signals": sig,
+                "direction_warning": (
+                    None if support["yes"] else
+                    f"edge {link['id']} carries NO `yes` findings "
+                    f"({support['no']} no, {support['no_effect']} no_effect). "
+                    "SCHEMA.md: a negation lives in `says`, never in the verb, so "
+                    f"'{link.get('how')}' here states the opposite of what it reads "
+                    "like. A no_effect on a direct-action edge is real tractability "
+                    "evidence; a `no` is evidence against the relation itself."
+                ),
                 "why": (
                     f"object of direct-action edge from small_molecule "
                     f"{link['from']} ({link.get('how')})"
@@ -278,21 +534,150 @@ def nominate(graph, idx):
                 continue
             nominated.setdefault(tid, []).append({
                 "via": gap["id"],
-                "why": "named in a gap -- undrugged candidate, no direct-action edge yet",
+                "evidence_class": "structural_gap_only",
+                "why": (
+                    f"named in gap {gap['id']} (missing pair "
+                    f"{gap.get('missing')}). Upstream gaps are open triangles, "
+                    "computed from graph shape, NOT curated undrugged candidates: "
+                    "this thing shares a neighbour with the other half of the pair "
+                    "and has no edge to it. It carries no evidence of its own."
+                ),
             })
 
+    # A gap nomination no longer deletes a rejection. Both are reported, and the
+    # collision is named, because "this was rejected as a readout AND nominated
+    # by a gap" is exactly the case the old pop() hid.
+    contested_nominations = {}
     for tid in nominated:
-        rejected.pop(tid, None)
+        if tid in rejected:
+            contested_nominations[tid] = rejected[tid]
 
-    return nominated, rejected, adjudicate
+    return nominated, rejected, adjudicate, contested_nominations
+
+
+def coverage_notes(graph):
+    """Everything in `coverage` that bears on reading an absence as a result.
+
+    Three things used to be invisible here. An ABSENT `coverage` block produced
+    no warning at all, so a graph missing the block read exactly like a
+    `complete` one. `no_quote_discarded` -- the count of claims upstream threw
+    away for having no verbatim sentence, and its only documented removal -- was
+    never surfaced. And `depth: quick` was never surfaced, though SCHEMA.md note
+    2 says quick reads page 1 and page 1 lies, so at quick an absence means
+    nothing even when stop_reason is `complete`.
+    """
+    if "coverage" not in graph:
+        return {
+            "coverage_present": False,
+            "note": (
+                "`coverage` is ABSENT. SCHEMA.md: 'what was NOT read. Always "
+                "present.' With no coverage block there is no basis on which to "
+                "read any absence in this graph as a result -- treat every "
+                "unstated thing as unknown, not as absent."
+            ),
+        }
+    coverage = graph["coverage"]
+    if coverage is None or not isinstance(coverage, dict):
+        raise GraphShapeError(
+            f"`coverage` is {type(coverage).__name__}, not an object. SCHEMA.md "
+            "makes it always present and always real, including on a failed graph."
+        )
+
+    stop = coverage.get("stop_reason")
+    depth = coverage.get("depth")
+    discarded = coverage.get("no_quote_discarded")
+    warnings = []
+
+    if coverage.get("truncated"):
+        warnings.append("`truncated` is true: this is a sample, not the literature.")
+    if stop is None:
+        warnings.append("`stop_reason` is absent -- cannot tell budget from exhaustion.")
+    elif stop != "complete":
+        warnings.append(
+            f"`stop_reason` is {stop!r}. Only 'complete' means the literature was "
+            "exhausted; the other four mean the run ran out of budget, so an "
+            "absent mechanism statement here is a budget limit, not an "
+            "established absence (SCHEMA.md note 6)."
+        )
+    if depth == "quick":
+        warnings.append(
+            "`depth` is 'quick'. SCHEMA.md note 2: quick reads page 1, and page 1 "
+            "lies -- at this depth absence means unknown, whatever stop_reason says."
+        )
+    if discarded:
+        warnings.append(
+            f"`no_quote_discarded` is {discarded}: upstream dropped {discarded} "
+            "extracted claim(s) for carrying no verbatim sentence. That is the "
+            "pipeline's only documented removal, it is silent in the graph, and "
+            "those claims are not recoverable from this file. Anything this "
+            "intake reports as unstated may be among them."
+        )
+
+    return {
+        "coverage_present": True,
+        "truncated": coverage.get("truncated"),
+        "stop_reason": stop,
+        "depth": depth,
+        "no_quote_discarded": discarded,
+        "literature_exhausted": stop == "complete" and depth != "quick"
+                                and not coverage.get("truncated"),
+        "warnings": warnings,
+        "note": None if warnings else
+                "coverage is clean: untruncated, stop_reason 'complete', nothing "
+                "discarded. An absence in this graph may be read as an absence.",
+    }
+
+
+def selection_note(out):
+    """The dossier's Contract takes ONE `uniprot_accession`. The graph can
+    nominate any number and offers no basis to rank them -- and this skill does
+    not rank (SKILL.md 'What this skill does not do'). Zero and many are both
+    real outcomes and both used to look like a plain list.
+    """
+    n = len(out)
+    with_evidence = [
+        o["thing"] for o in out
+        if any(r.get("evidence_class") == "direct_action_edge"
+               for r in o["nominated_by"])
+    ]
+    gap_only = [o["thing"] for o in out if o["thing"] not in with_evidence]
+    if n == 0:
+        note = ("No candidate. Read `rejected`, `needs_adjudication` and "
+                "`integrity` before reporting this as 'no targets in the "
+                "literature' -- a granularity mismatch, a dangling id or an "
+                "unknown verb all land here too.")
+    elif n == 1:
+        note = "One candidate. No choice to make."
+    else:
+        note = (
+            f"{n} candidates and NO basis in the graph to choose between them. "
+            "The dossier Contract takes one `uniprot_accession`, and this skill "
+            "does not rank. Do not take the first: the order here is by `thing` "
+            "id, which is insertion order upstream and carries no meaning. Either "
+            "run the dossier once per candidate, or state the ambiguity and issue "
+            "an ask. Picking one silently is the failure this field exists to stop."
+        )
+    return {
+        "n_candidates": n,
+        "basis_to_choose": None,
+        "with_direct_action_evidence": with_evidence,
+        "gap_only_no_evidence": gap_only,
+        "note": note,
+    }
 
 
 def build(graph, only=None):
     idx = index(graph)
     things = idx["things"]
-    nominated, rejected, adjudicate = nominate(graph, idx)
+    nominated, rejected, adjudicate, contested = nominate(graph, idx)
 
     if only:
+        if only not in nominated:
+            raise GraphShapeError(
+                f"--thing {only!r} is not a nomination. Nominated: "
+                f"{sorted(nominated) or '(none)'}. Filtering to a thing that was "
+                "never nominated returns an empty result that reads like a finding."
+            )
         nominated = {k: v for k, v in nominated.items() if k == only}
 
     out = []
@@ -305,6 +690,10 @@ def build(graph, only=None):
             "aliases": t.get("aliases", []),
             "mentions": t.get("mentions"),
             "nominated_by": reasons,
+            # Populated when this same thing also carries a rejection. The old
+            # code deleted the rejection; a readout named in a structural gap
+            # then became an unqualified target.
+            "also_rejected_because": contested.get(tid),
             # Filled by the agent. Left null on purpose -- see SKILL.md.
             "gene_symbol": None,
             "uniprot_accession": None,
@@ -314,14 +703,17 @@ def build(graph, only=None):
             "evidence": neighbourhood(tid, idx),
         })
 
-    coverage = graph.get("coverage", {})
+    coverage = graph.get("coverage") or {}
     status = graph.get("status")
     # `complete` is the ONLY stop_reason meaning the literature was exhausted.
     # The other four mean the run ran out of budget (SCHEMA.md note 6).
     stop_reason = coverage.get("stop_reason")
-    retracted = [p["id"] for p in graph.get("papers", []) if p.get("retracted")]
+    retracted = [p["id"] for p in idx["papers"].values() if p.get("retracted")]
 
     return {
+        "integrity": integrity(graph, idx),
+        "coverage": coverage_notes(graph),
+        "selection": selection_note(out),
         "graph_id": graph.get("graph_id"),
         "round": graph.get("round"),
         "question": graph.get("question"),
@@ -333,6 +725,9 @@ def build(graph, only=None):
             else f"graph status is '{status}' -- lists may be empty for reasons that "
                  f"are not evidence. Do not read zero nominations as a result."
         ),
+        # Kept for callers that read it. `coverage` above is the fuller block and
+        # is the one to read: this one is null on an ABSENT coverage key, which
+        # was the bug.
         "coverage_warning": (
             {
                 "truncated": coverage.get("truncated"),
@@ -350,8 +745,21 @@ def build(graph, only=None):
         "retracted_papers": retracted,
         "nominations": out,
         "rejected": [
-            {"thing": tid, "name": things.get(tid, {}).get("name"), "why": why}
+            {"thing": tid, "name": things.get(tid, {}).get("name"), "why": why,
+             "also_nominated": tid in contested}
             for tid, why in sorted(rejected.items())
+        ],
+        "contested_nominations": [
+            {"thing": tid, "name": things.get(tid, {}).get("name"),
+             "nominated_by": [r["via"] for r in nominated.get(tid, [])],
+             "rejected_because": why,
+             "note": (
+                 "This thing is BOTH nominated and rejected. Most often: reached "
+                 "by a downstream-effect edge (readout) and separately named in a "
+                 "structural gap. The gap is not evidence -- it is an open "
+                 "triangle. Decide before handing this to the dossier."
+             )}
+            for tid, why in sorted(contested.items())
         ],
         "needs_adjudication": adjudicate,
     }
@@ -415,7 +823,7 @@ def already_asked(graph, ask_type, target):
     look like it was interrogated twice as hard as it was.
     """
     hits = []
-    for r in graph.get("rounds", []):
+    for r in read_list(graph, "rounds", require_id=False):
         if r.get("ask") == ask_type and r.get("target") == target:
             hits.append(r)
     return hits
@@ -560,7 +968,7 @@ def ask_context(graph):
         "asks_already_issued": [
             {"n": r.get("n"), "ask": r.get("ask"), "target": r.get("target"),
              "outcome": r.get("outcome")}
-            for r in graph.get("rounds", [])
+            for r in read_list(graph, "rounds", require_id=False)
         ],
         "links": sorted(rows, key=lambda r: r["link"]),
         "_warning": (
@@ -595,8 +1003,16 @@ def main():
     )
     args = ap.parse_args()
 
-    with open(args.graph) as fh:
-        graph = json.load(fh)
+    try:
+        with open(args.graph) as fh:
+            # parse_constant fires on NaN/Infinity, which json.load otherwise
+            # accepts and json.dump re-emits as invalid JSON for a strict consumer.
+            graph = json.load(fh, parse_constant=_reject_constant)
+    except GraphShapeError as exc:
+        sys.exit(f"refusing: {exc}")
+
+    if not isinstance(graph, dict):
+        sys.exit(f"refusing: top level is {type(graph).__name__}, not an object.")
 
     if graph.get("_fixture") and not args.allow_fixture:
         sys.exit(
@@ -604,18 +1020,26 @@ def main():
             "synthetic. Re-run with --allow-fixture for a test."
         )
 
-    if args.check_ask:
-        gates, unchecked = check_ask(graph, json.loads(args.check_ask))
-        json.dump({"gates": gates, "not_checked_here": unchecked}, sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        sys.exit(0 if all(g["ok"] for g in gates) else 1)
+    try:
+        if args.check_ask:
+            gates, unchecked = check_ask(graph, json.loads(args.check_ask))
+            json.dump({"gates": gates, "not_checked_here": unchecked},
+                      sys.stdout, indent=2)
+            sys.stdout.write("\n")
+            sys.exit(0 if all(g["ok"] for g in gates) else 1)
 
-    if args.ask_context:
-        json.dump(ask_context(graph), sys.stdout, indent=2)
-        sys.stdout.write("\n")
-        return
+        if args.ask_context:
+            payload = ask_context(graph)
+        else:
+            payload = build(graph, args.thing)
+    except GraphShapeError as exc:
+        # Loud and specific. The alternative -- a bare TypeError, or worse a
+        # clean exit with zero nominations -- reads as "no targets in this
+        # literature", which is the one wrong answer this file must never give.
+        sys.exit(f"refusing: {exc}")
 
-    json.dump(build(graph, args.thing), sys.stdout, indent=2)
+    # allow_nan=False so a NaN that got this far cannot leave as invalid JSON.
+    json.dump(payload, sys.stdout, indent=2, allow_nan=False)
     sys.stdout.write("\n")
 
 

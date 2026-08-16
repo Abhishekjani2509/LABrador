@@ -6,128 +6,277 @@ The deliverable is **one JSON file** at the canonical sandbox path:
 /mnt/session/outputs/druggability-dossier.json
 ```
 
-Grade that file. Do not grade the reply text, and do not accept a claim made in
-the reply that the file does not itself support.
+**Grade that file and nothing else.** Do not grade the reply text, do not accept
+a claim made in the reply that the file does not itself support, and do not fail
+a run for something the file cannot express. Every criterion below is decided by
+reading that file or by re-running a bundled script against it; none of them
+turns on prose quality, effort, or thoroughness. A criterion that cannot be
+falsified from the file is not a criterion, and a rubric full of them produces
+nothing but `max_iterations_reached`.
 
-Most of this rubric is already executable. The skill bundle ships a machine
-validator with 13 rules and 14 violation types, and it is pure-stdlib Python, so
-it runs in the sandbox with no installation:
+## Step 1 — run the validator. It settles criteria 1–17.
+
+The skill bundle ships a machine validator. It is pure-stdlib Python, so it runs
+in the sandbox with nothing installed:
 
 ```
 python3 .claude/skills/assemble-dossier/validate_dossier.py \
         /mnt/session/outputs/druggability-dossier.json
 ```
 
-It exits **0** with no violations and **1** with them, printing
-`[RULE] path: message` for each. Run it first: criteria 1–9 below are exactly
-its rules, so a clean exit satisfies all nine at once, and any violation it
-prints names the criterion that failed and where.
+It carries **16 rule functions emitting 17 violation codes**, and it is covered
+by 86 unit tests in `test_validate_dossier.py` beside it. It exits **0** with no
+violations, **1** with them, and **2** if invoked with no argument; on violations
+it prints one `  [CODE] path: message` line per finding, sorted.
 
-## Criteria
+**A clean exit satisfies criteria 1–17 at once.** Each violation it prints names
+the criterion that failed and the JSON path that failed it, so grade from its
+output rather than re-deriving the same checks by eye. Criteria 18–21 are the
+ones the validator does not cover; they are still decided from the file.
 
-1. **The file exists, is valid JSON, and is a JSON object.** A dossier that
-   cannot be parsed fails everything else by default.
-   (`WELL_FORMED`)
+Where this rubric and the validator could ever disagree, **the validator wins**
+and this document is the stale one. It is the machine grader; this is its index.
 
-2. **Every key in the CLAUDE.md output template is present.** Unretrieved values
-   are `null` and empty collections are `[]`; no key is omitted, and no template
-   placeholder string (`""` where a value was required, `"small_molecule_tractable | not_tractable | insufficient_evidence"`)
-   is left standing. `verdict` is a label, never a number.
-   (`WELL_FORMED`)
+## Criteria 1–17 — exactly the validator's rules
 
-3. **Every number carries provenance.** Each numeric leaf sits inside a block
-   whose `sources` list is non-empty, or carries its own `source`. The four
-   blocks that no other key attributes — `target`, `tractability`, `structure`,
-   `affinity` — each have their own non-empty `sources`. An empty `sources`
-   list attributes nothing and counts as absent.
-   (`NUMBER_WITHOUT_PROVENANCE`)
+Listed in the validator's own registry order, with the trigger that fails them.
 
-4. **The two axes are reported separately and never averaged.** There is no
-   combined or overall score anywhere in the file, and `verdict_basis` is one of
-   `retrieved_precedent`, `computed_tractability`, `both`, `none` — naming which
-   axis carried the verdict. A verdict with no basis is an average with extra
-   steps.
-   (`AXES_AVERAGED`)
+1. **`WELL_FORMED` — the file parses and the template is filled.** A JSON object;
+   all 16 required top-level keys present; every enumerated field
+   (`verdict`, `verdict_basis`, `structure.tier`,
+   `tractability.cryptic_pocket_risk`, `tractability.cryptic_mechanism`,
+   `cryptic_potency_prior.expected_ceiling`,
+   `pocket_vs_interface.classification`) non-null and inside its legal set; no
+   string anywhere still containing the template's `" | "` alternation; no
+   nameless stub entries in the six list blocks; `verdict` a label and never a
+   number; `next_experiment.description` and `biologic_precedent.note`
+   non-empty; `falsification.survived` an actual boolean and `checks_run`
+   non-empty; no NaN or Infinity.
 
-5. **Modality is separated per drug.** Every entry in
-   `target_precedent.approved_small_molecules` and
-   `clinical_stage_small_molecules` carries `modality: "small_molecule"` and
-   nothing else; antibodies, peptides, fusion proteins and `Unknown`
-   `molecule_type` values are not in those lists. Biologics appear under
-   `biologic_precedent`; modality-unknown drugs appear in `not_found` and count
-   toward neither block. A USAN `-mab` or `-cept` stem inside a small-molecule
-   list is an automatic failure.
-   (`MODALITY_LEAK`)
+2. **`NUMBER_WITHOUT_PROVENANCE` — every number carries provenance.** Each
+   numeric leaf must sit inside a dict holding a non-empty provenance key
+   (`source`, `sources`, `_provenance`, `doi`, `pdb_id`, `chembl_target_id`,
+   `tool`, `basis`, `ensemble_pdb_ids` and the rest of the 24 the validator
+   accepts). Provenance inherits **downward only**, so in practice `target`,
+   `tractability`, `structure` and `affinity` each need their own non-empty
+   `sources` — nothing else attributes their numbers. An empty list attributes
+   nothing.
 
-6. **Druggability is a range and volume is the primary number.**
-   `tractability.pocket_druggability` has both `min` and `max` present whenever
-   it is populated at all — never a single point value — and
-   `pocket_volume_a3` carries its spread. Any reported fraction gives its
-   denominator: `ensemble_consensus_fraction` has `n_structures` **or**
-   `n_measurements`, and leaves `meets_consensus_criterion` null when only
-   measurements (not structures) were counted.
-   (`DRUGGABILITY_POINT_ESTIMATE`, `FRACTION_WITHOUT_N`)
+3. **`AXES_AVERAGED` — the two axes are never merged.** No key named or
+   containing `overall`, `composite`, `score`, `averaged`, `axis_average` and
+   the rest of the banned set; and no numeric value under a key that mixes a
+   precedent token (`precedent`, `actives`, `potency`, `approved`, `clinical`)
+   with a tractability token (`druggability`, `pocket`, `tractability`,
+   `volume`). There is no overall number in this dossier, by construction.
 
-7. **A pooled spread records how the site was chosen.**
-   `pocket_volume_a3.site_pocket_selected_by` and
-   `pocket_druggability.site_pocket_selected_by` are populated. Values of
-   `site_signature_unreliable_homooligomer`, `max_druggability_no_ligand_site`
-   or `no_pocket_matched_site_signature` do not identify a site, so numbers
-   carrying them are reported per structure and not pooled into one spread.
-   (`SAME_SITE_BASIS_MISSING`, `SAME_SITE_BASIS_INVALID`)
+4. **`MODALITY_LEAK` — modality is separated per drug.** Every entry in
+   `approved_small_molecules` and `clinical_stage_small_molecules` carries
+   `modality: "small_molecule"`; no name from `biologic_precedent` appears in
+   either; no USAN `-mab` or `-cept` stem in either. Also fires when
+   `verdict: "small_molecule_tractable"` rests on `retrieved_precedent` or
+   `both` with both lists empty and no characterised potency — that is a
+   biologic being leaned on — and when a tractable verdict with zero approved
+   small molecules and an approved biologic leaves `axis_conflict` empty.
 
-8. **A cryptic claim carries its apo census.** `cryptic_evidence.is_cryptic` is
-   true or false after a run and never null. When true, `n_apo_examined` and
-   `n_apo_site_absent` are both present, more than one apo structure was
-   examined, and the site was absent in all or nearly all of them (Vajda 2018);
-   `site_present_in_apo_ensemble: true` means **occluded, not cryptic**. A
-   `cryptic_mechanism` other than `none` or `undetermined` with no
-   `cryptic_evidence` behind it is an assertion, not a finding.
-   (`CRYPTIC_MISCLAIM`)
+5. **`INSUFFICIENT_EVIDENCE_AVOIDED` — declining is a correct answer and it must
+   be reachable.** Fewer than 50 distinct actives, `structure.holo_count` a
+   literal `0`, and no approved small molecules, with any verdict other than
+   `insufficient_evidence`, fails. So does `insufficient_evidence` with an empty
+   `next_experiment.resolves`.
 
-9. **Null says why, and null is not zero.** Every null value has a matching
-   entry in `not_found` naming the field and the reason. Nothing that could not
-   be retrieved is reported as `0`.
-   (`NULL_IS_NOT_ZERO`)
+6. **`DRUGGABILITY_POINT_ESTIMATE` — druggability is a range, never a point.**
+   `pocket_druggability` and `pocket_volume_a3` are objects, not scalars;
+   `min` and `max` are both present or both absent; a populated range requires
+   at least two distinct values in `method.clustering_d_swept`, a non-empty
+   `method.ensemble_pdb_ids`, and a volume beside it (or the missing volume
+   named in `not_found`). No numeric value under any other key containing
+   `druggab` is allowed outside `pocket_druggability.min`/`.max`/`.fold_range`.
 
-10. **`as_of_date` integrity.** When `as_of_date` is set,
-    `target_precedent.as_of_leakage` carries one entry per affected field, and
-    `clinical_stage_small_molecules` has an entry **unconditionally** — including
-    when the list is empty, because ChEMBL's `max_phase` is a current value with
-    no phase history. With no `as_of_date` the list is `[]`.
-    (`AS_OF_LEAKAGE`)
+7. **`DRUGGABILITY_LOAD_BEARING` — the score is reported and carries nothing.**
+   This is the rule that changed on 2026-08-15 and it has four parts:
+   `pocket_druggability.load_bearing` must be **literally `false`** (missing,
+   `true`, `"false"` and `0` all fail); `_false_negative_rate` must be a
+   non-empty string wherever a range is reported; a `not_tractable` or
+   `insufficient_evidence` verdict on `computed_tractability` or `both` with
+   `pocket_druggability.max < 0.5` and **no** volume number anywhere in
+   `pocket_volume_a3` (`primary_d1_6_a3`, `min`, `max`) fails outright — decline
+   on an **unmeasured volume**, never on a poor score; and a low druggability
+   sitting beside a volume of 240 Å³ or more requires a non-empty
+   `tractability.caveat` stating the disagreement.
 
-11. **Axis disagreement is declared.** When retrieved precedent and computed
-    tractability point different ways, `axis_conflict` is populated with a
-    non-empty explanation rather than resolved or averaged away. The reference
-    case: a target with a strong pocket and zero approved small molecules is
-    `verdict_basis: "both"` with `axis_conflict` populated.
-    (`AXIS_CONFLICT_UNDECLARED`)
+8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the computed axis's number.**
+   Whenever any volume or druggability figure is reported,
+   `pocket_volume_a3.primary_d1_6_a3` must be numeric (or excused by name in
+   `not_found`); it must not exceed **1000 Å³**, which is the signature of sites
+   merged with neighbouring cavities rather than a D=1.6 site volume; and a
+   reported min/max needs `pocket_volume_a3.clustering_d` populated.
 
-12. **An actives count is a claim about assays until proven otherwise.** Whenever
-    `target_precedent.distinct_actives` is populated,
-    `assay_concentration.top_assay_description` and `top_assay_share_pct` are
-    populated too, and `measures_a_different_target` is answered. A single assay
-    above ~30% of all activity is stated as such.
-    (`ASSAY_PROVENANCE_MISSING`)
+9. **`FRACTION_WITHOUT_N` — a fraction with no denominator is not a
+   measurement.** `ensemble_consensus_fraction.fraction_with_strong_pocket`
+   requires one of `n_structures`, `n_measurements` or `n`; and a stated
+   `n_structures` must equal `len(method.ensemble_pdb_ids)`.
 
-13. **`insufficient_evidence` was reachable.** A target with no structure, no
-    actives and no patents returns `verdict: "insufficient_evidence"` with both
-    axes null and `next_experiment` naming what would resolve it. A confident
-    score on an unstudied target fails this criterion; so does declining without
-    naming a resolving experiment.
-    (`INSUFFICIENT_EVIDENCE_AVOIDED`)
+10. **`SAME_SITE_BASIS_MISSING` — a pooled spread records how the site was
+    chosen.** `site_pocket_selected_by` is populated on both
+    `pocket_volume_a3` and `pocket_druggability` whenever either carries a
+    number, and every value is one of the five legal bases
+    (`ligand_site_jaccard`, `site_signature_overlap`,
+    `site_signature_unreliable_homooligomer`, `max_druggability_no_ligand_site`,
+    `no_pocket_matched_site_signature`).
 
-14. **Blocks that could not be computed are null with a reason, not fabricated.**
-    Several dossier axes have no tool available in this deployment — the
-    affinity predictor, cofolding, and the Open Targets modality cross-check.
-    Their fields (`affinity.*`, `structure.cofold_control`,
-    `pocket_neighbour_precedent.*.cofold_transfer`) must be `null` with the
-    unavailability recorded in `not_found`. A populated value in any of them is
-    recalled, not measured, and fails this criterion outright.
+11. **`SAME_SITE_BASIS_INVALID` — three of those five do not identify a site.**
+    `site_signature_unreliable_homooligomer`, `max_druggability_no_ligand_site`
+    and `no_pocket_matched_site_signature` may not appear on a figure pooled
+    across more than one measurement (structures × clustering values). Report
+    those per structure instead.
 
-15. **The final reply carries the dossier.** Sandbox files are not retrievable
-    through the Files API after the session ends, so the reply is the only
-    channel back. This criterion is graded on the file only insofar as the file
-    must exist and be complete; the reply requirement is stated in `CLAUDE.md`
-    and is not machine-graded here.
+12. **`SITE_INCONSISTENT` — the number must belong to the site being claimed.**
+    `mdpocket_site_definition_used: "site_from_density"` with
+    `site_centroid_to_ligand_distance_a` above **4 Å** may not have volume or
+    druggability reported as the site's — that is a different cavity. And a
+    substantive `pocket_vs_interface.classification` requires both
+    `partner_pdb_id` and `pocket_interface_overlap`, because rule 2b's
+    classification is measured against a partner structure or it is an
+    assumption.
+
+13. **`CRYPTIC_MISCLAIM` — a cryptic claim carries its apo census.**
+    `cryptic_evidence.is_cryptic` is a real boolean after a run, with a
+    non-empty `basis`. When true: `n_apo_examined` ≥ 1 and
+    `n_apo_site_absent / n_apo_examined ≥ 0.8` (Vajda 2018's "all or nearly
+    all"), `site_present_in_apo_ensemble` not true (true means **occluded, not
+    cryptic** — this is the TNF-alpha case), and `cryptic_pocket_risk` not
+    `low`. A `cryptic_mechanism` other than `none`/`undetermined` with no census
+    is an assertion. Mechanism and prognosis must agree: side-chain or subunit
+    occlusion may not claim a nanomolar ceiling, and loop motion may not claim
+    micromolar-at-best.
+
+14. **`NULL_IS_NOT_ZERO` — null says why, and null is not zero.** Across the 15
+    measured fields, a null needs a matching `not_found` entry naming it; a
+    field named in `not_found` may not then be reported as `0`; and no
+    measured field is a string. Placeholder strings (`"n/a"`, `"unknown"`,
+    `"none"`, `"-"`) under any `_count`/`_nm`/`_pct`/`_a3`/`_fraction`/`_a` key
+    fail.
+
+15. **`AS_OF_LEAKAGE` — the cutoff is binding.** With `as_of_date` set it must
+    be ISO `YYYY-MM-DD`; `distinct_actives`, `best_potency_nm` and `patents`
+    need a leakage entry whenever they carry a value;
+    `clinical_stage_small_molecules` needs one **unconditionally, including when
+    the list is empty**; no entry `year` may exceed the cutoff year; no
+    `release_date` may sort after it. With no `as_of_date`, `as_of_leakage` is
+    `[]`.
+
+16. **`AXIS_CONFLICT_UNDECLARED` — disagreement is declared, not resolved.**
+    `axis_conflict` must be non-empty when: there are approved biologics and no
+    approved small molecules alongside a tractable verdict or ≥500 actives; or
+    ≥500 actives with zero holo structures; or a single assay at ≥30% share that
+    measures a different target; or a best potency reported as uncharacterised.
+
+17. **`ASSAY_PROVENANCE_MISSING` — an actives count is a claim about assays.**
+    A non-zero `distinct_actives` requires `top_assay_description` and
+    `top_assay_share_pct`; a share ≥30% requires
+    `measures_a_different_target` answered; and a reported `best_potency_nm`
+    requires `best_potency_characterised` answered.
+
+## Criteria 18–21 — file-verifiable, not validator-enforced
+
+The validator does not check these. Read them off the JSON directly.
+
+18. **Chain selection was asserted, and recorded.**
+    `tractability.method.chains_used` is populated with the chains actually
+    scored — `pocket_scan` now takes `chains` and `site_residues`, so rule 2b is
+    executable and "chain selection could not be asserted" is no longer a legal
+    caveat. The one exception is an input with no `mechanism_hypothesis`: then
+    `chains_used` may be null **only if** `tractability.caveat` says the pockets
+    are for the biological assembly because no mechanism was specified. A null
+    `chains_used` with no such caveat fails, because chain selection changes the
+    answer (KRAS 4OBE: 0.442 at rank 1 on chain A, 0.257 at rank 6 on A+B) and a
+    silent whole-assembly default is an unstated assertion.
+
+19. **The method block reconstructs the run.** `tractability.method` carries
+    `tool`, `clustering_d_swept` with at least two values, and
+    `ensemble_pdb_ids` matching `structure.ensemble_used`. The sweep is what
+    measures the parameter's own effect — within-structure |D=2.4 − D=1.6| on
+    the same site has a median of 0.229 — so a single clustering value is not a
+    measurement.
+
+20. **Site rank reports both rankers or neither.** When
+    `tractability.site_pocket_rank` carries a number, `fpocket` and `prank` are
+    both present (`prank` may be null with a `not_found` entry if PRANK did not
+    run), alongside `n_pockets`. PRANK is a site-*finding* aid — it promotes the
+    true site in 79% of 70 ligand-anchored measurements and demotes it in 1% —
+    and as a druggability classifier its rank is inverted at AUC 0.25, so a rank
+    reported alone reads as a quality value and must not.
+
+21. **Unavailable axes are null with a reason, never fabricated.** Two parts,
+    and only the first is absolute.
+
+    *Hard:* `affinity.*` (including rule 12's positive control),
+    `structure.cofold_control` and every
+    `pocket_neighbour_precedent.*.cofold_transfer` are `null`, and
+    `structure.tier` is not `cofolded`, `predicted` or `sampled_ensemble`.
+    There is no affinity predictor, no cofolding model, no structure predictor
+    and no Open Targets client in this deployment, so a populated value in any
+    of them is recalled from memory rather than measured. A recalled number is
+    indistinguishable from a measured one once it is in the JSON, and it is the
+    one error this dossier cannot survive. **Any populated value here fails
+    outright.**
+
+    *Stated:* `not_found` names the missing capability, at block level. One
+    entry with `field: "affinity"` covers the whole block including the
+    positive control — that is how both shipped reference dossiers do it and it
+    is sufficient. Where `neighbour_precedent` returned a
+    `ModuleNotFoundError`, `structural_neighbour_precedent` is recorded as
+    *unavailable* and never as "no structural neighbours found"; the same
+    distinction applies to a `pocket_scan` ligand lookup that failed rather than
+    missed.
+
+## What this rubric must NOT do
+
+These are failure modes of the *grader*, and they are as costly as a bad
+dossier.
+
+- **Do not gate on a volume threshold.** Volume at D=1.6 separated all 15
+  evaluation targets perfectly (AUC 1.000, stable under all 15 leave-one-out
+  refits, hard ≤207 Å³ and druggable ≥242 Å³), but that boundary is a **17%
+  margin fitted post hoc on n=15 and is not calibrated**, on 5 hard targets that
+  are all PPI/cytokine/membrane against a druggable set enriched in kinases and
+  GPCRs — so it may partly be tracking target class. A target at 230 Å³ is
+  *unclassified* by it. The only numeric volume gates anywhere in the grader are
+  the 1000 Å³ merge-artifact ceiling (criterion 8) and the 240 Å³ trigger for
+  *requiring a caveat* (criterion 7) — neither classifies anything as druggable
+  or hard, and no criterion may be added that does.
+
+- **Do not grade a druggability value against an expected number.** The same
+  structure read 0.673 on the deployed path and 0.708 locally; fpocket estimates
+  volume by Monte Carlo and the score inherits that noise, and roughly one
+  percentage point of any reported CV is the method's own. Never fail a run on
+  the third significant figure, and never treat a low druggability as a wrong
+  answer — 41% of pockets with a drug physically bound score below 0.1
+  (n=37 ligand-anchored holo structures; EGFR with osimertinib scores 0.013).
+
+- **Do not accept persistence as a substitute.** The site pocket was detected in
+  100% of structures for all 15 targets, so persistence is constant and its AUC
+  is exactly 0.500; the published consensus criterion built on it ranks MYC
+  first. `ensemble_consensus_fraction` is an anti-cherry-picking control
+  (criterion 9), not a tractability signal, and no criterion may read it as one.
+
+- **Do not require a druggability figure from mdpocket.** Its druggability field
+  is **null by design**: fpocket's score is min-max normalised across the other
+  pockets of the same structure, and a fixed grid has a population of one, so
+  the quantity is undefined there. A null is correct; a number would be the bug.
+
+- **Do not demand a key-by-key `not_found` enumeration where a block-level
+  entry covers it.** Provenance and stated-absence both inherit downward. The
+  two shipped reference dossiers,
+  `.claude/skills/assemble-dossier/examples/jak1_P23458.json` and
+  `tnf_P01375.json`, both exit the validator at **0 violations** and are the
+  calibration for how much bookkeeping is enough — if a criterion you are about
+  to apply would fail either of them, the criterion is wrong, not the dossier.
+  Re-run the validator on them in the sandbox to check.
+
+- **Do not grade the reply.** `CLAUDE.md` requires the complete JSON in the
+  final reply as well as on disk, because sandbox files are not retrievable
+  after the session ends. That requirement is real and it is **not a criterion
+  here** — this grader sees only the file, so a reply requirement graded from
+  the file would either be vacuous or fail every run. The file's existence,
+  parseability and completeness are criterion 1.

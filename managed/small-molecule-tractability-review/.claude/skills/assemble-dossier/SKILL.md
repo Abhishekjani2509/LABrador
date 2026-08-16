@@ -129,7 +129,12 @@ result = fn.remote(pdb_ids=[...], chains={...}, ligand_codes=[...])
 Four calls pay four cold starts; one call pays one. Pass `ligand_codes` only as
 an override. Pass `site_residues` when you have a site definition, because
 without one an apo structure falls back to "the most druggable pocket anywhere
-in the chain".
+in the chain". **`chains` and `site_residues` both reach the tool now** — rule
+2b's chain selection is directly expressible (`chains={"1TNF": ["A","B"]}`) and
+the subunit-removed control is reachable, which is what separates "the cavity is
+too small" from "a protomer is standing in it". A chain flag is not always
+enough: a fusion chaperone can sit *inside* a chain (3V2Y's T4 lysozyme at
+1002–1161 beside the receptor at 16–330), which needs a residue range.
 
 **Read `site_pocket_selected_by` on every value before using it.** It is
 returned per structure per clustering value, and two of its five possible values
@@ -137,13 +142,51 @@ mean the number does not describe a known site:
 `max_druggability_no_ligand_site` and `site_signature_unreliable_homooligomer`.
 Values carrying either must not be pooled into one spread.
 
-**Writes:** `tractability.pocket_volume_a3` (the primary number, with spread),
-`tractability.pocket_druggability` (a range across D and across structures,
-never a point), `tractability.ensemble_consensus_fraction`,
-`tractability.method`, and `site_pocket_selected_by` on each spread.
+**Writes:** `tractability.pocket_volume_a3` — including
+`primary_d1_6_a3`, **the computed axis's primary number**, and `clustering_d`
+saying which D values the spread pools — `tractability.pocket_druggability` (a
+range across D and across structures, never a point, with `load_bearing: false`
+and `_false_negative_rate`), `tractability.site_pocket_rank`,
+`tractability.ensemble_consensus_fraction`, `tractability.method`, and
+`site_pocket_selected_by` on each spread.
 
-Volume first. Druggability is a three-descriptor logistic regression fitted on
-21 positives and is quoted as a weak prior with its provenance attached.
+**Volume at D=1.6 first, and it is not a stylistic preference.** Measured over
+15 targets, 67 structures and 134 measurements: volume at D=1.6 separates the
+set at **AUC 1.000**, stable under all 15 leave-one-target-out refits, while
+druggability manages **0.720 with a 95% CI of 0.44–0.94** at the same clustering
+and **0.520** at D=2.4. On 37 holo structures with a drug-like ligand physically
+bound and the pocket anchored to it, **41% of druggability scores fall below
+0.1** — EGFR 6LUD with osimertinib bound is 0.013. Druggability is a
+three-descriptor logistic regression fitted on 21 positives, and
+`mean_loc_hyd_dens_norm` is min-max normalised across the *other* pockets of the
+same structure, so it is a property of a pocket relative to whatever else was
+detected beside it. Quote it as a weak prior with its provenance attached and
+**never let it carry a verdict**.
+
+Three traps specific to the primary number:
+
+- `primary_d1_6_a3` is **not** the min of the pooled spread. D=1.6 and D=2.4 do
+  not measure the same cavity. Record the D=1.6 value or decline it.
+- A site volume above ~1000 Å³ means sites have merged with neighbours. That is
+  the normal D=2.4 failure and it is not a big pocket.
+- **The volume guide is a proposal, not a threshold.** ≥240 Å³ fell entirely in
+  the druggable group and ≤210 Å³ entirely in the hard group, but that is a 17%
+  margin fitted post hoc on n=15 with only 5 hard targets, all PPI/cytokine/
+  membrane. It gates nothing. Mark it uncalibrated wherever you quote it, the
+  same way the 4 Å off-site distance is marked.
+
+**`prank_rank` goes in `site_pocket_rank.prank`, beside `site_pocket_rank.fpocket`,
+never instead of it.** PRANK promotes the true site in 79% of 70 ligand-anchored
+measurements and demotes it in 1% (the 6OIM KRAS case, kept visible) — median
+rank 5→1, top-3 recall 37%→91%. It is a **site finder**. As a druggability
+classifier its rank is inverted, **AUC 0.25**, because on an unanchored target
+the top pocket is top by construction.
+
+**Do not substitute persistence for the demoted score.** It is the obvious wrong
+fix: the site pocket was detected in 100% of structures for all 15 targets, so
+persistence is **AUC 0.500** — exactly chance — and the published consensus
+criterion built on it gives AUC 0.560 and **ranks MYC first at 0.80**, above 8 of
+the 10 druggable targets.
 
 ### 5. Cryptic mechanism
 
@@ -226,6 +269,20 @@ stations answer.
 | structure or chemistry positively argues no small molecule can bind — an epitope with no cavity, an IDR with no holo structure anywhere | `not_tractable` |
 | thin chemistry, no holo structures, no approvals — not enough to say either way | `insufficient_evidence` |
 
+**A low druggability score is not a route to either negative verdict, and the
+validator now blocks it.** 41% of pockets with a drug-like ligand physically
+bound score below 0.1 — EGFR 6LUD with osimertinib in it is 0.013, RORgt 6C1P is
+0.009 at rank 55 of 60, JAK1's median across nine approved drugs is 0.009. A
+`not_tractable` reached on that number is a false negative in the most expensive
+direction available. `not_tractable` on computed grounds needs the D=1.6 volume
+behind it; if the volume was not measured, the answer is `insufficient_evidence`
+**with the unmeasured volume named as the reason**, not a poor pocket.
+
+**And every historic verdict that leaned on a low druggability score is flagged
+for re-examination.** The failure is systematic across all 10 known-druggable
+targets, not a handful of outliers, so this is not a matter of spotting the odd
+bad call — assume any such verdict is unsupported until the volume is measured.
+
 `verdict_basis` names which axis carries it: `retrieved_precedent`,
 `computed_tractability`, `both`, or `none`. Without it, "tractability claimed on
 precedent grounds" is not a checkable statement and the modality rule cannot be
@@ -261,6 +318,14 @@ template itself** — `verdict_basis`, `target.sources`, `tractability.sources`,
 additions, and they must be filled or nulled like any other. Do not treat them
 as optional because this table once did.
 
+**Six more landed on 2026-08-15 with the rule 4 re-prioritisation, and they are
+template keys too:** `pocket_volume_a3.clustering_d`,
+`pocket_volume_a3.primary_d1_6_a3`, `pocket_druggability.load_bearing`,
+`pocket_druggability._false_negative_rate`, `pocket_volume_a3._primary_note` and
+the `tractability.site_pocket_rank` block. Two of them are `_`-prefixed and so
+are invisible to the provenance walker by design — they carry the reason a
+number is discounted, not a claim. `load_bearing` has exactly one legal value.
+
 What remains genuinely added, and why each earns its place:
 
 | key | why |
@@ -285,7 +350,7 @@ not data: use `[]` for "none", never an entry with an empty name.
 
 `validate_dossier.py` — pure stdlib, importable as
 `validate_dossier(dossier: dict) -> list[Violation]`, or runnable as a CLI that
-exits 1 on any violation. Fifteen rules:
+exits 1 on any violation. Sixteen rule functions, seventeen violation types:
 
 | rule | catches |
 | --- | --- |
@@ -295,6 +360,8 @@ exits 1 on any violation. Fifteen rules:
 | `MODALITY_LEAK` | a drug in both blocks, a `-mab`/`-cept` stem among small molecules, tractability claimed on precedent that is entirely biologic |
 | `INSUFFICIENT_EVIDENCE_AVOIDED` | thin chemistry plus zero holo plus zero approvals answered with a confident verdict |
 | `DRUGGABILITY_POINT_ESTIMATE` | a scalar druggability, a one-sided range, a single clustering value, an unnamed ensemble, druggability without volume |
+| `DRUGGABILITY_LOAD_BEARING` | **new, 2026-08-15.** `load_bearing` anything but `false`, a range with no `_false_negative_rate` beside it, a `not_tractable`/`insufficient_evidence` verdict on computed grounds with a low druggability and no volume, and a low druggability sitting beside a large volume with an empty `tractability.caveat` |
+| `VOLUME_NOT_PRIMARY` | **new, 2026-08-15.** computed-axis geometry reported without `pocket_volume_a3.primary_d1_6_a3` and without a `not_found` line, a primary volume above 1000 Å³ (sites merged), or a spread with no `clustering_d` record |
 | `FRACTION_WITHOUT_N` | a consensus fraction with no N, or an N disagreeing with the named ensemble |
 | `SAME_SITE_BASIS_MISSING` / `_INVALID` | a pooled spread with no recorded basis, or pooled on a basis that does not identify a site |
 | `SITE_INCONSISTENT` | geometry quoted off `site_from_density` when its centroid is past the 4 A proposed threshold, or an interface class asserted with no partner structure and no measured overlap |
@@ -306,7 +373,19 @@ exits 1 on any violation. Fifteen rules:
 
 Thresholds are named module constants, not inline numbers, so they can be argued
 with: `INSUFFICIENT_ACTIVES_THRESHOLD = 50`, `SINGLE_ASSAY_DOMINANCE_PCT = 30.0`,
-`CRYPTIC_APO_ABSENCE_FRACTION = 0.8`, `AXIS_CONFLICT_ACTIVES_THRESHOLD = 500`.
+`CRYPTIC_APO_ABSENCE_FRACTION = 0.8`, `AXIS_CONFLICT_ACTIVES_THRESHOLD = 500`,
+`DRUGGABILITY_FALSE_NEGATIVE_BAND = 0.5`, `DRUGGABILITY_FALSE_NEGATIVE_FLOOR = 0.1`,
+`PRIMARY_VOLUME_CLUSTERING_D = 1.6`, `MERGED_VOLUME_A3 = 1000.0`,
+`VOLUME_GUIDE_DRUGGABLE_A3 = 240.0`, `VOLUME_GUIDE_HARD_A3 = 210.0`.
+`test_the_measured_constants_are_pinned` asserts every one of them, so widening
+the false-negative band or promoting the volume guide into a classifier fails a
+test that names the number that moved.
+
+**The two volume-guide constants classify nothing, deliberately.** They are used
+in exactly one place: deciding when a low druggability and a large volume
+disagree loudly enough that `tractability.caveat` must say so. No verdict, no
+threshold, no gate — the boundary is a 17% margin fitted post hoc on n=15 and it
+needs out-of-sample validation first.
 
 ### A rule that asks "was this attempted?" must test the VALUE, never the key
 
@@ -351,7 +430,8 @@ runs and both return zero violations. Read them together — the pair is the poi
 | best potency | 0.010 nM, characterised enzyme assay | 0.03 nM **uncharacterised** — rejected; reported 1.3 nM SPR instead |
 | structures | 42 holo / 10 apo | 17 holo / 35 apo, the one holo ligand a known frequent hitter |
 | pocket volume | **305.9 - 913.8 A^3**, spread 66.5% | **refused** (would pool to 126.9 - 809.5) |
-| druggability | **0.020 - 0.437**, 21.8-fold | **refused** (would pool to 0.001 - 0.651, fold-range 651.0) |
+| volume at D=1.6 — **the primary number** | **not separated**, `not_found` (the run pooled both D values) | **refused**, same grounds |
+| druggability | **0.020 - 0.437**, 21.8-fold, `load_bearing: false` | **refused** (would pool to 0.001 - 0.651, fold-range 651.0) |
 | site basis | **4 of 4 `ligand_site_jaccard`** | 2 of 12 `ligand_site_jaccard`, **10 of 12 `site_signature_unreliable_homooligomer`** |
 | same-site control `max_radius_difference_a` | **2.29 / 2.16 A** | **14.43 / 16.49 A** |
 | mdpocket off-site distance | **1.86 A** — check passes | **29.57 A** — `off_site_warning` raised |
@@ -410,6 +490,24 @@ structures, and at the transferred ligand site 1TNF returns **0.00 A^3** — so
 honest. And neither `disorder_fraction` is reported despite metapredict
 returning one, because no accession was passed and it read the sequence off the
 structure — 280 of JAK1's 1154 residues, 141 of TNF's 233.
+
+**Both examples now decline the primary number, and that is the rule 4a
+re-examination flag landing on our own exemplars rather than on somebody else's
+dossier.** Neither run separated the D=1.6 site volume — JAK1 pooled 3EYG and
+10PI across both clustering values into 305.9–913.8 Å³ and did not keep the
+per-measurement figures, so `primary_d1_6_a3` is null with a `not_found` line
+saying exactly that. Under the old ordering that was a complete answer. It is
+not one now, and the honest record of the change is a declined field rather than
+a number back-derived from a spread. Note the shape of the upper end: **913.8 Å³
+is what a D=2.4 merge looks like** (rule 4: above ~1000 Å³ sites have merged), so
+reading the spread as "the site is up to 914 Å³" would be reading a merge.
+
+Neither example's verdict moves, and that is worth saying plainly: JAK1 is
+carried by retrieved precedent — nine approved small molecules — and TNF by both
+axes with `axis_conflict` populated. Nothing here was resting on a druggability
+score, which is why the demotion cost these two dossiers a field and not a
+conclusion. A dossier that *would* have moved is exactly the one the new rule
+fires on.
 
 JAK1's `not_found` also carries a smaller, sharper case: the run counted **9**
 approved small molecules after collapsing salt/parent pairs, and only **8** could
@@ -512,6 +610,41 @@ It is not. The validator requires that druggability reported without volume be
 accompanied by a `not_found` line naming the gap, and that is the *minimum* — the
 honest response is to re-run for volume, which is why it is the JAK1 example's
 `next_experiment`.
+
+**As of 2026-08-15 the gap between the two numbers is measured, and it is much
+wider than "volume is more reproducible".** Over 15 targets, 67 structures and
+134 measurements:
+
+| | |
+| --- | --- |
+| volume at D=1.6, target level | **AUC 1.000**, CI [1.000, 1.000], stable under all 15 leave-one-target-out refits |
+| druggability at D=1.6, target level | **0.720**, 95% CI **0.44–0.94** — includes chance, P(AUC≤0.5) = 0.071 |
+| druggability at D=2.4 | **0.520** — chance |
+| druggability on certain positives | 37 ligand-anchored holo structures across all 10 druggable targets: median **0.320**, **25/37 < 0.5**, **15/37 (41%) < 0.1** |
+| persistence | site pocket detected in **100% of structures for all 15 targets** → **AUC 0.500** |
+| published consensus criterion | **AUC 0.560**, and it **ranks MYC top at 0.80** |
+
+Two things follow that are easy to get wrong in opposite directions.
+
+**The score is inverted at target level, not merely noisy.** MYC — zero holo
+structures, canonical undruggable — has a D=2.4 median of **0.75**, above KRAS
+0.54, BCL-2 0.52, JAK1 0.49, EGFR 0.44 and NLRP3 0.12. And the *clustering
+choice* does about 1.5× more work than the biology: median within-structure
+|D=2.4 − D=1.6| is **0.229** against a between-group difference of medians of
+**0.154** at D=1.6. D=2.4 is not a fix — IRAK4 2O8Y goes 0.791 → 0.001.
+
+**The obvious replacement is worse.** Persistence is *exactly* chance and the
+consensus criterion built on it puts the canonical undruggable target first.
+Reaching for it would reproduce the same inversion one rung down. Keep the
+consensus fraction for what it does do — stopping you quoting your best
+conformer — and read no tractability from it.
+
+The measured caveat travels with the finding: **n = 5 hard targets**, all
+PPI/cytokine/membrane class, against a druggable set enriched in kinases,
+nuclear receptors and GPCRs, so volume may partly be tracking target class. The
+mitigation is that the two least classical druggable targets, NLRP3 at 242 Å³
+and IL-17A at 250 Å³, still land above every hard target. That is a mitigation,
+not a control.
 
 ### Laundering nulls through a vague `not_found` line
 
