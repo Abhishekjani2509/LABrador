@@ -1,6 +1,6 @@
 [
   {
-    "confidence": 0.5,
+    "confidence": 0.56,
     "id": "g1",
     "implied_by": [
       "L3",
@@ -10,11 +10,11 @@
       "t1",
       "t4"
     ],
-    "note": "both connect to t3; no direct link reported",
+    "note": "both connect to t3; no direct link reported (implied via 2 intermediates)",
     "searched_in_round": null
   },
   {
-    "confidence": 0.4,
+    "confidence": 0.1838,
     "id": "g2",
     "implied_by": [
       "L1",
@@ -28,7 +28,7 @@
     "searched_in_round": null
   },
   {
-    "confidence": 0.5,
+    "confidence": 0.3536,
     "id": "g4",
     "implied_by": [
       "L2",

@@ -317,6 +317,10 @@ acted on.
   published version are one paper.
 - **Gaps are capped at 50**, ranked by the weaker of the two supporting links,
   and confidence capped at 0.6. A gap is a proposal, not a finding.
+- **A retried round is a no-op, not a double-count.** Findings dedupe on
+  content (paper + relationship + normalized quote), not on id — a retry
+  re-extracts the same sentences and may hand them fresh ids. Duplicates are
+  reported in `coverage.duplicates_dropped`, never dropped silently.
 - **`coverage` is always real.** `found`, `read`, `used`, `truncated` and
   `stop_reason` describe what actually happened. Only `stop_reason: "complete"`
   means the literature was exhausted; the other values mean budget ran out.
