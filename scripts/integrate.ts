@@ -46,6 +46,7 @@ const RENAMES: Record<string, string> = {
 };
 
 const TRAILING_NEWLINES = /\n+$/;
+const TOUCHED_NODE_RE = /^managed\/([^/]+)\//;
 const dryRun = process.argv.includes("--dry-run");
 const log = (line: string) => process.stdout.write(`${line}\n`);
 
@@ -142,8 +143,32 @@ function mergeBranch(b: { name: string; sha: string }, cwd: string): string {
   return paths === "moved" ? "MERGED+path-fix" : "MERGED";
 }
 
-/** Dirs with their own test suites, gated only when the merge touched them. */
-const PYTHON_NODE = "managed/therapeutic-program-economics";
+/**
+ * Python nodes gate on their own suites, but only when the merge touched
+ * them: any managed/<node>/ with a pyproject.toml AND a uv.lock (no lock =
+ * not reproducibly testable; logged, not blocking).
+ */
+function touchedPythonNodes(cwd: string, baseSha: string): string[] {
+  const touched = trySh(
+    `git diff --name-only ${baseSha}..HEAD -- "managed/*/pyproject.toml" "managed/*/**"`,
+    cwd
+  );
+  if (!touched.ok) {
+    return [];
+  }
+  const dirs = new Set<string>();
+  for (const file of touched.out.split("\n")) {
+    const m = file.match(TOUCHED_NODE_RE);
+    if (m?.[1]) {
+      dirs.add(`managed/${m[1]}`);
+    }
+  }
+  return [...dirs].filter(
+    (d) =>
+      existsSync(join(cwd, d, "pyproject.toml")) &&
+      existsSync(join(cwd, d, "uv.lock"))
+  );
+}
 
 function verify(cwd: string, baseSha: string): { ok: boolean; out: string } {
   const install = trySh("bun install --frozen-lockfile", cwd);
@@ -158,20 +183,20 @@ function verify(cwd: string, baseSha: string): { ok: boolean; out: string } {
   if (!check.ok) {
     return { ok: false, out: `check failed:\n${check.out}` };
   }
-  const touched = trySh(
-    `git diff --name-only ${baseSha}..HEAD -- ${PYTHON_NODE}`,
-    cwd
-  );
-  if (touched.ok && touched.out.length > 0) {
-    const pyDir = join(cwd, PYTHON_NODE);
-    const sync = trySh("uv sync --frozen --extra dev", pyDir);
+  for (const node of touchedPythonNodes(cwd, baseSha)) {
+    const pyDir = join(cwd, node);
+    // --extra dev where declared; plain sync otherwise.
+    const sync = trySh("uv sync --frozen --extra dev", pyDir).ok
+      ? { ok: true, out: "" }
+      : trySh("uv sync --frozen", pyDir);
     if (!sync.ok) {
-      return { ok: false, out: `uv sync failed:\n${sync.out}` };
+      return { ok: false, out: `uv sync failed (${node}):\n${sync.out}` };
     }
     const pytest = trySh("uv run pytest -q", pyDir);
     if (!pytest.ok) {
-      return { ok: false, out: `pytest failed:\n${pytest.out}` };
+      return { ok: false, out: `pytest failed (${node}):\n${pytest.out}` };
     }
+    log(`pytest green: ${node}`);
   }
   return { ok: true, out: "" };
 }

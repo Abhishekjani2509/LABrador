@@ -39,7 +39,8 @@ adapter B is built (§5), adapter A still has no owner.
 | Soliman | `msoliman6/literature-graph-mcp` | `research-evidence-mapper` | ✅ |
 | Moamen | `moamen` | `sandbox-capability-probe` | ✅ |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
-| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | hypothesis node — **no code pushed yet** | (nothing to merge) |
+| Vince | `vaalessi/hypothesis-highlander` | `hypothesis-highlander` (meta-search ABOVE the pipeline) | ✅ |
+| Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | hypothesis node — **no code pushed yet**; note Vince's highlander now covers hypothesis *enumeration* — coordinate to avoid building the same thing twice | (nothing to merge) |
 | Cyrus | works on `main` | infra, merges, renames, README | — |
 
 Note: Cyrus renamed all node dirs on 2026-08-15 (`d6b8451`). Old names
@@ -87,6 +88,13 @@ are dead — do not create files under them.
 - v0.2.0 hardening drop (2026-08-15 late): evaluation module with reality
   anchors, run replay, red-team hardening + interpretability-contract docs,
   five new test suites — 87/87 tests pass on merged main.
+- **NEW node: `hypothesis-highlander`** (2026-08-15 late) — quality-diversity
+  meta-search that sits ABOVE the four nodes: fixes one indication (RA
+  example), enumerates biomarkers × hypotheses, runs each through the
+  existing nodes, learns across runs (MAP-Elites archive + Pareto front +
+  failure ledger). Module-agnostic by design; stdlib core; 18/18 tests pass
+  on merged main. Interop with the real node contracts not yet verified —
+  see §5.
 
 **Cyrus — infra**
 - Merged all branches into `main`, renamed nodes for clarity, rewrote README
@@ -158,7 +166,8 @@ are dead — do not create files under them.
 |---|---|---|
 | **Adapter A** | mapper `findings[]` → thesis `Evidence[]` (mapping is nearly mechanical; `no_effect` needs a convention) | Soliman + Abhishek |
 | ~~**Adapter B**~~ | **Built 2026-08-15 late (owner Abhishek)**: `managed/trial-recruitment-forecaster/economics-bridge.ts` — overlay script shipped (delay years + triangular `launch_delay_years` range + counterfactual pricing, best-effort against the demo fixture, read-only on Vince's dir); **Vince to confirm the `launch_year` application convention**. The two "obvious" wirings remain wrong and are documented in the file header: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | done (Abhishek; Vince to confirm convention) |
-| **Orchestrator** | one command running thesis → evidence → recruitment → economics | Cyrus + whoever's free |
+| **Orchestrator** | one command running thesis → evidence → recruitment → economics. NOTE: Vince's `hypothesis-highlander` claims this layer as a meta-search — decide whether it IS the orchestrator or sits above a simpler one | Cyrus + Vince |
+| **Highlander↔nodes interop** | highlander says "module-agnostic" but its calls against the real node contracts (thesis.ts, RecruitabilityResult, ProgramInput, mapper graphs) are unverified — its test_interop.py runs against stubs | Vince + node owners |
 | ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
 
