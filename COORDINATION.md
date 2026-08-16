@@ -68,6 +68,12 @@ are dead — do not create files under them.
   graph on the REAL SCHEMA.md (first live cross-node edge — mapper →
   tractability) and nominates UniProt targets from it; handles `no_effect`,
   `hedged_only`, failed-graph status, and gene-vs-protein kinds.
+- Hardened against the FIRST REAL mapper graph (g_1a4f, 2026-08-15 late):
+  the real graph carries no protein/gene entities — proteins survive only
+  inside intervention names ("IRAK4 inhibition" typed small_molecule) — so
+  intake initially nominated nothing despite all self-written fixtures
+  passing. Lesson recorded: fixtures you write yourself lie; §6 item 6 is
+  the schema-level fix.
 
 **Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-15 late — second live Managed Agent, first product one)*
 - SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
@@ -205,7 +211,11 @@ Ratification is now a sign-off, not a design session.**
    2026-08-15 late): every other categorical field is enumerated, but `how`
    is open vocabulary — so "drug inhibits IRAK4" (a target) and "drug
    reduces IL-6" (a downstream effect) are structurally identical. Soliman
-   to enumerate at least the target-nominating verbs.
+   to enumerate at least the target-nominating verbs. **Now backed by real
+   evidence**: the first real graph (g_1a4f) types "IRAK4 inhibition" as a
+   small_molecule intervention with no protein/gene entity anywhere —
+   consumers can't find targets without either typed entities or a `how`
+   enum (see Rafal's e6d946c commit message for the full post-mortem).
 
 Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
 
