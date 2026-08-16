@@ -5,12 +5,7 @@
     "simulatedMonthsAfter": 19
   },
   "eligibility": {
-    "citedTrials": [
-      "NCT03029091",
-      "NCT02227836",
-      "NCT03191864",
-      "NCT04322708"
-    ],
+    "citedTrials": ["NCT03029091", "NCT02227836", "NCT03191864", "NCT04322708"],
     "drivers": [
       "exclusion of other causes of esophageal eosinophilia (Crohn's, Churg-Strauss, achalasia, hypereosinophilic syndrome, celiac, parasitic infection)",
       "esophageal stricture precluding endoscope passage or requiring recent dilation",
@@ -65,10 +60,7 @@
   "requiredN": 159,
   "score": 0.8666666666666667,
   "screensPerEnrollee": 2,
-  "simulatedMonthsRange": [
-    8,
-    55
-  ],
+  "simulatedMonthsRange": [8, 55],
   "simulatedMonthsToEnroll": 22,
   "sites": 69,
   "sitesBasis": "precedent",
