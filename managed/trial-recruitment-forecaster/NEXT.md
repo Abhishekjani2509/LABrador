@@ -14,6 +14,8 @@ Answers: *given an indication thesis, could this trial actually be enrolled?*
 | `fixtures/theses.json` | 4 fixtures, one per mode, each with a `whyInSet` rationale. |
 | `demo.ts` | Runnable. `bun managed/trial-recruitment-forecaster/demo.ts [id] [asOf]` |
 | `economics-bridge.ts` | **Adapter B** (COORDINATION §5): RecruitabilityResult → launch-delay overlay for Vince's economics node, with best-effort pricing. See section below. |
+| `evidence-bridge.ts` | **Adapter A** (COORDINATION §5): research-evidence-mapper graph → `IndicationThesis.evidence[]`, validated row-by-row with `Evidence.parse`. Run against the real `runs/g_1a4f` graph. See section below. |
+| `INTEROP-highlander.md` | Verification report (COORDINATION §5): does `hypothesis-highlander` actually speak `RecruitabilityResult` + `thesis.ts`? Mismatch table + minimal adapter recommendation. Read-only on Vince's dir. |
 
 Verified end to end on 2026-08-15 (evening): typecheck + ultracite clean, all
 four fixtures coherent, hero retrospective solid, backtest runs. `managed/trial-recruitment-forecaster`
@@ -93,6 +95,67 @@ forbidden wirings. The `launch_year`-delta application convention still needs
 Vince's confirmation. Verified run (dupi-eoe today): 22 mo → delay 0 whole
 years (0.33 unrounded), range {0,0,3}; counterfactual saves 3 months →
 priced at ~$1.27M against the synthetic economics fixture.
+
+## Evidence bridge (Adapter A, shipped 2026-08-15 late)
+
+`bun managed/trial-recruitment-forecaster/evidence-bridge.ts <graph.json>` →
+`{evidence, dropped, provenance}`. Read-only against Soliman's directory.
+
+Mapping (full rules + citations in the file header): `claim` = the finding's
+**verbatim quote** plus its from/how/to triple and a `[graph_id#finding_id]`
+tag (the quote is the inspectability payload — never paraphrased, and the
+finding's own undocumented `claim` field, which IS a paraphrase, is ignored);
+`says` yes/no/no_effect → `direction` supports/contradicts/**no_effect** (never
+collapsed — that is what §6 item 3 added the third value for); `source` =
+`doi:…` else `PMID:…`, and a finding whose paper has neither is DROPPED, not
+placeholder-sourced; `sourceType` = `publication`; `strength` =
+clamp01(study-type quality × 0.8 if preprint), the table copied from the
+mapper's own `assemble.py:199` `_STUDY_QUALITY`. Findings whose link `basis`
+is `background_only`/`hedged_only` are excluded, mirroring Rafal's
+graph-intake (`graph_read.py:31 NON_ACTIONABLE_BASIS`) so two consumers of one
+upstream agree on what is actionable. Every emitted row goes through
+`Evidence.parse`; failures are dropped and counted.
+
+**Real-artifact run** (`managed/research-evidence-mapper/runs/g_1a4f.json`,
+round 2, status ok): **12 findings → 11 Evidence rows, 1 dropped** (f6,
+`non_actionable_basis` — background_only). 10 supports / 1 contradicts (n_f3,
+"However, it did not inhibit IL‐1–induced cytokines in RA FLS."), strength 0.5
+for the three test_tube papers and 0.6 for the animal one. No `no_effect`
+finding exists in this graph, so that path is exercised only on a synthetic
+input — flagged for Soliman as the untested branch.
+
+**Schema deviations found in the real artifact** (reported in
+`provenance.schemaDeviations`, not repaired — for Soliman):
+
+1. every finding lacks `round` and `flags`, both promised by SCHEMA.md;
+2. every paper lacks `round`, also promised;
+3. every finding carries an undocumented `claim` field (a model paraphrase);
+   `papers` carry an undocumented (but useful) `pmid`;
+4. `findings/r2.json` is a **full snapshot**, not the append-only round chunk
+   SCHEMA.md describes — it repeats all seven r1 rows. Anyone concatenating
+   the chunk files double-counts; the bridge dedupes on finding id and reports
+   collisions, and takes the full graph file as its supported input;
+5. f6 is cited by no link, so it has no `basis` — the bridge derives one the
+   way `assemble.py:299 link_basis` would for a one-finding link.
+
+Open question for Soliman: whether a `hedged: true` finding inside a `mixed`
+link should take a strength discount. It does not today; inventing a
+multiplier the mapper does not define would be worse than saying so.
+
+## Highlander interop (verified 2026-08-15 late, read-only)
+
+Full table in [`INTEROP-highlander.md`](./INTEROP-highlander.md). Headline:
+the two `RecruitabilityResult` fields `hypothesis-highlander` reads (`score`,
+`simulatedMonthsToEnroll`) **match this node exactly — nothing to rename here**.
+What has drifted is its hand-written Python mirror of `thesis.ts`: it puts
+`uniprotAccession` at the top level (zod strips it silently — Rafal's join key
+is lost in both directions, verified by running both parsers) and its
+`Evidence.direction` has only two values, so a thesis carrying the `no_effect`
+rows `evidence-bridge.ts` now emits raises `AssertionError` inside its
+`validate()`. It also ships its own Adapter A/B whose numbers disagree with
+this node's bridges (strength formula, `no_effect` handling, whole-vs-fractional
+delay years, a hardcoded $5.06M/yr rate). Fixes are all on highlander's side;
+this node changes nothing.
 
 ## Backtest results and what they mean
 

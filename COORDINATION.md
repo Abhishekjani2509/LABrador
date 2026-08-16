@@ -13,7 +13,7 @@ evening — refreshed after every merge per §7.10)**.
 ```
 hypothesis (thesis.ts contract)
       │
-      ├──> research-evidence-mapper ──── findings[] ──┐   (adapter A, unowned)
+      ├──> research-evidence-mapper ──── findings[] ──┐   (adapter A, built: evidence-bridge.ts)
       ├──> small-molecule-tractability-review         ├─> IndicationThesis.evidence[]
       │                                               │
       ▼                                               │
@@ -28,7 +28,7 @@ therapeutic-program-economics
 
 The shared contract is [`IndicationThesis`](./managed/trial-recruitment-forecaster/thesis.ts).
 **Status: not yet ratified — see §6.** Nothing composes end-to-end today;
-adapter B is built (§5), adapter A still has no owner.
+adapters A and B are both built (§5) and await their upstream owners' review.
 
 ## 2. Branch map — who owns what
 
@@ -58,6 +58,8 @@ are dead — do not create files under them.
 - 11 adversarial-review findings fixed same day. `thesis.ts` authored (the
   proposed shared contract). Details: [NEXT.md](./managed/trial-recruitment-forecaster/NEXT.md).
 - Adapter B shipped (`economics-bridge.ts`, 2026-08-15 late) — see §5 row.
+- Adapter A shipped (`evidence-bridge.ts`, 2026-08-15 late), run on Soliman's
+  real `runs/g_1a4f.json` — see §5 row for the schema deviations it found.
 
 **Rafal — small-molecule-tractability-review** *(partial prototype)*
 - 4 real skills (precedent-lookup, structure-select, pocket-scan,
@@ -171,10 +173,10 @@ are dead — do not create files under them.
 
 | Item | What it is | Suggested owner |
 |---|---|---|
-| **Adapter A** | mapper `findings[]` → thesis `Evidence[]` (mapping is nearly mechanical; `no_effect` needs a convention) | Soliman + Abhishek |
+| ~~**Adapter A**~~ | **Built 2026-08-15 late (owner Abhishek; Soliman to review)**: `managed/trial-recruitment-forecaster/evidence-bridge.ts` — mapper `findings[]` → thesis `Evidence[]`, run against the REAL `research-evidence-mapper/runs/g_1a4f.json` (12 findings → 11 rows; f6 dropped, `background_only`). `no_effect` convention settled: passthrough to the third `direction` value (§6 item 3), never collapsed. `claim` carries the verbatim quote + triple; `source` is `doi:`/`PMID:` and a paper with neither drops the row; `strength` copies the mapper's own `_STUDY_QUALITY` table (assemble.py:199) ×0.8 preprint; `background_only`/`hedged_only` excluded, mirroring Rafal's `graph_read.py:31`. **REAL-ARTIFACT CAVEAT for Soliman**: g_1a4f deviates from SCHEMA.md — findings lack `round` and `flags`, papers lack `round`, findings carry an undocumented `claim` paraphrase, and `findings/r2.json` is a full snapshot rather than an append-only round chunk (concatenating chunks double-counts). Also untested: no `no_effect` finding exists in any real graph yet. | done (Abhishek; Soliman to review) |
 | ~~**Adapter B**~~ | **Built 2026-08-15 late (owner Abhishek)**: `managed/trial-recruitment-forecaster/economics-bridge.ts` — overlay script shipped (delay years + triangular `launch_delay_years` range + counterfactual pricing, best-effort against the demo fixture, read-only on Vince's dir); **Vince to confirm the `launch_year` application convention**. The two "obvious" wirings remain wrong and are documented in the file header: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | done (Abhishek; Vince to confirm convention) |
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics. NOTE: Vince's `hypothesis-highlander` claims this layer as a meta-search — decide whether it IS the orchestrator or sits above a simpler one | Cyrus + Vince |
-| **Highlander↔nodes interop** | highlander says "module-agnostic" but its calls against the real node contracts (thesis.ts, RecruitabilityResult, ProgramInput, mapper graphs) are unverified — its test_interop.py runs against stubs | Vince + node owners |
+| **Highlander↔nodes interop** | highlander says "module-agnostic" but its calls against the real node contracts (thesis.ts, RecruitabilityResult, ProgramInput, mapper graphs) are unverified — its test_interop.py runs against stubs. **Forecaster side VERIFIED 2026-08-15 late (Abhishek, read-only): the two `RecruitabilityResult` fields it reads (`score`, `simulatedMonthsToEnroll`) match exactly, but its hand-mirrored thesis has drifted — `uniprotAccession` is top-level instead of `target.uniprotAccession` (silently lost in BOTH directions, verified) and `Evidence.direction` lacks `no_effect`, so a real bridged thesis hard-fails its `validate()`. Report + mismatch table + minimal fix: [`managed/trial-recruitment-forecaster/INTEROP-highlander.md`](./managed/trial-recruitment-forecaster/INTEROP-highlander.md). Economics / mapper / tractability sides still open.** | Vince + node owners (forecaster side done) |
 | ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
 
@@ -204,9 +206,9 @@ Ratification is now a sign-off, not a design session.**
    the wide vocabulary stays (upstream must not misdescribe an antibody to
    get a valuation); non-priceable modalities are the economics node's
    documented gap until its owner extends his enum (his §4 item).
-5. Confirm the adapters in §5 and their owners (B is built; Vince to
-   confirm the `launch_year` application convention; A still unowned,
-   suggested Soliman + Abhishek).
+5. Confirm the adapters in §5 and their owners (both are built; Vince to
+   confirm the `launch_year` application convention for B; Soliman to review
+   A's mapping and the SCHEMA.md deviations it found in `runs/g_1a4f`).
 6. **SCHEMA.md: `how` needs an enum** (raised by Rafal's graph-intake,
    2026-08-15 late): every other categorical field is enumerated, but `how`
    is open vocabulary — so "drug inhibits IRAK4" (a target) and "drug
