@@ -424,3 +424,4 @@ ACCEPTANCE: a thesis arrives with its envelope; trace-demo prepends it.
 EFFORT: S (once the node exists).
 
 - **2026-08-16 00:57 UTC** — merged `pipeline-observatory` (MERGED) — glassbox: lint pass (templates, optional chain, catch binding) · glassbox: biome formatting pass · glassbox: DESIGN.md (envelope spec, instrumentation gaps, runbook) + COORDINATION par10 assignments · glassbox: trace envelope demo + non-CS observatory page (real run artifact included) — typecheck+check green.
+- **2026-08-16 00:59 UTC** — merged `msoliman6/literature-graph-mcp` (36a27a2, tier-2: criss-cross lib conflict → main's union kept; his authoritative §3 rewrite taken — mapper end-to-end verified on deployed agent, graph g_9d3c, no_quote_discarded: 0) — typecheck+check green.
