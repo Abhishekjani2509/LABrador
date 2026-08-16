@@ -177,6 +177,21 @@ TRIVIAL_MAX_HEAVY_ATOMS = 9
 #: product, a polymer or a macrocyclic peptide, not a small-molecule ligand.
 DRUGLIKE_MAX_MW = 1200.0
 
+#: The ubiquity prior (R14) fires only at or below this size. Additives and
+#: fragment hits overlap between roughly 5 and 15 heavy atoms and nowhere else,
+#: so bounding it here means the prior can never demote a real inhibitor. 15 is
+#: above benzamidine's 9 and below the 24 of 5QQE's `N5S`.
+UBIQUITY_MAX_HEAVY_ATOMS = 15
+
+#: Entries a small component must appear in before ubiquity overrides
+#: drug-like chemistry. Measured spread at the decision boundary: BEN 361 and
+#: B3P 232 against LZ1 10, ZBR 9, LFI 8, MOV 7, N5S 1. 150 sits in the empty
+#: band between them. **UNCALIBRATED** — it is fitted on one measured false
+#: positive, and it is a proposal in exactly the sense rule 4a's volume guide
+#: is. It gates only the small end, and it is reported in `evidence` and
+#: flagged (`ubiquity_prior_applied`) whenever it fires.
+UBIQUITY_MIN_ENTRIES = 150
+
 _METALS = frozenset(
     """LI BE NA MG AL K CA SC TI V CR MN FE CO NI CU ZN GA RB SR Y ZR NB MO TC
     RU RH PD AG CD IN SN SB CS BA LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU
@@ -1336,6 +1351,48 @@ class ChemCompSource:
                 "name": _nn(r.get("nm")),
             }
 
+    def with_entry_counts(self, comp_ids: Iterable[str]) -> dict[str, int]:
+        """`comp_id -> number of PDB entries carrying it`, folded into the
+        cached records as `n_pdb_entries` so R14 can read it.
+
+        BEST EFFORT AND NEVER FATAL. A failure leaves `n_pdb_entries` absent,
+        which R14 reads as NOT CHECKED rather than as rare — the same
+        distinction `fetch_errors` makes for the CCD row itself, and for the
+        same reason. Measured: this aggregate returns in ~0.6 s for 15 ids;
+        the analogous join against `uniprot_v.pdb_chains`, which would give the
+        better statistic (distinct proteins rather than entries), times out at
+        120 s and is not usable.
+        """
+        want = [c.upper() for c in comp_ids if c]
+        out: dict[str, int] = {}
+        for i in range(0, len(want), 40):
+            batch = want[i:i + 40]
+            inlist = ", ".join("'" + c.replace("'", "''") + "'" for c in batch)
+            q = ("SELECT comp_id, count(distinct entry_id) n FROM "
+                 f"pdb_v.entry_ligands WHERE comp_id IN ({inlist}) GROUP BY 1")
+            try:
+                proc = subprocess.run(
+                    [self._paperclip, "sql", "-s", "proteins", q],
+                    capture_output=True, text=True, env=self._env,
+                    timeout=self._timeout, stdin=subprocess.DEVNULL,
+                )
+            except Exception as exc:                   # noqa: BLE001
+                self.last_error = f"entry counts: {type(exc).__name__}: {exc}"
+                continue
+            if proc.returncode != 0:
+                self.last_error = f"entry counts: {(proc.stderr or proc.stdout)[:200]}"
+                continue
+            for r in _parse_paperclip_table(proc.stdout):
+                cid = (r.get("comp_id") or "").strip().upper()
+                n = _ni(r.get("n"))
+                if cid and n is not None:
+                    out[cid] = n
+        for cid, n in out.items():
+            rec = self._cache.get(cid)
+            if isinstance(rec, dict):
+                rec["n_pdb_entries"] = n
+        return out
+
     def save_cache(self) -> None:
         if self._cache_path:
             self._cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1354,6 +1411,13 @@ def _nn(v: Any) -> Any:
 def _nf(v: Any) -> float | None:
     try:
         return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ni(v: Any) -> int | None:
+    try:
+        return int(v)
     except (TypeError, ValueError):
         return None
 
@@ -1482,6 +1546,10 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
         "has_phosphorus": bool(els.get("P")),
         "metals": sorted(e for e in els if e in _METALS) or None,
         "smiles_present": bool(smiles),
+        # Optional, supplied by the caller or by
+        # `ChemCompSource.with_entry_counts()`. `None` means NOT CHECKED, which
+        # is not the same as "rare" and never reads as one — see R14.
+        "n_pdb_entries": _ni(rec.get("n_pdb_entries")),
     }
 
     # ---- R0. The CCD's own placeholder components. `UNK`, `UNL`, `UNX` and
@@ -1599,6 +1667,7 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
         "peptide_residues": g.peptide_backbone_residues(),
         "alkyl_sulfonates": g.alkyl_sulfonate_groups(),
         "pyrimidine_base": g.pyrimidine_base(),
+        "electrophilic_halide_carbons": g.electrophilic_halide_carbons(),
     })
 
     chain = ev["longest_aliphatic_chain"]
@@ -1788,6 +1857,49 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
                   "pure C/H/O, no nitrogen and no aromatic ring: not drug-like "
                   "chemistry", ev, confidence="medium")
 
+    # ---- R14. UBIQUITY. The one place a measured LIST is the right
+    # instrument, and the argument for it is narrow on purpose.
+    #
+    # `BEN` (benzamidine, 120 Da, 9 heavy atoms) is a ubiquitous protease
+    # crystallisation additive AND a bona fide fragment: its close neighbours
+    # are real thrombin and trypsin inhibitors. No structural test can reject
+    # it without rejecting a real ligand class, which is a different situation
+    # from ADP, where chemistry separates cleanly and a list never could.
+    #
+    # So the discriminator is not what the molecule looks like but how it
+    # BEHAVES across the PDB: a component that turns up in hundreds of
+    # unrelated entries is laboratory practice, not precedent. That is a query
+    # (`SELECT comp_id, count(distinct entry_id) FROM pdb_v.entry_ligands`),
+    # not an opinion, and `ChemCompSource.with_entry_counts()` runs it.
+    #
+    # BOUNDED TWO WAYS, because an unbounded frequency prior would eat real
+    # chemistry. It fires only (a) below `UBIQUITY_MAX_HEAVY_ATOMS`, the size
+    # band where additives and fragments actually overlap, so it can never
+    # demote a 500 Da inhibitor, and (b) at the very end, so it can only ever
+    # convert `druglike` and never overrides a chemistry verdict.
+    #
+    # MEASURED, and note what the measurement also says: BEN 361 entries,
+    # B3P 232, JEF 21, LZ1 (a genuine fragment hit) 10, ZBR 9, LFI 8, MOV 7,
+    # N5S 1 — against GOL 26004 and EDO 17548. A frequency prior ALONE would
+    # not have worked: JEF is a real additive at 21 entries, below any cut that
+    # keeps LZ1 safe. JEF and B3P are caught by chemistry (R11b) and only BEN
+    # needs this. The better statistic — spread across unrelated proteins
+    # rather than entries — is not usable here: the
+    # `entry_ligands x pdb_chains` join times out at 120 s while the plain
+    # count returns in 617 ms.
+    n_entries = ev.get("n_pdb_entries")
+    if n_entries is not None and heavy is not None \
+            and heavy <= UBIQUITY_MAX_HEAVY_ATOMS \
+            and n_entries >= UBIQUITY_MIN_ENTRIES:
+        return _v(cid, rec, "crystallisation_additive",
+                  f"{heavy} heavy atoms and present in {n_entries} PDB entries "
+                  f"(>= {UBIQUITY_MIN_ENTRIES}): a component this small that "
+                  "appears across hundreds of unrelated entries is a "
+                  "crystallisation additive, whatever its chemistry looks "
+                  "like. This is the benzamidine class, which no structural "
+                  "test can separate from a real fragment hit", ev,
+                  flags=("ubiquity_prior_applied",), confidence="medium")
+
     bits = []
     if els.get("N"):
         bits.append(f"{els['N']} nitrogen(s)")
@@ -1795,9 +1907,34 @@ def classify_record(rec: Mapping[str, Any] | None, comp_id: str | None = None
     bits.append(f"{heavy} heavy atoms")
     if mw is not None:
         bits.append(f"{mw:.0f} Da")
+
+    dl_flags: list[str] = []
+    conf = "high"
+    # A component carrying THREE OR MORE alkyl-halide electrophiles is a
+    # bifunctional/trifunctional crosslinking reagent, not a drug — see
+    # `SmilesGraph.electrophilic_halide_carbons` for why the threshold is 3 and
+    # not 2 (nitrogen mustards are approved drugs with exactly two). The
+    # chemistry cannot settle it on its own, so this does NOT change the
+    # verdict; it lowers confidence and says what to go and check. With a
+    # `StructureContext` the question is answered outright — `LFI` in 8QFZ
+    # becomes `polymer_conjugate`.
+    if ev["electrophilic_halide_carbons"] >= 3:
+        dl_flags.append("multi_electrophile_may_be_a_crosslinking_reagent")
+        conf = "medium"
+    if n_entries is None and heavy is not None \
+            and heavy <= UBIQUITY_MAX_HEAVY_ATOMS:
+        # Said out loud rather than left as a silent pass: at this size the
+        # additive/fragment ambiguity is real and it was not checked.
+        dl_flags.append("ubiquity_not_checked")
+
     return _v(cid, rec, "druglike",
               "no cofactor, lipid, sugar, peptide, polymer or additive "
-              "signature fired; " + ", ".join(bits), ev)
+              "signature fired; " + ", ".join(bits)
+              + ("; NOTE: 3+ alkyl-halide electrophiles — check "
+                 "_struct_conn before treating this as a ligand"
+                 if "multi_electrophile_may_be_a_crosslinking_reagent" in dl_flags
+                 else ""),
+              ev, flags=tuple(dl_flags), confidence=conf)
 
 
 # --------------------------------------------------------------------------
@@ -2039,7 +2176,8 @@ def _classify_without_smiles(cid, rec, ev, heavy, els, ctype) -> LigandVerdict:
 
 
 def classify_ligand(comp_id: str, *, source: str = "pdb",
-                    chemcomps: ChemCompSource | None = None) -> LigandVerdict:
+                    chemcomps: ChemCompSource | None = None,
+                    context: StructureContext | None = None) -> LigandVerdict:
     """Classify one chemical component.
 
     `comp_id` is the FULL component ID from the mmCIF — `A1JPS`, not the first
@@ -2053,11 +2191,13 @@ def classify_ligand(comp_id: str, *, source: str = "pdb",
     """
     if source != "pdb":
         raise ValueError(f"unsupported source {source!r}; only 'pdb' is implemented")
-    return classify_ligands([comp_id], source=source, chemcomps=chemcomps)[comp_id.upper()]
+    return classify_ligands([comp_id], source=source, chemcomps=chemcomps,
+                            context=context)[comp_id.upper()]
 
 
 def classify_ligands(comp_ids: Iterable[str], *, source: str = "pdb",
-                     chemcomps: ChemCompSource | None = None
+                     chemcomps: ChemCompSource | None = None,
+                     context: StructureContext | None = None
                      ) -> dict[str, LigandVerdict]:
     """Batch form — ONE Paperclip round trip per 40 comp_ids.
 
@@ -2086,24 +2226,29 @@ def classify_ligands(comp_ids: Iterable[str], *, source: str = "pdb",
                         flags=("lookup_failed",), confidence="none",
                         source="paperclip:pdb_v.chemcomps (lookup failed)")
         else:
-            out[c] = classify_record(rec, c)
+            out[c] = _apply_structure_context(classify_record(rec, c), context)
     return out
 
 
-def is_druglike_ligand(comp_id: str, *, chemcomps: ChemCompSource | None = None) -> bool:
+def is_druglike_ligand(comp_id: str, *, chemcomps: ChemCompSource | None = None,
+                       context: StructureContext | None = None) -> bool:
     """True only for `druglike`. `unknown` is False — an unclassified ligand is
-    not evidence of a bindable site."""
-    return classify_ligand(comp_id, chemcomps=chemcomps).verdict == "druglike"
+    not evidence of a bindable site. `polymer_conjugate` is False as well: a
+    crosslinker inside a peptide ligand is that peptide's chemistry."""
+    return classify_ligand(comp_id, chemcomps=chemcomps,
+                           context=context).verdict == "druglike"
 
 
 def filter_druglike(comp_ids: Iterable[str], *,
-                    chemcomps: ChemCompSource | None = None) -> list[str]:
-    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps)
+                    chemcomps: ChemCompSource | None = None,
+                    context: StructureContext | None = None) -> list[str]:
+    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps, context=context)
     return [c for c, v in verdicts.items() if v.verdict == "druglike"]
 
 
 def holo_call(comp_ids: Iterable[str], *,
-              chemcomps: ChemCompSource | None = None) -> dict[str, Any]:
+              chemcomps: ChemCompSource | None = None,
+              context: StructureContext | None = None) -> dict[str, Any]:
     """Entry-level holo/apo call with the full reasoning attached.
 
     Returns `is_holo`, the drug-like ligands that justify it, and every other
@@ -2111,15 +2256,36 @@ def holo_call(comp_ids: Iterable[str], *,
     rather than "apo" full stop, and can show WHY a rejected ligand was
     rejected.
     """
-    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps)
+    verdicts = classify_ligands(comp_ids, chemcomps=chemcomps, context=context)
     buckets: dict[str, list[str]] = {}
     for c, v in verdicts.items():
         buckets.setdefault(v.verdict, []).append(c)
     dl = sorted(buckets.get("druglike", []))
     failed = sorted(c for c, v in verdicts.items() if "lookup_failed" in v.flags)
+    # WHAT THE ENTRY IS EVIDENCE OF, WHEN IT IS NOT EVIDENCE OF A SMALL
+    # MOLECULE. A `polymer_conjugate` is not an absence — it says a peptide or
+    # another polymer is bound here, which is real and belongs in the dossier's
+    # PEPTIDE precedent block under rule 1, not in the small-molecule one.
+    # 8QFZ is a demonstrated ligandable groove with a 12-residue bicyclic
+    # peptide against it; what it is not is a small-molecule holo structure.
+    precedent: list[dict[str, Any]] = []
+    for c in sorted(buckets.get("polymer_conjugate", [])):
+        ev = verdicts[c].evidence
+        for host in ev.get("conjugate_of", []) or []:
+            precedent.append({
+                "via_comp_id": c,
+                "modality": ev.get("precedent_modality"),
+                "entity_id": host.get("entity_id"),
+                "description": host.get("description"),
+                "n_monomers": host.get("n_monomers"),
+                "sequence": host.get("sequence"),
+            })
     return {
         "is_holo": bool(dl),
         "druglike_ligands": dl,
+        "polymer_conjugates": sorted(buckets.get("polymer_conjugate", [])),
+        "polymer_ligand_precedent": precedent,
+        "context_applied": context is not None and context.is_available(),
         "by_verdict": {k: sorted(v) for k, v in sorted(buckets.items())},
         "unknown_ligands": sorted(buckets.get("unknown", [])),
         # `is_holo=False` with a non-empty `undetermined` is NOT an apo call.

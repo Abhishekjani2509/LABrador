@@ -127,10 +127,17 @@ Listed in the validator's own registry order, with the trigger that fails them.
    `pocket_volume_a3` (`primary_d1_6_a3`, `min`, `max`) fails outright — decline
    on an **unmeasured volume**, never on a poor score; and a low druggability
    sitting beside a volume of 240 Å³ or more requires a non-empty
-   `tractability.caveat` stating the disagreement.
+   `tractability.caveat` stating the disagreement. **That 240 Å³ is a disclosure
+   trigger only** — it fires a *write it down*, never a classification, and the
+   calibration it came from is withdrawn (rule 4a; see the grader failure modes
+   below).
 
-8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the computed axis's number.**
-   Whenever any volume or druggability figure is reported,
+8. **`VOLUME_NOT_PRIMARY` — volume at D=1.6 is the number the computed axis
+   must report.** "Primary" here means *reported first and never omitted*, **not
+   that volume separates druggable from hard** — that separation is withdrawn
+   (rule 4a, 2026-08-15: three of fifteen calibration anchors scored the wrong
+   protein). This criterion checks presence and sanity, and grades no volume
+   against any boundary. Whenever any volume or druggability figure is reported,
    `pocket_volume_a3.primary_d1_6_a3` must be numeric (or excused by name in
    `not_found`); it must not exceed **1000 Å³**, which is the signature of sites
    merged with neighbouring cavities rather than a D=1.6 site volume; and a
