@@ -1,0 +1,57 @@
+# The alarm for the seams between our nodes.
+#
+# Six people push into this repo through an auto-integrator that merges on
+# green. `bun run typecheck` and `bun run check` already catch code that does
+# not compile. What they cannot catch is the failure that actually costs us a
+# demo: one node's artifact silently stops matching what another node reads —
+# a renamed field, a schema drift, a fixture that stops validating, a bridge
+# that quietly starts emitting zero rows.
+#
+# `bun run pipeline:health` runs the deterministic half of the whole pipeline
+# and prints PASS/FAIL per seam. It needs NO API key and NO network, which is
+# exactly why it can run on every push. The live half (`bun run pipeline`,
+# which calls Claude and clinicaltrials.gov) is exercised by hand and its trace
+# artifact is committed; this job checks that the committed trace is still a
+# complete 7-station run carrying its honesty labels.
+name: integration health
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # uv runs the two Python halves of the chain: the hypothesis generator
+      # (station 1) and the economics engine. The health suite shells out to
+      # `uv` and to `python3`; a missing tool is reported as a FAIL against the
+      # check that needed it rather than swallowed, but installing it here
+      # means a FAIL is a real seam break rather than a missing runtime.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint (ultracite)
+        run: bun run check
+
+      # The seam alarm itself. Non-zero exit if any bridge, validator or
+      # fixture stopped agreeing with its consumer.
+      - name: Pipeline health (deterministic seams)
+        run: bun run pipeline:health
