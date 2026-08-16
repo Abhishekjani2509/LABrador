@@ -230,7 +230,7 @@ output. Non-determinism here silently corrupts every score.
 | 5 | smoke, blocking | six facts below |
 | 6 | render | deferred |
 
-### Spike result — agent `spike` v2, session `sesn_01TsJ1p4AfH7zd9Msbe12ArF`
+### Spike result — sandbox-capability-probe, 2026-08-15
 
 | check | result |
 |---|---|

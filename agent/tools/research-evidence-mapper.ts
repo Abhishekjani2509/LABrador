@@ -5,7 +5,7 @@ import { acl } from "@/managed/research-evidence-mapper/acl.ts";
 import { loadManagedAgent, runTask } from "@/lib/claude-managed-agent.ts";
 
 const sessionIdState = defineState<string | undefined>(
-  "literature-graph-session",
+  "research-evidence-mapper-session",
   () => undefined,
 );
 

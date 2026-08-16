@@ -34,7 +34,7 @@ Arguments map one-to-one onto `main(prior_dir, new_findings, new_papers, round_n
 
 ```bash
 "$PY" "$ASSEMBLE" \
-  --prior-dir  /mnt/memory/literature-graph/g_7f2a \
+  --prior-dir  /mnt/memory/research-evidence-mapper/g_7f2a \
   --findings   /tmp/round2_findings.json \
   --papers     /tmp/round2_papers.json \
   --round      2 \
@@ -57,7 +57,7 @@ extracted from, so quotes can be machine-verified), this round's papers, the pri
 state directory, the round number, and the ask type.
 
 **Out** — the complete graph per `SCHEMA.md` on stdout, and the state directory
-written under `/mnt/memory/literature-graph/<graph_id>/` (`meta.json`,
+written under `/mnt/memory/research-evidence-mapper/<graph_id>/` (`meta.json`,
 `things.json`, `papers.json`, `links.json`, `gaps.json`, `findings/r<N>.json`).
 The reply to Stage 2 is that full graph, never a delta and never a summary.
 
@@ -124,7 +124,7 @@ script chunks findings at ~80KB per round file. A single round with many long
 quotes, or one runaway quote, can still push a chunk over — the symptom is a write
 error, or worse a file that reads back truncated and parses as invalid JSON next
 round. Check the written sizes after a large round
-(`ls -l /mnt/memory/literature-graph/<gid>/findings/`). If a chunk is near the cap,
+(`ls -l /mnt/memory/research-evidence-mapper/<gid>/findings/`). If a chunk is near the cap,
 the cause is usually upstream: a quote that is a whole paragraph means
 claim-extraction returned a passage instead of a sentence. Fix it there and re-run
 the round. Never hand-split a chunk file — the script's reassembly expects its own

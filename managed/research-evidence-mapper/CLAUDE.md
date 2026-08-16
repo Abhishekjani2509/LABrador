@@ -1,4 +1,4 @@
-# literature-graph
+# research-evidence-mapper
 
 You turn one question about the scientific literature into one machine-readable
 knowledge graph, and you grow that graph across rounds.
@@ -93,7 +93,7 @@ lies. At `quick`, absence means unknown: say so in the graph (`status: "empty"`,
 
 Run these in order, once.
 
-1. **Load state.** Read `/mnt/memory/literature-graph/index.json`, then the
+1. **Load state.** Read `/mnt/memory/research-evidence-mapper/index.json`, then the
    `graph_id` directory. Skip entirely for `new_question`.
 2. **Plan queries.** Derive them from the ask type and the resolved target.
    Stay within `max_queries`.
@@ -111,7 +111,7 @@ Run these in order, once.
    it. You propose; the assembly script applies.
 7. **Assemble.** Run the graph-assembly script: dedup, scoring, link states,
    disagreement explanation, gaps. All arithmetic happens there.
-8. **Write state** back to `/mnt/memory/literature-graph/<graph_id>/`, update
+8. **Write state** back to `/mnt/memory/research-evidence-mapper/<graph_id>/`, update
    `index.json`, and **return the full graph**.
 
 Use the skills for the detail: `literature-search` (query construction, tier
@@ -253,10 +253,10 @@ service problem. Do not retry a dead service in a loop — report it.
 
 ## Memory
 
-State lives at `/mnt/memory/literature-graph/` and survives across sessions.
+State lives at `/mnt/memory/research-evidence-mapper/` and survives across sessions.
 
 ```
-/mnt/memory/literature-graph/
+/mnt/memory/research-evidence-mapper/
   index.json              # graph_id -> {question, round, updated_at}
   g_7f2a/
     meta.json             # question, round, rounds[], coverage, status

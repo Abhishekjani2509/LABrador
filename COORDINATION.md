@@ -77,13 +77,43 @@ are dead — do not create files under them.
   passing. Lesson recorded: fixtures you write yourself lie; §6 item 6 is
   the schema-level fix.
 
-**Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-15 late — second live Managed Agent, first product one)*
-- SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
-  CLAUDE.md, three skills (literature-search, claim-extraction,
-  graph-assembly with deterministic assemble.py), and first run artifacts
-  (`runs/g_1a4f`). Deployed: manifest + acl + eve wrapper landed, plus a
-  shared-runtime MCP fail-fast watchdog (surfaces never-reached-tools in
-  minutes instead of after the timeout budget).
+**Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-16 early)*
+- **Live Managed Agent**: `agent_015feTqKz3Bmtec2RaWaE2sW` v3, three skills
+  uploaded, memory store `memstore_01NGZC8ti7PMqpqzUKcxuiaY`, Paperclip MCP
+  attached as an `mcp_toolset` (`always_allow`), credential in vault
+  `vlt_011Ce5SbT8uAxY9LgM3eTZpS`. Second deployed agent in the repo.
+- **Paperclip is a hosted remote MCP** — `https://paperclip.gxl.ai/mcp`,
+  streamable HTTP, exposing ONE passthrough tool `paperclip({command})` that
+  runs the CLI server-side. Stateless, no shell loops, one command per call.
+  An earlier revision of this node's docs wrongly concluded no MCP existed;
+  that is retracted in BUILD.md/CONTRACT.md rather than silently rewritten.
+- **End-to-end verified on the deployed agent**: graph `g_9d3c` — 28 things,
+  6 papers, 23 findings *every one carrying a verbatim quote,
+  `no_quote_discarded: 0`*, 22 links, honest `coverage`
+  (`found: 46, used: 6, truncated: true`).
+- **Liveness**: a canary query runs before any real search; if it fails the
+  agent stops and returns `status: "failed"` with `stop_reason:
+  "search_unavailable"` and an `error` prefixed `PAPERCLIP UNAVAILABLE:`.
+  A dead corpus must never read as "no evidence found". Fired and passed in
+  production on its first run.
+- **assemble.py is deterministic** — byte-identical across repeated runs and
+  varied `PYTHONHASHSEED`. All arithmetic lives there; nothing is scored by
+  hand.
+- Two defects found only once real output existed, both fixed: the agent
+  wrapped its JSON in prose + a ```json fence (breaks any consumer calling
+  `JSON.parse`, including Rafal's graph-intake), and gap ranking produced 38
+  gaps sharing 6 scores whose top ten were readouts of ONE paper radiating
+  off a hub. Ranking now weights basis, paper-independence, a hub penalty and
+  multi-route implication → 12 distinct scores, top gap becomes a real
+  missing edge (PF-06650833 vs tofacitinib, never directly compared).
+- Renamed `literature-graph` → `research-evidence-mapper` and merged `main`
+  (2026-08-16). Trap worth knowing repo-wide: **the memory store's NAME sets
+  the `/mnt/memory/<slug>` mount path**, and `deploy.ts` only provisions a
+  store when `memory_store_id` is absent — so renaming a node while keeping
+  that id leaves the agent writing state to a mount that no longer matches
+  its prompt, silently.
+- Shared-runtime MCP fail-fast watchdog (surfaces never-reached-tools in
+  minutes instead of after the timeout budget) — landed with the deploy.
 
 **Moamen — sandbox-capability-probe** *(done; node since deleted from the repo — findings live on in Soliman's CONTRACT.md)*
 - The only deployed Managed Agent. Proved: bundled scripts execute in the
@@ -143,11 +173,28 @@ are dead — do not create files under them.
 - [ ] Pin the `proto-tools` git dependency (unpinned ref = unreproducible image).
 
 **Soliman**
-- [x] First implementation drop merged (CLAUDE.md, 3 skills, assemble.py,
-      run artifacts). Remaining per BUILD.md: fixtures, wrapper, and the
-      blocking verification criteria — owner to confirm what's left.
-- [ ] Long-lived Paperclip auth (which header the MCP accepts for API keys).
-- [ ] Committed session id in CONTRACT.md:199 — scrub if repo goes public.
+- [x] Implementation drop, deploy, router wrapper, `acl.ts` (`{public: true}`),
+      manifest. Agent live and verified end to end.
+- [x] Committed session id in CONTRACT.md — scrubbed 2026-08-16.
+- [ ] **`fixtures/` still missing** (BUILD.md step 1). One question each:
+      well-studied, sparse, genuinely disputed. The well-studied candidate is
+      validated (EGFR mutations → TKI response, >=2000 corpus papers, six
+      first authors on five continents); the other two are not written.
+- [ ] **`expand_node` and `resolve_link` have never executed.** Only
+      `new_question` and `test_gap` have run. `resolve_link` is the likeliest
+      to break first — it is the ask that biases queries toward the
+      under-represented side AND reads figures, and neither path has run.
+- [ ] **Findings are not idempotent across a retried round.** `main()` appends
+      without deduping on id, so a retried round double-counts findings and
+      inflates `agreement` and `independence` for every affected link. Real
+      risk: the first deployed run hit a 10-minute timeout mid-round.
+- [ ] Long-lived Paperclip auth. `Authorization: Bearer` is proven against the
+      MCP with a session token; which header it accepts for a **long-lived API
+      key** is untested, and the CLI cannot mint one (`paperclip login` is
+      browser-OAuth only). **The vault token expires ~2026-08-16 02:00 UTC**;
+      after that the agent returns `search_unavailable` until it is replaced.
+- [ ] `targets[]` + `uniprot_accession` handoff for the tractability node —
+      needs Rafal's sign-off, not a unilateral schema change (see §5).
 
 **Moamen**
 - [ ] Nothing owed. Optional high-leverage favor: add `clinicaltrials.gov`
@@ -178,6 +225,8 @@ are dead — do not create files under them.
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics. NOTE: Vince's `hypothesis-highlander` claims this layer as a meta-search — decide whether it IS the orchestrator or sits above a simpler one | Cyrus + Vince |
 | **Highlander↔nodes interop** | highlander says "module-agnostic" but its calls against the real node contracts (thesis.ts, RecruitabilityResult, ProgramInput, mapper graphs) are unverified — its test_interop.py runs against stubs. **Forecaster side VERIFIED 2026-08-15 late (Abhishek, read-only): the two `RecruitabilityResult` fields it reads (`score`, `simulatedMonthsToEnroll`) match exactly, but its hand-mirrored thesis has drifted — `uniprotAccession` is top-level instead of `target.uniprotAccession` (silently lost in BOTH directions, verified) and `Evidence.direction` lacks `no_effect`, so a real bridged thesis hard-fails its `validate()`. Report + mismatch table + minimal fix: [`managed/trial-recruitment-forecaster/INTEROP-highlander.md`](./managed/trial-recruitment-forecaster/INTEROP-highlander.md). Economics / mapper / tractability sides still open.** | Vince + node owners (forecaster side done) |
 | ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
+| **Mapper `targets[]` schema** | The tractability node's one mandatory input is `uniprot_accession`, and `kind: "protein"` cannot distinguish a drug target from a readout. Proposal: `things[].uniprot_accession` + `gene_symbol` + `resolved_by` + `ambiguity[]`, plus an ordered `targets[]` block. Resolution must key on the **quote, not the entity name** — resolving the string "IL-6" yields P05231 (ligand) while receptor-blockade evidence is P08887, and without an explicit unresolved state the pipeline confidently assesses the wrong protein. Rafal's `graph-intake` already consumes mapper graphs, so this is a contract change against a live consumer. | Soliman + Rafal (needs Rafal's OK before implementation) |
+| **README row stale (mapper)** | Root README still says Research Evidence Mapper is *"Design packet only; the agent, skills, deterministic assembler, and fixtures remain to be built"* and *"No implementation currently enforces them"*. All three clauses are now false — the agent is deployed and verified. Not edited here because §7.3 reserves shared files to their owner. Suggested replacement state: **"Deployed Managed Agent (v3) with three skills and a deterministic assembler; fixtures and two of four ask types still outstanding."** | Cyrus (owner of README) |
 | **Decision-grade policy** | economics excludes simulation-sourced inputs from decision grade BY DESIGN — a composed demo will always read NOT_DECISION_GRADE unless the team explicitly decides how simulated upstream numbers are graded. Decide before the stage demo, not on it. | Everyone (5-min call) |
 
 ## 6. thesis.ts ratification agenda (the blocking conversation)
@@ -277,7 +326,7 @@ Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
 | trial-recruitment-forecaster | `bun managed/trial-recruitment-forecaster/demo.ts` (needs `ANTHROPIC_API_KEY`); `bun managed/trial-recruitment-forecaster/backtest.ts` |
 | therapeutic-program-economics | `cd managed/therapeutic-program-economics && uv sync --frozen --extra dev && uv run pytest && uv run ruff check .` |
 | small-molecule-tractability-review | no runnable end-to-end yet; pipeline.html records per-stage status |
-| research-evidence-mapper | docs only; BUILD.md lists blocking verification criteria |
+| research-evidence-mapper | `bun run console research-evidence-mapper -- --once '{"graph_id":"g_nope","ask":"resolve_link","target":"L99","depth":"quick"}'` (fast contract check: reply must start `{`, no fence, `status: "failed"`); full run: `--once '{"ask":"new_question","target":"<question>","depth":"standard"}' --timeout 3000` |
 | sandbox-capability-probe | `bun run console sandbox-capability-probe -- --once "run the probe"` (deployed) |
 
 ---

@@ -1,4 +1,4 @@
-# literature-graph
+# research-evidence-mapper
 
 A Claude Managed Agent that turns one question about the scientific literature
 into one machine-readable knowledge graph, and grows that graph across rounds.
@@ -8,9 +8,12 @@ quote** from text it actually fetched, and returns the whole graph as JSON —
 nodes, evidence, scored relationships, and the places where the literature has
 a hole in it.
 
-**Status: working prototype, not deployed.** The pipeline has run end to end
-against real papers in a local session. It has not run in the cloud sandbox.
-See [Status and gaps](#status-and-gaps) before relying on it.
+**Status: deployed and verified.** `agent_015feTqKz3Bmtec2RaWaE2sW` v3 runs on
+the Claude Developer Platform with three skills, a memory store, and the
+Paperclip MCP attached. It has produced a real graph end to end in the cloud
+sandbox — 23 findings, every one quote-verified, none discarded. Two of its
+four ask types have never executed, and `fixtures/` is not written. See
+[Status and gaps](#status-and-gaps) before relying on it.
 
 ---
 
@@ -150,11 +153,11 @@ it. Which header the MCP accepts for a **long-lived API key** is still untested;
 
 ### Memory
 
-One memory store, mounted at `/mnt/memory/literature-graph/`, provisioned by
+One memory store, mounted at `/mnt/memory/research-evidence-mapper/`, provisioned by
 `bun run deploy`. State survives across sessions and rounds.
 
 ```
-/mnt/memory/literature-graph/
+/mnt/memory/research-evidence-mapper/
   index.json          graph_id -> question, round, updated_at
   g_7f2a/
     meta.json  things.json  papers.json  links.json  gaps.json
@@ -195,7 +198,7 @@ From the repo root, in a Claude Code session:
 
 ```bash
 bun install                                   # once per machine
-/managed-agent-deploy literature-graph        # compiles + deploys + smoke tests
+/managed-agent-deploy research-evidence-mapper        # compiles + deploys + smoke tests
 ```
 
 That compiles `manifest.json`, `acl.ts` and the router wrapper, uploads the
@@ -208,7 +211,7 @@ Requirements:
 - `ANTHROPIC_API_KEY` in `.env` at the repo root
 - a Paperclip credential in a platform vault, id in `manifest.vault_ids`
 
-Re-deploy any time with `bun run deploy literature-graph` — idempotent, and a
+Re-deploy any time with `bun run deploy research-evidence-mapper` — idempotent, and a
 no-op when nothing changed.
 
 ### B. Call the deployed agent (what everyone else does)
@@ -216,8 +219,8 @@ no-op when nothing changed.
 Nothing to install. It is a server-side agent with an HTTP endpoint.
 
 ```bash
-bun run console literature-graph              # opens it in the Claude Console
-bun run console literature-graph -- --once "$(cat fixtures/q-disputed.txt)"
+bun run console research-evidence-mapper              # opens it in the Claude Console
+bun run console research-evidence-mapper -- --once "$(cat fixtures/q-disputed.txt)"
 ```
 
 Any backend can drive it with three HTTP calls — create a session, send the
@@ -254,7 +257,7 @@ downloading; `pip install gxl-paperclip` fails because the PyPI index returns
 so on Python 3.13+ it tries a Rust source build and fails.
 
 The agent's own skills are **not loadable** while prototyping — the session's
-cwd is the repo root, so `managed/literature-graph/.claude/skills/` is outside
+cwd is the repo root, so `managed/research-evidence-mapper/.claude/skills/` is outside
 what the Skill tool discovers. Read the SKILL.md files and follow them by hand;
 the deploy smoke test is what proves real skill loading.
 
@@ -296,12 +299,15 @@ same `stop_reason`. And a `test_gap` that could not query never sets
 | | |
 |---|---|
 | Sandbox affordances (bundled scripts, python3, `/mnt/memory`, egress) | verified via the `spike` agent |
-| `new_question` | run against real papers |
-| `test_gap` | run against real papers; overturned a round-1 answer |
+| `new_question` | ✅ run against real papers, locally and deployed |
+| `test_gap` | ✅ run against real papers; overturned a round-1 answer |
 | `expand_node`, `resolve_link` | **never executed** |
 | Figure reading (`ask-image`) | **never executed** |
-| Deployment | **never run** — `manifest.json` does not exist yet |
-| Long-lived API key auth against the MCP | **untested** |
+| Deployment | ✅ live — `agent_015feTqKz3Bmtec2RaWaE2sW` v3 |
+| Raw-JSON output contract | ✅ enforced and checked mechanically |
+| Paperclip liveness canary | ✅ fired and passed in production |
+| Long-lived API key auth against the MCP | **untested** — vault holds a session token that expires |
+| Findings idempotency on a retried round | **known bug** — appends without dedupe, inflates agreement/independence |
 
 `resolve_link` is the likeliest to break first: it is the ask that biases
 queries toward the under-represented side *and* reads figures, and neither path
