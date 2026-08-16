@@ -573,3 +573,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 01:42 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: relax the figure gate — it fires, and the gate was the whole cause — typecheck+check green.
 
 - **2026-08-16 01:45 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — Merge commit '4d7785212afadba8d507f8a56e651930ebff79d6' into HEAD · Agents in flight: output notes, modality module, graph fixtures · Merge commit '76a4d754b108f7112cfb64553c0389bdeaeef95d' into HEAD · Apply benchmark and PocketMiner results to prior art and cofold-check · Demote druggability, gate the superposition, and close the credential path — typecheck+check green.
+
+- **2026-08-16 01:52 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Render the brief report as prose rather than labelled fragments — typecheck+check green.
