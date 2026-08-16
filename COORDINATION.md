@@ -124,6 +124,23 @@ are dead — do not create files under them.
   is one command instead of a hand-authored driver. Confirmed materialized in
   the sandbox and `cat`-ed by the agent. Call ratio moved from 16 MCP / 41
   local to 42 MCP / 36 local.
+- **`how` is a closed set** — `inhibits` | `activates` | `binds` | `increases` |
+  `decreases` | `drives` | `associated_with`, with the distinction the drift
+  exposed: **activity is not abundance**. A kinase inhibitor `inhibits`;
+  `decreases` is for a measured level or score. Seven of eight IRAK4 edges had
+  been `decreases`, which reads as *lowers IRAK4 protein* — not what any of
+  those papers showed. Backward-compatible for graph-intake: same field, more
+  reliable values. Caveat for §6: changing a verb on an EXISTING pair forks a
+  parallel link, since links key on (from, how, to), so migrating an old graph
+  needs a deliberate remap rather than a re-extraction.
+- **Missing-tool liveness deliberately tested.** Credential invalidated on
+  purpose, agent run, credential restored. Result: `status: "failed"`,
+  `stop_reason: "search_unavailable"`, error prefixed `PAPERCLIP UNAVAILABLE`,
+  lists empty, found/read/used 0/0/0, and **zero** filesystem hunting — the two
+  accidental outages had produced 15 calls of `which paperclip` /
+  `find / -iname "*paperclip*"`. Needed a `--mcp-silence` flag on `console`,
+  because the MCP watchdog would otherwise kill the run before the agent could
+  report the outage it exists to report.
 - **Fixtures written** (BUILD.md step 1) — three corpus-validated questions,
   each grading something specific rather than demonstrating success:
   EGFR/TKI (`deep`, dense consensus; sets traps for text-only sponsorship
@@ -222,23 +239,6 @@ are dead — do not create files under them.
 
 *§7.6: finished work moves to §3. Nothing with `[x]` belongs in this list.*
 
-- [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
-      the MCP; which header it accepts for a **long-lived API key** is still
-      untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth
-      only). Rotation is a one-call vault update so it is not blocking, but the
-      deployed agent stops searching whenever the token behind the vault entry
-      lapses — observed twice.
-- [ ] **`how` verb drift, for the §6 enum discussion.** Seven of eight
-      intervention→target edges came back as `decreases`, one as `inhibits`.
-      "KT-474 decreases IRAK4" is semantically off — these inhibit activity,
-      not abundance. Pooling is unaffected, but it is concrete evidence for the
-      `how` enum already on the ratification agenda. Raising there rather than
-      changing shared vocabulary unilaterally.
-- [ ] **The missing-tool liveness path has only ever fired by accident** —
-      twice, when the vault token lapsed and the platform exposed no Paperclip
-      tool at all, and the agent went hunting for a local CLI. The rule now
-      covers it (stop, report, do not search the filesystem), but it deserves a
-      deliberate test before anyone relies on it.
 - [ ] **`targets[]` + `uniprot_accession` handoff** for the tractability node.
       The `things[]` half is shipped — `uniprot_accession`, `gene_symbol`,
       `resolved_by`, `ambiguity`. What remains is the ordered `targets[]` block

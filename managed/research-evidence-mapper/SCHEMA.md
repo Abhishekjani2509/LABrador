@@ -59,6 +59,10 @@ other by `id`. Nothing nested.
   }],
   "findings": [{
     "id": "f2", "from": "t2", "how": "binds", "to": "t3",
+    // how: inhibits | activates | binds | increases | decreases | drives |
+    //      associated_with  -- closed set. Activity is not abundance: a kinase
+    //      inhibitor `inhibits`, it does not `decrease`. Links key on
+    //      (from, how, to), so a free-form verb forks one relationship.
     "says": "yes",               // yes | no | no_effect
     "quote": "the linker-38C2 conjugate binds integrin",   // EXACT source words
     "paper": "p2", "where": "test tube",                   // conditions, if stated

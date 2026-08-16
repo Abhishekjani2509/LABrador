@@ -471,6 +471,7 @@ Field vocabularies, exact spellings, no substitutes:
 - `status` — `ok` | `empty` | `partial` | `failed`
 - `things.kind` — `protein` | `small_molecule` | `gene` | `disease` | `process` | `method`
 - `papers.study_type` — `meta_analysis` | `clinical_trial` | `human_cohort` | `animal` | `test_tube` | `computational` | `review`
+- `findings.how` / `links.how` — `inhibits` | `activates` | `binds` | `increases` | `decreases` | `drives` | `associated_with`
 - `findings.says` — `yes` | `no` | `no_effect`
 - `findings.section` — `abstract` | `introduction` | `results` | `methods` | `discussion` | `figure_caption`
 - `links.state` — `agreed` | `disagreed` | `single_source` | `no_effect`
