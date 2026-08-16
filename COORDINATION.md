@@ -315,7 +315,10 @@ Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
    cross-node needs to §5.
 
 **Landing work:**
-7. Push to **your own branch**. The **auto-integrator** merges it to `main`:
+7. Push to **your own branch**. The **auto-integrator** merges it to `main`
+   — UNLESS the branch name contains `checkpoint`, `do-not-merge` /
+   `do-not-auto-merge`, `wip`, or `draft`: those are never touched (opt-out
+   convention, added when Rafal's checkpoint branch appeared).
    `bun scripts/integrate.ts` sweeps every branch, `merge --no-ff`s anything
    new, auto-fixes resurrected pre-rename paths, runs typecheck + check, and
    only pushes if green — a merge-log entry lands in §9 each time. It runs
