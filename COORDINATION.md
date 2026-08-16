@@ -659,3 +659,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 03:17 UTC** — merged `abhishek-jani` (MERGED) — dossier-bridge: Adapter C — a tractability dossier's verdict as thesis Evidence — typecheck+check green.
 
 - **2026-08-16 03:22 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Halve the prose report again: clip arguments, state shared caveats once — typecheck+check green.
+
+- **2026-08-16 03:30 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fix four production findings from the tractability bridge; merged `rafwiewiora/druggability-dossier` (MERGED) — Merge commit 'af99acbe2d03dac7767a51fd96549d67001d6b87' into HEAD · Druggability is a within-structure quantity: a type error, not a power problem · Record: the graph viewer landed in 6678cc5 under an unrelated message — typecheck+check green.
