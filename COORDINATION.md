@@ -308,3 +308,5 @@ Appended by `scripts/integrate.ts` on every verified auto-merge (manual tier-2 r
 - **2026-08-16 00:41 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: raw-JSON output contract enforced, and gap ranking that discriminates — typecheck+check green.
 
 - **2026-08-16 00:42 UTC** — merged `rafwiewiora/druggability-dossier` (MERGED) — graph-intake: survive the first real graph, and carry computation back — typecheck+check green.
+
+- **2026-08-16 00:47 UTC** — merged `abhishek-jani` (MERGED) — Verify highlander interop against the real forecaster contracts (read-only) · Adapter A: mapper findings -> IndicationThesis.Evidence[], on the real graph; merged `vaalessi/hypothesis-highlander` (MERGED) — Apply adversarially-verified review fixes (7 items, +11 regression tests) — typecheck+check green.
