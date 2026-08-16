@@ -569,3 +569,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 
 - **2026-08-16 01:26 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — COORDINATION: move Soliman's finished work to §3, leave §4 open-only — typecheck+check green.
 - **2026-08-16 01:28 UTC** — merged `rafwiewiora/druggability-dossier` (514a5ad, tier-2: compiled-agent wrapper imported the dead druggability-dossier path — fixed to small-molecule-tractability-review, same class as the mapper deploy) — tractability agent COMPILED (manifest+tools+acl+wrapper); druggability score demoted, four silent wrong answers fixed — typecheck+check green.
+
+- **2026-08-16 01:42 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: relax the figure gate — it fires, and the gate was the whole cause — typecheck+check green.
