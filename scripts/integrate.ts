@@ -131,7 +131,10 @@ function mergeBranch(b: { name: string; sha: string }, cwd: string): string {
   return paths === "moved" ? "MERGED+path-fix" : "MERGED";
 }
 
-function verify(cwd: string): { ok: boolean; out: string } {
+/** Dirs with their own test suites, gated only when the merge touched them. */
+const PYTHON_NODE = "managed/therapeutic-program-economics";
+
+function verify(cwd: string, baseSha: string): { ok: boolean; out: string } {
   const install = trySh("bun install --frozen-lockfile", cwd);
   if (!install.ok) {
     return { ok: false, out: `bun install failed:\n${install.out}` };
@@ -143,6 +146,21 @@ function verify(cwd: string): { ok: boolean; out: string } {
   const check = trySh("bun run check", cwd);
   if (!check.ok) {
     return { ok: false, out: `check failed:\n${check.out}` };
+  }
+  const touched = trySh(
+    `git diff --name-only ${baseSha}..HEAD -- ${PYTHON_NODE}`,
+    cwd
+  );
+  if (touched.ok && touched.out.length > 0) {
+    const pyDir = join(cwd, PYTHON_NODE);
+    const sync = trySh("uv sync --frozen --extra dev", pyDir);
+    if (!sync.ok) {
+      return { ok: false, out: `uv sync failed:\n${sync.out}` };
+    }
+    const pytest = trySh("uv run pytest -q", pyDir);
+    if (!pytest.ok) {
+      return { ok: false, out: `pytest failed:\n${pytest.out}` };
+    }
   }
   return { ok: true, out: "" };
 }
@@ -177,6 +195,7 @@ try {
   const repo = join(work, "repo");
   sh("git checkout --quiet main", repo);
 
+  const baseSha = sh("git rev-parse HEAD", repo);
   const pending = listBranches(repo).filter((b) => !isAncestor(b.sha, repo));
   if (pending.length === 0) {
     log("NOTHING-TO-MERGE: every branch is already in main");
@@ -196,7 +215,7 @@ try {
     process.exit(2);
   }
 
-  const checks = verify(repo);
+  const checks = verify(repo, baseSha);
   if (!checks.ok) {
     log(
       `VERIFY-FAILED — nothing pushed. Details:\n${checks.out.slice(0, 4000)}`
