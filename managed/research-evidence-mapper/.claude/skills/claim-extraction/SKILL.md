@@ -246,6 +246,36 @@ sentence.
 
 ---
 
+## The `how` verb — activity is not abundance
+
+`how` is a closed set. Links key on `(from, how, to)`, so a verb chosen freely
+forks one relationship into several, and a downstream consumer reads the verb
+to decide what actually happened.
+
+| verb | means | use when |
+|---|---|---|
+| `inhibits` | reduces the **activity** of a protein | a kinase inhibitor, an antagonist, a blocking antibody |
+| `activates` | increases the **activity** of | a kinase phosphorylates its substrate |
+| `binds` | physical interaction, no direction claimed | co-IP, structural, affinity data |
+| `decreases` | reduces the **amount or magnitude** of | knockdown lowers mRNA; treatment lowers a score |
+| `increases` | raises the amount or magnitude of | expression is upregulated |
+| `drives` | causal contribution to a process or disease | pathway drives inflammation |
+| `associated_with` | correlation only, no causal claim | expression correlates with severity |
+
+**The distinction that matters: activity is not abundance.** A kinase inhibitor
+`inhibits` its target — it does not `decrease` it. Reach for `decreases` only
+when the paper measured a level, a count or a score.
+
+Observed when this was free-form: eight compounds were linked to IRAK4 and
+seven came back as `decreases`, one as `inhibits`. "KT-474 decreases IRAK4"
+reads as *lowers IRAK4 protein levels*, which is not what any of those papers
+showed — they inhibit the kinase. The pooling still worked, because the edge
+existed either way, but a consumer reading `how` to infer direction would have
+drawn the wrong biology from seven of eight edges.
+
+Pick from the table. If none fits, use the closest and say why in the finding's
+`claim` — do not invent a verb, because a new verb silently creates a new link.
+
 ## Every intervention must say what it acts on
 
 **When you create an intervention node — a compound, an inhibitor, a knockdown,

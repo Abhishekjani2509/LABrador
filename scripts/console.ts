@@ -24,7 +24,7 @@ const args = process.argv.slice(2);
 const [name] = args;
 if (!name) {
   console.error(
-    'usage: bun run console <name> [-- --once "task"] [--quiet] [--timeout <seconds>]'
+    'usage: bun run console <name> [-- --once "task"] [--quiet] [--timeout <seconds>] [--mcp-silence <seconds>]'
   );
   process.exit(1);
 }
@@ -38,6 +38,16 @@ if (onceIndex !== -1 && !args[onceIndex + 1]?.trim()) {
 }
 const once = onceIndex === -1 ? undefined : args[onceIndex + 1];
 const quiet = args.includes("--quiet");
+// Stand the MCP watchdog down. Needed to TEST the missing-tool path: with no
+// MCP server reachable the agent makes no MCP call, so the watchdog would kill
+// the run before the agent can report the outage it is supposed to report.
+const silenceIndex = args.indexOf("--mcp-silence");
+const mcpSilenceMs =
+  silenceIndex === -1 ? undefined : Number(args[silenceIndex + 1]) * 1000;
+if (silenceIndex !== -1 && !Number.isFinite(mcpSilenceMs)) {
+  console.error("--mcp-silence needs a number of seconds (0 disables)");
+  process.exit(1);
+}
 const timeoutIndex = args.indexOf("--timeout");
 const timeoutMs =
   timeoutIndex === -1 ? undefined : Number(args[timeoutIndex + 1]) * 1000;
@@ -119,6 +129,7 @@ function renderEvent(event: SessionEvent) {
 
 const result = await runTask({
   manifest,
+  mcpSilenceMs,
   onEvent: renderEvent,
   rubric,
   task: once,
