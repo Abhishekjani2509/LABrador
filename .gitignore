@@ -24,3 +24,5 @@ managed/*
 !managed/trial-recruitment-forecaster
 agent/tools/*
 !agent/tools/workflow.ts
+# glassbox: spec + demo only, public data, no deployment ids
+!managed/pipeline-observatory
