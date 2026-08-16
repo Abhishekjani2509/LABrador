@@ -29,26 +29,50 @@ Resolve `python3` the same way: `command -v python3`, else `/usr/local/bin/pytho
 
 ## Invoke
 
-Arguments map one-to-one onto `main(prior_dir, new_findings, new_papers, round_n, ask)`.
-**Pass JSON as files, never as argv strings** — see failure modes.
+**One command per round. Do not write a driver script.**
 
 ```bash
-"$PY" "$ASSEMBLE" \
-  --prior-dir  /mnt/memory/research-evidence-mapper/g_7f2a \
-  --findings   /tmp/round2_findings.json \
-  --papers     /tmp/round2_papers.json \
-  --round      2 \
-  --ask        resolve_link \
-  --target     L2 \
-  > /tmp/graph_r2.json
+python3 <path>/assemble.py \
+  --input round.json \
+  --memory-dir /mnt/memory/research-evidence-mapper \
+  --save
 ```
 
-`--prior-dir` for a `new_question` points at a directory that does not exist yet;
-that is expected and the script starts from an empty graph.
+`round.json` is everything this round produced. Write it once, then run the
+command; the full graph comes back on stdout (or use `--out FILE`).
 
-**The script is the authority on its own flags.** If a flag here is rejected, run
-`"$PY" "$ASSEMBLE" --help` and follow that. Never work around a flag mismatch by
-doing the step by hand.
+```jsonc
+{
+  "graph_id": "g_7f2a",        // omit for new_question — a stable id is minted
+  "question": "...",
+  "round": 2,
+  "ask": "new_question | expand_node | resolve_link | test_gap",
+  "target": "L3",              // null for new_question
+  "depth": "standard",
+  "generated_at": "2026-08-16T02:05:00Z",
+  "status": "ok",              // your judgement of the round; ok|empty|partial|failed
+  "coverage": { "...": "the real numbers" },
+  "things":   [ /* new/proposed entities */ ],
+  "papers":   [ /* include "source_text" — it is used to verify quotes, then stripped */ ],
+  "findings": [ /* every one with its verbatim quote */ ]
+}
+```
+
+`--save` writes state back under `--memory-dir` and updates `index.json`.
+Omit it to see what a round *would* produce without committing it.
+
+Two behaviours worth relying on:
+
+- **An extending ask against a graph that is not in memory returns
+  `status: "failed"` and leaves memory untouched.** It does not silently start
+  a new graph.
+- **`new_question` mints its id from a hash of the question**, so a retried
+  round rejoins the same graph instead of forking a second one for the same
+  question.
+
+Check the module itself with `python3 assemble.py --selftest` — it exercises
+quote verification, dedupe, scoring, disagreement explanation, the
+missing-directory case, and the twice-run byte-identical property.
 
 ## In / out
 

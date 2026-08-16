@@ -13,6 +13,7 @@ corrupts every score in the graph.
 import json
 import math
 import os
+import sys
 import re
 import unicodedata
 
@@ -719,3 +720,208 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
         "coverage": cov,
         "rounds": rounds,
     }
+
+
+# --------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------
+#
+# One command per round. Without this the caller has to hand-author a driver
+# script every round to marshal findings into main(), which costs more tool
+# calls than the extraction it exists to serve -- and worse, it puts freshly
+# written, unreviewed glue in front of a core whose entire value is that it is
+# deterministic. A byte-stable script reached through a different caller each
+# time is not reproducible.
+#
+#   python3 assemble.py --input round.json --memory-dir /mnt/memory/<node> --save
+#
+# round.json carries everything for this round:
+#   {"graph_id": "g_7f2a",        // omit for new_question; a fresh id is minted
+#    "question": "...", "round": 2, "ask": "resolve_link", "target": "L3",
+#    "depth": "standard", "generated_at": "...", "status": "ok",
+#    "coverage": {...}, "things": [...], "papers": [...], "findings": [...]}
+#
+# papers[] may carry "source_text"; it is used for quote verification and
+# stripped from the output. The full graph goes to stdout (or --out FILE).
+
+
+def _mint_graph_id(memory_dir, question):
+    """Deterministic id from the question, so a retried new_question round does
+    not create a second graph for the same question."""
+    import hashlib as _h
+    base = _h.sha256(("q:" + (question or "")).encode("utf8")).hexdigest()[:4]
+    index = {}
+    idx_path = os.path.join(memory_dir or "", "index.json")
+    if memory_dir and os.path.isfile(idx_path):
+        with open(idx_path, encoding="utf8") as fh:
+            index = json.load(fh)
+    gid = "g_" + base
+    n = 0
+    while gid in index and index[gid].get("question") != question:
+        n += 1
+        gid = "g_" + _h.sha256(("q:%s:%d" % (question, n)).encode("utf8")).hexdigest()[:4]
+    return gid
+
+
+def cli(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description="Assemble one round into the graph.")
+    ap.add_argument("--input", help="round bundle JSON (see header)")
+    ap.add_argument("--memory-dir", default=None,
+                    help="e.g. /mnt/memory/research-evidence-mapper")
+    ap.add_argument("--out", default="-", help="write graph here ('-' = stdout)")
+    ap.add_argument("--save", action="store_true",
+                    help="write state back and update index.json")
+    ap.add_argument("--selftest", action="store_true")
+    a = ap.parse_args(argv)
+
+    if a.selftest:
+        return selftest()
+    if not a.input:
+        ap.error("--input is required (or --selftest)")
+
+    with open(a.input, encoding="utf8") as fh:
+        r = json.load(fh)
+
+    ask = r.get("ask") or "new_question"
+    gid = r.get("graph_id")
+    if ask == "new_question" or not gid:
+        gid = gid or _mint_graph_id(a.memory_dir, r.get("question"))
+        prior_dir = None
+    else:
+        prior_dir = os.path.join(a.memory_dir, gid) if a.memory_dir else None
+        if prior_dir and not os.path.isdir(prior_dir):
+            # An extending ask against a graph that is not in memory is a
+            # failed round, not an empty one -- do not silently start over.
+            graph = {
+                "schema_version": "1.1", "graph_id": gid,
+                "question": r.get("question"), "round": r.get("round", 0),
+                "status": "failed",
+                "generated_at": r.get("generated_at"),
+                "error": "graph_id %r not found in memory; nothing to extend" % gid,
+                "rounds": [], "coverage": dict(r.get("coverage") or {}),
+                "things": [], "papers": [], "findings": [], "links": [], "gaps": [],
+            }
+            _emit(graph, a.out)
+            return 0
+
+    graph = main(
+        prior_dir=prior_dir,
+        new_findings=r.get("findings") or [],
+        new_papers=r.get("papers") or [],
+        new_things=r.get("things") or [],
+        round_n=r.get("round", 1),
+        ask=ask,
+        question=r.get("question"),
+        graph_id=gid,
+        generated_at=r.get("generated_at"),
+        coverage=r.get("coverage") or {},
+        target=r.get("target"),
+        depth=r.get("depth"),
+        papers_added=len(r.get("papers") or []),
+    )
+    if r.get("status"):
+        graph["status"] = r["status"]
+    for p in graph.get("papers", []):
+        p.pop("source_text", None)
+
+    if a.save:
+        if not a.memory_dir:
+            raise SystemExit("--save needs --memory-dir")
+        save_state(graph, os.path.join(a.memory_dir, gid))
+        idx_path = os.path.join(a.memory_dir, "index.json")
+        index = {}
+        if os.path.isfile(idx_path):
+            with open(idx_path, encoding="utf8") as fh:
+                index = json.load(fh)
+        index[gid] = {"question": graph.get("question"),
+                      "round": graph.get("round"),
+                      "updated_at": graph.get("generated_at")}
+        with open(idx_path, "w", encoding="utf8") as fh:
+            fh.write(_dump(index))
+
+    _emit(graph, a.out)
+    return 0
+
+
+def _emit(graph, out):
+    blob = _dump(graph)
+    if out == "-":
+        sys.stdout.write(blob)
+    else:
+        with open(out, "w", encoding="utf8") as fh:
+            fh.write(blob)
+
+
+def selftest():
+    """Exercise the properties that matter, on synthetic input."""
+    ok = True
+
+    def check(name, cond):
+        nonlocal ok
+        ok = ok and bool(cond)
+        print("%-46s %s" % (name, "PASS" if cond else "FAIL"))
+
+    text = "Alpha inhibits Beta in cultured cells. Gamma had no effect."
+    papers = [{"id": "p1", "doi": "10.1/a", "title": "A", "year": 2020,
+               "study_type": "test_tube", "first_author": "Ann",
+               "source_text": text},
+              {"id": "p2", "doi": "10.1/b", "title": "B", "year": 2021,
+               "study_type": "test_tube", "first_author": "Bob",
+               "source_text": text}]
+    things = [{"id": "t1", "name": "Alpha", "kind": "protein"},
+              {"id": "t2", "name": "Beta", "kind": "protein"}]
+    finds = [{"id": "f1", "paper": "p1", "from": "t1", "how": "inhibits",
+              "to": "t2", "says": "yes", "is_own_result": True,
+              "section": "results", "where": "cultured cells",
+              "quote": "Alpha inhibits Beta in cultured cells."},
+             {"id": "f2", "paper": "p2", "from": "t1", "how": "inhibits",
+              "to": "t2", "says": "yes", "is_own_result": True,
+              "section": "results", "where": "mouse",
+              "quote": "Alpha inhibits Beta in cultured cells."},
+             {"id": "f3", "paper": "p1", "from": "t1", "how": "inhibits",
+              "to": "t2", "says": "yes", "is_own_result": True,
+              "section": "results", "where": "x",
+              "quote": "This sentence is not in the source text at all."}]
+    g = main(None, finds, papers, 1, "new_question", question="q",
+             graph_id="g_test", generated_at="T", new_things=things)
+    check("unverifiable quote dropped", g["coverage"]["no_quote_discarded"] == 1)
+    check("verified findings kept", len(g["findings"]) == 2)
+    check("one link built", len(g["links"]) == 1)
+    check("link is agreed", g["links"][0]["state"] == "agreed")
+
+    g2 = main(None, finds + finds, papers, 1, "new_question", question="q",
+              graph_id="g_test", generated_at="T", new_things=things)
+    check("duplicate findings deduped", len(g2["findings"]) == 2)
+    # 6 rows in, 2 of them the unverifiable f3 -- those are discarded on the
+    # quote check BEFORE dedupe ever sees them, so only f1 and f2 repeat.
+    check("duplicates counted", g2["coverage"].get("duplicates_dropped") == 2)
+    check("discards counted separately",
+          g2["coverage"]["no_quote_discarded"] == 2)
+
+    check("quote match is whitespace-normalized",
+          verify_quote("Alpha   inhibits\nBeta in cultured cells.", text))
+    check("paraphrase rejected", not verify_quote("Alpha blocks Beta.", text))
+    check("agreement of a lone source is 0.5", agreement(1, 0) == 0.5)
+    check("agreement is symmetric", agreement(3, 1) == 1 - agreement(1, 3) + 0.0
+          or abs((agreement(3, 1) - 0.5) + (agreement(1, 3) - 0.5)) < 1e-9)
+    check("no-overlap conditions explained",
+          explain_disagreement([{"where": "a"}], [{"where": "b"}]) is not None)
+    check("overlapping conditions not explained",
+          explain_disagreement([{"where": "a"}], [{"where": "a"}]) is None)
+    check("missing prior dir is an empty graph, not an error",
+          load_state("/nonexistent/dir/xyz")["things"] == [])
+
+    a1 = _dump(main(None, finds, papers, 1, "new_question", question="q",
+                    graph_id="g_test", generated_at="T", new_things=things))
+    a2 = _dump(main(None, finds, papers, 1, "new_question", question="q",
+                    graph_id="g_test", generated_at="T", new_things=things))
+    check("twice-run byte-identical", a1 == a2)
+
+    print("\nSELFTEST:", "GREEN" if ok else "RED")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli())
+

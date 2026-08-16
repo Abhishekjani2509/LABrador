@@ -109,8 +109,14 @@ Run these in order, once.
 6. **Propose name merges** against the **whole graph**, not just this round —
    "KRAS" arriving in round 3 joins the existing "K-Ras" node instead of forking
    it. You propose; the assembly script applies.
-7. **Assemble.** Run the graph-assembly script: dedup, scoring, link states,
-   disagreement explanation, gaps. All arithmetic happens there.
+7. **Assemble.** Write this round's `round.json` and run the graph-assembly
+   script **once** — `assemble.py --input round.json --memory-dir
+   /mnt/memory/research-evidence-mapper --save`. Dedup, scoring, link
+   states, disagreement explanation and gaps all happen there, and it
+   writes state and updates `index.json` for you. **Do not author a driver
+   script.** Hand-written glue in front of the deterministic core is how
+   reproducibility is lost, and every call spent on it is a call not spent
+   reading papers.
 8. **Write state** back to `/mnt/memory/research-evidence-mapper/<graph_id>/`, update
    `index.json`, and **return the full graph**.
 
