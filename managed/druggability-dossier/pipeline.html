@@ -1,894 +1,1911 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DRUGGABILITY DOSSIER — PIPELINE STATE</title>
-<style>
-  :root{
-    --bg:#d7d2ac;
-    --ink:#1a1a1a;
-    --ink-70:rgba(26,26,26,0.70);
-    --ink-45:rgba(26,26,26,0.45);
-    --ink-22:rgba(26,26,26,0.22);
-    --ink-12:rgba(26,26,26,0.12);
-    --mono:ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;}
-  body{
-    background:var(--bg);
-    color:var(--ink);
-    font-family:var(--mono);
-    font-size:12px;
-    line-height:1.5;
-    -webkit-font-smoothing:antialiased;
-    min-width:1180px;
-  }
-  a{color:inherit;}
+  <head>
+    <meta charset="utf-8">
+    <meta content="width=device-width, initial-scale=1" name="viewport">
+    <title>DRUGGABILITY DOSSIER — PIPELINE STATE</title>
+    <style>
+    :root {
+      --bg: #d7d2ac;
+      --ink: #1a1a1a;
+      --ink-70: rgba(26, 26, 26, 0.7);
+      --ink-45: rgba(26, 26, 26, 0.45);
+      --ink-22: rgba(26, 26, 26, 0.22);
+      --ink-12: rgba(26, 26, 26, 0.12);
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      padding: 0;
+      margin: 0;
+    }
+    body {
+      min-width: 1180px;
+      font-family: var(--mono);
+      font-size: 12px;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.5;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    a {
+      color: inherit;
+    }
 
-  /* ---------- header ---------- */
-  header{
-    border-bottom:2px solid var(--ink);
-    padding:12px 18px 10px 18px;
-    display:flex;
-    align-items:flex-end;
-    justify-content:space-between;
-    gap:32px;
-  }
-  .h-title{font-size:15px;letter-spacing:0.14em;font-weight:700;}
-  .h-sub{font-size:11px;color:var(--ink-70);letter-spacing:0.05em;margin-top:3px;max-width:640px;}
-  .counts{display:flex;align-items:stretch;border:1px solid var(--ink);}
-  .count{
-    padding:5px 11px 6px 11px;
-    border-right:1px solid var(--ink);
-    text-align:center;
-    min-width:74px;
-  }
-  .count:last-child{border-right:0;}
-  .count .n{font-size:18px;font-weight:700;line-height:1.1;display:block;}
-  .count .k{font-size:9px;letter-spacing:0.1em;color:var(--ink-70);white-space:nowrap;}
-  .count.tot{background:var(--ink);}
-  .count.tot .n{color:var(--bg);}
-  .count.tot .k{color:rgba(215,210,172,0.75);}
+    /* ---------- header ---------- */
+    header {
+      display: flex;
+      gap: 32px;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 12px 18px 10px 18px;
+      border-bottom: 2px solid var(--ink);
+    }
+    .h-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+    }
+    .h-sub {
+      max-width: 500px;
+      margin-top: 3px;
+      font-size: 11px;
+      color: var(--ink-70);
+      letter-spacing: 0.05em;
+    }
+    .counts {
+      display: flex;
+      align-items: stretch;
+      border: 1px solid var(--ink);
+    }
+    .count {
+      min-width: 66px;
+      padding: 5px 9px 6px 9px;
+      text-align: center;
+      border-right: 1px solid var(--ink);
+    }
+    .count:last-child {
+      border-right: 0;
+    }
+    .count .n {
+      display: block;
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+    .count .k {
+      font-size: 9px;
+      color: var(--ink-70);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+    .count.tot {
+      background: var(--ink);
+    }
+    .count.tot .n {
+      color: var(--bg);
+    }
+    .count.tot .k {
+      color: rgba(215, 210, 172, 0.75);
+    }
 
-  /* ---------- layout ---------- */
-  .wrap{
-    display:grid;
-    grid-template-columns:290px minmax(0,1fr) 340px;
-    align-items:stretch;
-    height:calc(100vh - 62px);
-    min-height:720px;
-  }
-  .col{overflow-y:auto;overflow-x:hidden;}
-  .col::-webkit-scrollbar{width:9px;}
-  .col::-webkit-scrollbar-thumb{background:var(--ink-22);}
-  .col::-webkit-scrollbar-track{background:transparent;}
+    /* ---------- layout ---------- */
+    .wrap {
+      display: grid;
+      grid-template-columns: 290px minmax(0, 1fr) 340px;
+      align-items: stretch;
+      height: calc(100vh - 62px);
+      min-height: 720px;
+    }
+    .col {
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .col::-webkit-scrollbar {
+      width: 9px;
+    }
+    .col::-webkit-scrollbar-thumb {
+      background: var(--ink-22);
+    }
+    .col::-webkit-scrollbar-track {
+      background: transparent;
+    }
 
-  /* ---------- sidebar ---------- */
-  #sidebar{border-right:1px solid var(--ink);}
-  .side-head{
-    padding:9px 12px 8px 12px;
-    border-bottom:1px solid var(--ink);
-    font-size:9.5px;letter-spacing:0.16em;color:var(--ink-70);
-    display:flex;justify-content:space-between;
-    position:sticky;top:0;background:var(--bg);z-index:3;
-  }
-  .grp{border-bottom:1px solid var(--ink-22);}
-  .grp-head{padding:9px 12px 2px 12px;}
-  .grp-name{font-size:10.5px;letter-spacing:0.15em;font-weight:700;}
-  .grp-note{font-size:9.5px;color:var(--ink-45);letter-spacing:0.02em;line-height:1.4;margin-top:1px;}
-  .grp-rows{padding:5px 0 8px 0;}
-  .row{
-    display:grid;
-    grid-template-columns:22px 1fr 26px;
-    gap:6px;
-    align-items:start;
-    padding:2.5px 12px 2.5px 12px;
-    cursor:pointer;
-    border-left:3px solid transparent;
-  }
-  .row .code{
-    font-size:10.5px;font-weight:700;text-align:center;
-    border:1px solid var(--ink-45);line-height:14px;height:15px;
-  }
-  .row .nm{font-size:10.5px;letter-spacing:-0.2px;color:var(--ink);line-height:1.35;
-    overflow-wrap:anywhere;}
-  .row .tg{font-size:8.5px;letter-spacing:0.06em;color:var(--ink-45);text-align:right;line-height:1.5;}
-  .row:hover{background:var(--ink-12);}
-  .row.sel{background:var(--ink);border-left-color:var(--ink);}
-  .row.sel .nm,.row.sel .tg{color:var(--bg);}
-  .row.sel .code{color:var(--bg);border-color:var(--bg);}
-  .row.dim{opacity:0.38;}
+    /* ---------- sidebar ---------- */
+    #sidebar {
+      border-right: 1px solid var(--ink);
+    }
+    .side-head {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      justify-content: space-between;
+      padding: 9px 12px 8px 12px;
+      font-size: 9.5px;
+      color: var(--ink-70);
+      letter-spacing: 0.16em;
+      background: var(--bg);
+      border-bottom: 1px solid var(--ink);
+    }
+    .grp {
+      border-bottom: 1px solid var(--ink-22);
+    }
+    .grp-head {
+      padding: 9px 12px 2px 12px;
+    }
+    .grp-name {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+    }
+    .grp-note {
+      margin-top: 1px;
+      font-size: 9.5px;
+      line-height: 1.4;
+      color: var(--ink-45);
+      letter-spacing: 0.02em;
+    }
+    .grp-rows {
+      padding: 5px 0 8px 0;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 22px 1fr 26px;
+      gap: 6px;
+      align-items: start;
+      padding: 2.5px 12px 2.5px 12px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+    }
+    .row .code {
+      height: 15px;
+      font-size: 10.5px;
+      font-weight: 700;
+      line-height: 14px;
+      text-align: center;
+      border: 1px solid var(--ink-45);
+    }
+    .row .nm {
+      font-size: 10.5px;
+      line-height: 1.35;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+      overflow-wrap: anywhere;
+    }
+    .row .tg {
+      font-size: 8.5px;
+      line-height: 1.5;
+      color: var(--ink-45);
+      text-align: right;
+      letter-spacing: 0.06em;
+    }
+    .row.wdr .nm {
+      color: var(--ink-45);
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+    }
+    .row:hover {
+      background: var(--ink-12);
+    }
+    .row.sel {
+      background: var(--ink);
+      border-left-color: var(--ink);
+    }
+    .row.sel.wdr .nm {
+      color: rgba(215, 210, 172, 0.7);
+    }
+    .row.sel .nm,
+    .row.sel .tg {
+      color: var(--bg);
+    }
+    .row.sel .code {
+      color: var(--bg);
+      border-color: var(--bg);
+    }
+    .row.dim {
+      opacity: 0.38;
+    }
 
-  /* ---------- diagram ---------- */
-  #stage{position:relative;}
-  #diagram{display:block;width:100%;height:auto;}
-  .dg-foot{
-    border-top:1px solid var(--ink-22);
-    padding:9px 18px 16px 18px;
-    display:flex;gap:26px;flex-wrap:wrap;align-items:flex-start;
-  }
-  .lg-item{display:flex;gap:7px;align-items:flex-start;}
-  .lg-item .lt{font-size:9.5px;line-height:1.35;color:var(--ink-70);max-width:150px;}
-  .lg-item .lt b{color:var(--ink);font-weight:700;display:block;letter-spacing:0.07em;font-size:9.5px;}
+    /* ---------- diagram ---------- */
+    #stage {
+      position: relative;
+    }
+    #diagram {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    .dg-foot {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 26px;
+      align-items: flex-start;
+      padding: 9px 18px 16px 18px;
+      border-top: 1px solid var(--ink-22);
+    }
+    .lg-item {
+      display: flex;
+      gap: 7px;
+      align-items: flex-start;
+    }
+    .lg-item .lt {
+      max-width: 150px;
+      font-size: 9.5px;
+      line-height: 1.35;
+      color: var(--ink-70);
+    }
+    .lg-item .lt b {
+      display: block;
+      font-size: 9.5px;
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: 0.07em;
+    }
 
-  /* ---------- right panel ---------- */
-  #panel{border-left:1px solid var(--ink);display:flex;flex-direction:column;}
-  .tabs{display:flex;border-bottom:1px solid var(--ink);flex:0 0 auto;}
-  .tab{
-    flex:1;padding:9px 6px;text-align:center;cursor:pointer;
-    font-size:9.5px;letter-spacing:0.14em;color:var(--ink-45);
-    border-right:1px solid var(--ink);background:transparent;
-    font-family:var(--mono);
-  }
-  .tab:last-child{border-right:0;}
-  .tab.on{background:var(--ink);color:var(--bg);font-weight:700;}
-  .p-body{padding:16px 18px 30px 18px;overflow-y:auto;flex:1 1 auto;}
-  .p-body::-webkit-scrollbar{width:9px;}
-  .p-body::-webkit-scrollbar-thumb{background:var(--ink-22);}
-  .p-code{font-size:30px;font-weight:700;line-height:1;letter-spacing:0.02em;}
-  .p-name{font-size:13px;font-weight:700;letter-spacing:0.03em;margin-top:6px;}
-  .p-stage{font-size:9.5px;letter-spacing:0.14em;color:var(--ink-45);margin-top:5px;}
-  .p-rule{border:0;border-top:1px solid var(--ink);margin:13px 0 12px 0;}
-  .p-rule.thin{border-top:1px solid var(--ink-22);}
-  .p-kicker{font-size:9px;letter-spacing:0.17em;color:var(--ink-45);margin-bottom:6px;}
-  .p-text{font-size:12px;line-height:1.62;}
-  .p-text + .p-text{margin-top:10px;}
-  .p-status{
-    display:inline-block;border:1px solid var(--ink);
-    padding:3px 8px;font-size:10px;letter-spacing:0.07em;font-weight:700;
-  }
-  .p-status.neg{background:var(--ink);color:var(--bg);}
-  .p-meta{font-size:10px;color:var(--ink-45);letter-spacing:0.05em;margin-top:14px;line-height:1.6;}
-  .p-hint{font-size:9.5px;color:var(--ink-45);letter-spacing:0.1em;margin-top:22px;}
-  .p-list{margin:8px 0 0 0;padding:0;list-style:none;}
-  .p-list li{font-size:11px;line-height:1.55;padding-left:13px;position:relative;color:var(--ink-70);}
-  .p-list li:before{content:"";position:absolute;left:0;top:7px;width:5px;height:5px;
-    border:1px solid var(--ink-45);transform:rotate(45deg);}
-  .p-list li b{color:var(--ink);font-weight:700;}
+    /* ---------- right panel ---------- */
+    /* min-height:0 on both the grid item and the flex child, or .p-body grows to
+               its content instead of scrolling and the tail of a long panel is unreachable */
+    #panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-left: 1px solid var(--ink);
+    }
+    .tabs {
+      display: flex;
+      flex: 0 0 auto;
+      border-bottom: 1px solid var(--ink);
+    }
+    .tab {
+      flex: 1;
+      padding: 9px 6px;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      color: var(--ink-45);
+      text-align: center;
+      letter-spacing: 0.14em;
+      cursor: pointer;
+      background: transparent;
+      border-right: 1px solid var(--ink);
+    }
+    .tab:last-child {
+      border-right: 0;
+    }
+    .tab.on {
+      font-weight: 700;
+      color: var(--bg);
+      background: var(--ink);
+    }
+    .p-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 16px 18px 30px 18px;
+      overflow-y: auto;
+    }
+    .p-body::-webkit-scrollbar {
+      width: 9px;
+    }
+    .p-body::-webkit-scrollbar-thumb {
+      background: var(--ink-22);
+    }
+    .p-code {
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+    .p-name {
+      margin-top: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+    .p-stage {
+      margin-top: 5px;
+      font-size: 9.5px;
+      color: var(--ink-45);
+      letter-spacing: 0.14em;
+    }
+    .p-rule {
+      margin: 13px 0 12px 0;
+      border: 0;
+      border-top: 1px solid var(--ink);
+    }
+    .p-rule.thin {
+      border-top: 1px solid var(--ink-22);
+    }
+    .p-kicker {
+      margin-bottom: 6px;
+      font-size: 9px;
+      color: var(--ink-45);
+      letter-spacing: 0.17em;
+    }
+    .p-text {
+      font-size: 12px;
+      line-height: 1.62;
+    }
+    .p-text + .p-text {
+      margin-top: 10px;
+    }
+    .p-status {
+      display: inline-block;
+      padding: 3px 8px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      border: 1px solid var(--ink);
+    }
+    .p-status.neg {
+      color: var(--bg);
+      background: var(--ink);
+    }
+    .p-meta {
+      margin-top: 14px;
+      font-size: 10px;
+      line-height: 1.6;
+      color: var(--ink-45);
+      letter-spacing: 0.05em;
+    }
+    .p-hint {
+      margin-top: 22px;
+      font-size: 9.5px;
+      color: var(--ink-45);
+      letter-spacing: 0.1em;
+    }
+    .p-list {
+      padding: 0;
+      margin: 8px 0 0 0;
+      list-style: none;
+    }
+    .p-list li {
+      position: relative;
+      padding-left: 13px;
+      font-size: 11px;
+      line-height: 1.55;
+      color: var(--ink-70);
+    }
+    .p-list li:before {
+      position: absolute;
+      top: 7px;
+      left: 0;
+      width: 5px;
+      height: 5px;
+      content: "";
+      border: 1px solid var(--ink-45);
+      transform: rotate(45deg);
+    }
+    /* scoped to .p-body only to out-specify .lg-item .lt b above; the two never
+           match the same element, but the cascade order would otherwise descend */
+    .p-body .p-list li b {
+      font-weight: 700;
+      color: var(--ink);
+    }
 
-  /* svg text defaults */
-  #diagram text{font-family:var(--mono);fill:var(--ink);}
-</style>
-</head>
-<body>
+    /* svg text defaults */
+    #diagram text {
+      font-family: var(--mono);
+      fill: var(--ink);
+    }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <div class="h-title">DRUGGABILITY DOSSIER &mdash; PIPELINE STATE</div>
+        <div class="h-sub">
+          Small-molecule tractability station. Isometric schematic: block height
+          &prop; verification work behind the component; block fill &prop; build
+          status.
+        </div>
+      </div>
+      <div class="counts" id="counts"></div>
+    </header>
 
-<header>
-  <div>
-    <div class="h-title">DRUGGABILITY DOSSIER &mdash; PIPELINE STATE</div>
-    <div class="h-sub">Small-molecule tractability station. Isometric schematic: block height &prop; verification work behind the component; block fill &prop; build status.</div>
-  </div>
-  <div class="counts" id="counts"></div>
-</header>
-
-<div class="wrap">
-  <nav class="col" id="sidebar"></nav>
-  <section class="col" id="stage">
-    <svg id="diagram" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision"></svg>
-    <div class="dg-foot" id="legend"></div>
-  </section>
-  <aside id="panel">
-    <div class="tabs">
-      <button class="tab on" data-tab="what">WHAT IT DOES</button>
-      <button class="tab" data-tab="status">STATUS</button>
+    <div class="wrap">
+      <nav class="col" id="sidebar"></nav>
+      <section class="col" id="stage">
+        <svg
+          id="diagram"
+          shape-rendering="geometricPrecision"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <title>
+            Isometric schematic of the druggability pipeline: one block per
+            component, grouped into stage columns.
+          </title>
+        </svg>
+        <div class="dg-foot" id="legend"></div>
+      </section>
+      <aside id="panel">
+        <div class="tabs">
+          <button class="tab on" data-tab="what" type="button">
+            WHAT IT DOES
+          </button>
+          <button class="tab" data-tab="status" type="button">STATUS</button>
+        </div>
+        <div class="p-body" id="pbody"></div>
+      </aside>
     </div>
-    <div class="p-body" id="pbody"></div>
-  </aside>
-</div>
 
-<script>
-/* ============================================================================
-   DATA  —  edit this array to update the schematic. Everything below renders
-   from it: the diagram, the sidebar index, the header counts, the panel.
+    <script>
+    "use strict";
+    /* ============================================================================
+           DATA  —  edit this array to update the schematic. Everything below renders
+           from it: the diagram, the sidebar index, the header counts, the panel.
 
-   stage  : key into STAGES
-   status : 'verified' | 'built' | 'partial' | 'notbuilt' | 'blocked'
-            (controls block fill + sidebar tag)
-   label  : the exact status string, shown verbatim. Never inferred.
-   h      : block height in world units = how much verification work sits
-            behind the component. 6 (nothing measured) .. 68 (counterexample
-            found, fixed, and re-tested).
-   caveat : true -> draws the open-diamond marker on the top face
-   ========================================================================= */
+           stage     : key into STAGES
+           status    : 'verified' | 'built' | 'deploying' | 'partial' | 'notbuilt'
+                       | 'withdrawn' | 'blocked'   (controls block fill + sidebar tag)
+           label     : the exact status string, shown verbatim. Never inferred.
+           h         : block height in world units = how much verification work sits
+                       behind the component. 6 (nothing measured) .. 68 (counterexample
+                       found, fixed, and re-tested).
+           caveat    : true -> draws the open-diamond marker on the top face
+           corrected : true -> this component gave a wrong answer, and was corrected.
+                       Draws the solid-square marker, and an asterisk in the index.
+                       The distinction from "built right first time" is the single
+                       most informative thing on the schematic — do not drop it.
+           ========================================================================= */
 
-const STAGES = [
-  { key:'input',  n:'01', name:['INPUT'],                      title:'INPUT',
-    note:'' },
-  { key:'prec',   n:'02', name:['PRECEDENT','AXIS'],           title:'PRECEDENT AXIS',
-    note:'Paperclip CLI + chembl_v / pdb_v / uniprot_v SQL views, ~24M bioactivities' },
-  { key:'struct', n:'03', name:['STRUCTURE','SELECTION'],      title:'STRUCTURE SELECTION',
-    note:'' },
-  { key:'pocket', n:'04', name:['POCKET','DETECTION'],         title:'POCKET DETECTION',
-    note:'Modal app druggability-pocket-scan · CPU · deployed' },
-  { key:'escal',  n:'05', name:['ESCALATION'],                 title:'ESCALATION',
-    note:'All GPU. All blocked on a Modal payment method — H100/H200/A100 are gated behind a card regardless of credit balance.' },
-  { key:'synth',  n:'06', name:['SYNTHESIS'],                  title:'SYNTHESIS',
-    note:'' },
-  { key:'eval',   n:'E',  name:['EVALUATION'],                 title:'EVALUATION',
-    note:'Sits beside the pipeline, not in it.', detached:true }
-];
+    const STAGES = [
+      { key: "input", n: "01", name: ["INPUT"], note: "", title: "INPUT" },
+      {
+        key: "prec",
+        n: "02",
+        name: ["PRECEDENT", "AXIS"],
+        note: "Paperclip CLI + chembl_v / pdb_v / uniprot_v SQL views, ~24M bioactivities",
+        title: "PRECEDENT AXIS",
+      },
+      {
+        key: "struct",
+        n: "03",
+        name: ["STRUCTURE", "SELECTION"],
+        note: "",
+        title: "STRUCTURE SELECTION",
+      },
+      {
+        key: "pocket",
+        n: "04",
+        name: ["POCKET", "ANALYSIS"],
+        note: "Modal app druggability-pocket-scan · CPU · deployed. cryptic_analysis.py, interface_analysis.py and disorder.py are now wired into the app rather than run by hand, and mdpocket has replaced the residue-number site matcher outright.",
+        title: "POCKET ANALYSIS",
+      },
+      {
+        key: "escal",
+        n: "05",
+        name: ["ESCALATION"],
+        note: "All GPU, all deployed to Modal (workspace rafwiewiora) and smoke-tested — the payment-method block is gone and the whole column is live. Everything here runs DOWNSTREAM of pocket detection. Nothing here finds a pocket, and E4 is the measurement that says so.",
+        title: "ESCALATION",
+      },
+      {
+        key: "synth",
+        n: "06",
+        name: ["SYNTHESIS"],
+        note: "",
+        title: "SYNTHESIS",
+      },
+      /* name[] is written with textContent (raw), title is written with innerHTML */
+      {
+        detached: true,
+        key: "eval",
+        n: "E",
+        name: ["EVALUATION", "& FALSIFICATION"],
+        note: "Sits beside the pipeline, not in it. These components measure the pipeline, not a target: fixtures it is calibrated against, retrospective runs at past cutoff dates, and destroyed-site controls run against our own tools to find out where they lie.",
+        title: "EVALUATION &amp; FALSIFICATION",
+      },
+    ];
 
-const DATA = [
-/* ---- INPUT --------------------------------------------------------------- */
-{ code:'A', stage:'input', name:'target accession', status:'built', h:28,
-  label:'BUILT',
-  what:'The only required input is a UniProt accession. Two optional fields ride along: an as_of_date, which re-runs the whole pipeline as it would have looked on a past date, and a mechanism_hypothesis — orthosteric, allosteric, or oligomer_destabilisation — which decides what structural question gets asked downstream.',
-  st:'Input contract is fixed and exercised by the fixture sets.' },
+    const DATA = [
+      /* ---- INPUT --------------------------------------------------------------- */
+      {
+        code: "A",
+        h: 28,
+        label: "BUILT",
+        name: "target accession",
+        st: "Input contract is fixed and exercised by the fixture sets.",
+        stage: "input",
+        status: "built",
+        what: "The only required input is a UniProt accession. Two optional fields ride along: an as_of_date, which re-runs the whole pipeline as it would have looked on a past date, and a mechanism_hypothesis — orthosteric, allosteric, or oligomer_destabilisation — which decides what structural question gets asked downstream.",
+      },
 
-/* ---- PRECEDENT AXIS ------------------------------------------------------ */
-{ code:'B', stage:'prec', name:'drugs by accession', status:'verified', h:56,
-  label:'BUILT AND VERIFIED',
-  what:'Pulls approved and clinical-stage drugs recorded against the accession, each with its first_approval year and annotated mechanism, out of the ChEMBL views exposed by the Paperclip CLI.',
-  st:'Verified against the rheumatoid arthritis fixture set, where the expected answer per target is known independently.' },
+      /* ---- PRECEDENT AXIS ------------------------------------------------------ */
+      {
+        code: "B",
+        h: 56,
+        label: "BUILT AND VERIFIED",
+        name: "drugs by accession",
+        st: "Verified against the rheumatoid arthritis fixture set, where the expected answer per target is known independently.",
+        stage: "prec",
+        status: "verified",
+        what: "Pulls approved and clinical-stage drugs recorded against the accession, each with its first_approval year and annotated mechanism, out of the ChEMBL views exposed by the Paperclip CLI.",
+      },
 
-{ code:'C', stage:'prec', name:'modality test', status:'verified', h:66,
-  label:'BUILT AND VERIFIED',
-  what:'Decides small molecule versus biologic from chemistry rather than from a label: canonical_smiles IS NULL marks a biologic. This gate runs before any precedent claim, because an approved antibody is not evidence that a small molecule is possible.',
-  st:'Confirmed cross-accession, which is the only reason it is trustworthy: salt forms otherwise read as biologics. Nine EGFR drugs looked like biologics under the naive test. Only four actually are.' },
+      {
+        code: "C",
+        corrected: true,
+        h: 66,
+        label: "BUILT AND VERIFIED",
+        name: "modality test",
+        st: "Corrected after a wrong answer. The first test read canonical_smiles IS NULL as “biologic”, and it could not discriminate: salt forms read as biologics, nine EGFR drugs looked like biologics when only four are. molecule_type calls all four JAK1 salt forms Small molecule and needs no confirmation step — 11 of 11 JAK1 rows, all TNF and IL-17A approvals correct.",
+        stage: "prec",
+        status: "verified",
+        what: "Decides small molecule versus biologic per drug, from an explicit modality field — chembl.molecule_dictionary.molecule_type — rather than from a label or from an absent chemical structure. This gate runs before any precedent claim, because an approved antibody is not evidence that a small molecule is possible.",
+      },
 
-{ code:'D', stage:'prec', name:'assay provenance', status:'verified', h:68,
-  label:'BUILT AND VERIFIED',
-  what:'Groups bioactivity rows by assay_description and flags any target whose measured activity is dominated by a single assay — threshold, one assay exceeding 30% of the rows.',
-  st:'Caught exactly the failure it was written for. 45% of TNF-alpha’s bioactivity comes from an IRAK4 assay measuring a different protein, and it is labelled assay_type=’B’, so the obvious assay_type filter does not remove it.' },
+      {
+        code: "D",
+        h: 68,
+        label: "BUILT AND VERIFIED",
+        name: "assay provenance",
+        st: "Caught exactly the failure it was written for. 45% of TNF-alpha’s bioactivity comes from an IRAK4 assay measuring a different protein, and it is labelled assay_type=’B’, so the obvious assay_type filter does not remove it.",
+        stage: "prec",
+        status: "verified",
+        what: "Groups bioactivity rows by assay_description and flags any target whose measured activity is dominated by a single assay — threshold, one assay exceeding 30% of the rows.",
+      },
 
-{ code:'E', stage:'prec', name:'compounds and potency', status:'verified', h:46,
-  label:'BUILT AND VERIFIED',
-  what:'Distinct compound count against the accession, and the best pchembl value observed — the two blunt numbers that say whether anyone has ever made anything that binds.',
-  st:'Verified. Reads through the same views as B and D, so it inherits the provenance flag from D rather than reporting potency naked.' },
+      {
+        code: "E",
+        h: 46,
+        label: "BUILT AND VERIFIED",
+        name: "compounds and potency",
+        st: "Verified. Reads through the same views as B and D, so it inherits the provenance flag from D rather than reporting potency naked.",
+        stage: "prec",
+        status: "verified",
+        what: "Distinct compound count against the accession, and the best pchembl value observed — the two blunt numbers that say whether anyone has ever made anything that binds.",
+      },
 
-{ code:'F', stage:'prec', name:'patents, trials, terminated programs', status:'partial', h:32,
-  label:'PARTIAL',
-  what:'Full-text retrieval across patents, trial records and literature via Paperclip grep, to surface programs that were started and then stopped — the part of the precedent record that databases do not carry.',
-  st:'Verified working, not yet wired into a run. Named compounds must be found with grep, never semantic search: LY3509754 returned 0 relevant hits semantically; grep returned 13 papers.' },
+      {
+        code: "F",
+        h: 32,
+        label: "PARTIAL",
+        name: "patents, trials, terminated programs",
+        st: "Verified working, not yet wired into a run. Named compounds must be found with grep, never semantic search: LY3509754 returned 0 relevant hits semantically; grep returned 13 papers.",
+        stage: "prec",
+        status: "partial",
+        what: "Full-text retrieval across patents, trial records and literature via Paperclip grep, to surface programs that were started and then stopped — the part of the precedent record that databases do not carry.",
+      },
 
-/* ---- STRUCTURE SELECTION ------------------------------------------------- */
-{ code:'G', stage:'struct', name:'PDB structures by accession', status:'verified', h:58,
-  label:'BUILT AND VERIFIED',
-  what:'Every PDB entry mapped to the accession, carrying release_date.',
-  st:'Verified. release_date is 100% populated across all 508,687 rows, which is what makes the as-of filter downstream safe rather than silently lossy.' },
+      /* ---- STRUCTURE SELECTION ------------------------------------------------- */
+      {
+        code: "G",
+        h: 58,
+        label: "BUILT AND VERIFIED",
+        name: "PDB structures by accession",
+        st: "Verified. release_date is 100% populated across all 508,687 rows, which is what makes the as-of filter downstream safe rather than silently lossy.",
+        stage: "struct",
+        status: "verified",
+        what: "Every PDB entry mapped to the accession, carrying release_date.",
+      },
 
-{ code:'H', stage:'struct', name:'biological assembly', status:'verified', h:68,
-  label:'BUILT AND VERIFIED',
-  what:'Fetches &lt;ID&gt;-assembly1.cif, never the asymmetric unit, so pockets are scored on the biological oligomer that actually exists in solution.',
-  st:'Verified by counterexample. 9SQX’s ASU holds two biological dimers; scoring all four chains fused them into one object and the real ligand site fell to rank 9. On assembly1 it is rank 1.' },
+      {
+        code: "H",
+        corrected: true,
+        h: 68,
+        label: "BUILT AND VERIFIED",
+        name: "biological assembly",
+        st: "Verified by counterexample. 9SQX’s ASU holds two biological dimers; scoring all four chains fused them into one object and the real ligand site fell to rank 9. On assembly1 it is rank 1.",
+        stage: "struct",
+        status: "verified",
+        what: "Fetches &lt;ID&gt;-assembly1.cif, never the asymmetric unit, so pockets are scored on the biological oligomer that actually exists in solution.",
+      },
 
-{ code:'I', stage:'struct', name:'holo/apo by ligand chemistry', status:'verified', h:62,
-  label:'BUILT AND VERIFIED',
-  what:'Classifies each structure holo or apo from the chemistry of what is bound — a heavy-atom threshold plus a denylist of cofactors and crystallisation additives.',
-  st:'Verified. The denylist is load-bearing, not cosmetic: GDP is 28 heavy atoms, so apo KRAS would otherwise be classified holo and the whole cryptic-pocket comparison would invert.' },
+      {
+        code: "I",
+        corrected: true,
+        h: 62,
+        label: "BUILT AND VERIFIED",
+        name: "holo/apo by ligand chemistry",
+        st: "Verified. The denylist is load-bearing, not cosmetic: GDP is 28 heavy atoms, so apo KRAS would otherwise be classified holo and the whole cryptic-pocket comparison would invert.",
+        stage: "struct",
+        status: "verified",
+        what: "Classifies each structure holo or apo from the chemistry of what is bound — a heavy-atom threshold plus a denylist of cofactors and crystallisation additives.",
+      },
 
-{ code:'J', stage:'struct', name:'as-of date filter', status:'verified', h:42,
-  label:'BUILT AND VERIFIED',
-  what:'Restricts the structure set to entries released on or before as_of_date, so a retrospective run cannot see the future.',
-  st:'Verified, and scoped honestly: it works for structures, on release_date. It is not claimed for any other evidence type.' },
+      {
+        code: "J",
+        h: 42,
+        label: "BUILT AND VERIFIED",
+        name: "as-of date filter",
+        st: "Verified, and scoped honestly: it works for structures, on release_date. It is not claimed for any other evidence type.",
+        stage: "struct",
+        status: "verified",
+        what: "Restricts the structure set to entries released on or before as_of_date, so a retrospective run cannot see the future.",
+      },
 
-{ code:'K', stage:'struct', name:'domain split', status:'verified', h:60,
-  label:'BUILT AND VERIFIED',
-  what:'Assigns each structure to a UniProt domain by overlap fraction between the modelled range and the annotated domain range.',
-  st:'Verified by counterexample. Overlap, never containment — containment missed TYK2’s earliest JH2 structure by two years, which is exactly the kind of error a retrospective run is supposed to catch.' },
+      {
+        code: "J2",
+        h: 50,
+        label: "BUILT AND VERIFIED",
+        name: "as-of dating (bioactivity)",
+        st: "Verified. KRAS goes from 18,245 activities to 2 at a 2012 cutoff, and best potency drops 4.73 log units. Before this existed, an as-of run filtered the structures correctly and then read a 2020s SAR record onto a 2012 question — a leak that only appears once the two stages run together.",
+        stage: "struct",
+        status: "verified",
+        what: "Extends the as-of cutoff off structures and onto measured bioactivity, joining chembl.assays to docs.year so a retrospective run sees only activity that had been published by the cutoff. J dated the structures; this dates the precedent axis, which is where the leak actually was.",
+      },
 
-{ code:'L', stage:'struct', name:'Foldseek structural neighbours', status:'partial', h:32,
-  label:'PARTIAL',
-  what:'Structural-homolog search, to establish precedent from proteins that look like the target rather than proteins annotated like it. Remote server, no local database to maintain.',
-  st:'Verified working — 992 hits in 13.3s — but not wired into the pipeline.' },
+      {
+        code: "K",
+        corrected: true,
+        h: 60,
+        label: "BUILT AND VERIFIED",
+        name: "domain split",
+        st: "Verified by counterexample. Overlap, never containment — containment missed TYK2’s earliest JH2 structure by two years, which is exactly the kind of error a retrospective run is supposed to catch.",
+        stage: "struct",
+        status: "verified",
+        what: "Assigns each structure to a UniProt domain by overlap fraction between the modelled range and the annotated domain range.",
+      },
 
-/* ---- POCKET DETECTION ---------------------------------------------------- */
-{ code:'M', stage:'pocket', name:'mmCIF via gemmi', status:'verified', h:56,
-  label:'BUILT AND VERIFIED',
-  what:'mmCIF is the only structure format read anywhere in the pocket scan.',
-  st:'Verified, and not a preference. Legacy PDB format cannot hold 5-character ligand codes — 9SQX’s ligand is A1JPS — and RCSB no longer issues PDB-format files for new entries.' },
+      {
+        code: "L",
+        h: 32,
+        label: "PARTIAL",
+        name: "Foldseek structural neighbours",
+        st: "Verified working — 992 hits in 13.3s — but not wired into the pipeline.",
+        stage: "struct",
+        status: "partial",
+        what: "Structural-homolog search, to establish precedent from proteins that look like the target rather than proteins annotated like it. Remote server, no local database to maintain.",
+      },
 
-{ code:'N', stage:'pocket', name:'fpocket detection, D swept', status:'verified', h:66,
-  label:'BUILT AND VERIFIED',
-  what:'Runs fpocket for detection with the clustering distance swept over {1.6, 2.4} rather than pinned to a single value, and reports the spread.',
-  st:'Verified by counterexample. -D 1.6 reports druggability 0.002 at the site of a co-crystallised 570 Da ligand — a false negative on a holo structure, where the right answer is already known.' },
+      /* ---- POCKET ANALYSIS ------------------------------------------------------ */
+      {
+        code: "M",
+        h: 56,
+        label: "BUILT AND VERIFIED",
+        name: "mmCIF via gemmi",
+        st: "Verified, and not a preference. Legacy PDB format cannot hold 5-character ligand codes — 9SQX’s ligand is A1JPS — and RCSB no longer issues PDB-format files for new entries.",
+        stage: "pocket",
+        status: "verified",
+        what: "mmCIF is the only structure format read anywhere in the pocket scan.",
+      },
 
-{ code:'O', stage:'pocket', name:'same-site tracking', status:'built', h:62, caveat:true,
-  label:'BUILT, WITH AN OPEN CAVEAT',
-  what:'A holo structure donates its ligand-contacting residues as a site signature. Apo structures are then scored at whichever detected pocket has the highest residue-number overlap with that signature, matched chain-agnostically. Without this, cross-structure comparison compares nothing.',
-  st:'It reproduces the 651x druggability spread end to end. But signature overlaps run only 0.071 to 0.214 against a 19-residue reference, so “same site” currently rests on 2 to 4 shared residues. Q is the principled fix.' },
+      {
+        code: "N",
+        corrected: true,
+        h: 66,
+        label: "BUILT AND VERIFIED",
+        name: "fpocket detection, D swept",
+        st: "Verified by counterexample. -D 1.6 reports druggability 0.002 at the site of a co-crystallised 570 Da ligand — a false negative on a holo structure, where the right answer is already known.",
+        stage: "pocket",
+        status: "verified",
+        what: "Runs fpocket for detection with the clustering distance swept over {1.6, 2.4} rather than pinned to a single value, and reports the spread.",
+      },
 
-{ code:'P', stage:'pocket', name:'P2Rank / PRANK rescoring', status:'built', h:48, caveat:true,
-  label:'BUILT, DEPLOY VERIFICATION PENDING',
-  what:'fpocket detects, PRANK ranks — ligandability ordering from a learned model instead of from fpocket’s own score.',
-  st:'Works locally: on 6OIM the switch-II pocket moves from fpocket rank 9 to PRANK rank 2. Not yet verified in the deployed image.' },
+      {
+        code: "O",
+        h: 62,
+        label: "WITHDRAWN",
+        name: "same-site tracking (residue-number matching)",
+        st: "WITHDRAWN, and the withdrawal is itself a reported result. An earlier version of this pipeline carried the 651x druggability spread this matcher produced as a HEADLINE finding — druggability 0.001 in 2ZJC against 0.651 in 1A8M across five apo TNF-alpha trimers. It is wrong, and here is why. mdpocket showed the matcher was tracking a pocket 7.7 A away from the site it claimed, with 12.2 A of internal inconsistency between structures. A 19-residue reference on a homotrimer collapses to 11 distinct residue numbers once chain identity is discarded, so a C3-symmetric site is unresolvable in principle by this method. And within ONE structure the two pockets called the same site at clustering D=1.6 and at D=2.4 sit about 12.3 A apart — about 18.4 A on 2AZ5. It was never measuring one site, so the spread was never a spread of one site. The volume range quoted beside it, 206.7-309.2 A³, is void for the same reason: it came from the same matching step. Two further defects in the passage that carried the claim — the K98R mutant caveat belongs to the OTHER pocket, the on-axis cavity, since K98 sits 8.74 A from ligand 307 in holo 2AZ5; and the ensemble is four mutants of five, not two of four. The claim is retracted and must not be cited except as a retraction.",
+        stage: "pocket",
+        status: "withdrawn",
+        what: "A holo structure donated its ligand-contacting residues as a site signature; apo structures were then scored at whichever detected pocket had the highest residue-number overlap with that signature, matched chain-agnostically. The heuristic is retracted and Q replaces it. It stays on the schematic on purpose — a withdrawn finding is a different state from one that was never built, and recording it is the point.",
+      },
 
-{ code:'Q', stage:'pocket', name:'mdpocket ensemble aggregation', status:'notbuilt', h:8,
-  label:'NOT BUILT',
-  what:'Measures pocket density over aligned frames of an ensemble, instead of detecting pockets independently per structure and matching them after the fact. This is the principled fix for O’s caveat.',
-  st:'Not built. It ships with fpocket and is already present in the deployed image, so the blocker here is code, not infrastructure.' },
+      {
+        caveat: true,
+        code: "P",
+        h: 48,
+        label: "BUILT, DEPLOY VERIFICATION PENDING",
+        name: "P2Rank / PRANK rescoring",
+        st: "Works locally: on 6OIM the switch-II pocket moves from fpocket rank 9 to PRANK rank 2. Not yet verified in the deployed image.",
+        stage: "pocket",
+        status: "built",
+        what: "fpocket detects, PRANK ranks — ligandability ordering from a learned model instead of from fpocket’s own score.",
+      },
 
-{ code:'R', stage:'pocket', name:'cryptic mechanism classification', status:'notbuilt', h:12,
-  label:'NOT BUILT',
-  what:'Superposes holo on apo, measures C-alpha displacement, and attributes the clash — separating backbone collapse (KRAS, 8.8 A) from side-chain or subunit occlusion (TNF-alpha, 1.62 A).',
-  st:'Not built. The rules are written and the numbers exist in calibration scripts, but there is no pipeline code. It matters because loop-motion sites reach nanomolar and side-chain-occluded sites do not.' },
+      {
+        code: "Q",
+        corrected: true,
+        h: 58,
+        label: "BUILT AND VERIFIED — IT REPLACED O",
+        name: "mdpocket ensemble aggregation",
+        st: 'Wired in, and it has now replaced the residue-number matcher outright. Coefficient of variation across the ensemble falls from roughly 28% to roughly 10% — the post-hoc matcher was inflating the spread about 2.8-fold, essentially all of it from one structure matching a pocket 12 A away from the others. Two significant figures, never three: fpocket estimates volume by Monte Carlo and mdpocket inherits it, so three identical reruns of one five-structure ensemble gave CVs of 12.1 / 11.3 / 10.8% against the deployed run’s 9.9%. About one percentage point of any CV here is the estimator’s own noise. The improvement survives that noise; the third digit does not exist, and an earlier version of this panel read "27.8% to 10.2%". Note also what the CV was measured on: site_from_density, whose centroid sits 7.7 A from the transferred SPD304 ligand. It is a real measurement of reproducibility and not a measurement of the ligand site. It also fails honestly where the matcher lied: on the five apo TNF-alpha structures it returns 0.00 A³ in four of five rather than substituting a nearby pocket and calling it the site. It ships with fpocket and was already in the deployed image, so the blocker was only ever code.',
+        stage: "pocket",
+        status: "verified",
+        what: "Fixes the site BY CONSTRUCTION: one grid definition, derived once, applied to every superposed structure in the ensemble (mdpocket characterization mode) — instead of detecting pockets independently per structure and matching them after the fact. This is the replacement for O, not a refinement of it.",
+      },
 
-{ code:'S', stage:'pocket', name:'pocket vs interface classification', status:'notbuilt', h:8,
-  label:'NOT BUILT',
-  what:'Labels each pocket orthosteric, allosteric, or destabiliser by overlapping its residues with computed protein-protein interface residues — the check that ties a pocket back to the input mechanism_hypothesis.',
-  st:'Not built.' },
+      {
+        code: "R",
+        corrected: true,
+        h: 64,
+        label: "BUILT AND VERIFIED",
+        name: "cryptic mechanism classification",
+        st: "Built and verified: 47 of 47 ground-truth checks pass. Corrected after a wrong answer. The first rule classified on clash composition, and KRAS has ZERO backbone clashes at 2.0 A despite about 8.8 A of switch-II loop motion at Glu63 — a hand-calibration figure, measured with auto-trim and residue-name matching disabled and the mobile regions named by hand; the deployed zero-knowledge default measures 8.65 A, and ~1.55 A for TNF-alpha against the hand figure of 1.62 A. Mechanism and is_cryptic are identical under both protocols, so nothing downstream of the label changes, but the two sets of displacement figures are not interchangeable and the order-of-magnitude separation (8.8 against 1.6) is the finding rather than the decimals. A loop that swings that far carries its side chains into the site with it, so the atoms sitting IN the site are side-chain even though the cause is backbone. A clash-based classifier misses KRAS entirely and hands the canonical nanomolar target a micromolar prognosis. Classification now keys on C-alpha displacement; clash composition is still reported, but never drives the call.",
+        stage: "pocket",
+        status: "verified",
+        what: "cryptic_analysis.py, wired into the Modal app. Superposes holo on apo, measures C-alpha displacement at the site, attributes every clash to backbone / side chain / displaced subunit, and computes the ligand’s free volume. Returns loop_or_backbone_motion vs sidechain_occlusion vs subunit_occlusion, and returns is_cryptic against the field’s own stringent definition — absent in all or nearly all unbound structures — rather than a loose one. The two mechanisms carry OPPOSITE PROGNOSES, and that is the whole reason the module exists: backbone or loop motion is good and reaches nanomolar, while side-chain rotation or subunit occlusion is poor and stalls at micromolar. It is a prior on achievable potency, not a taxonomy label.",
+      },
 
-/* ---- ESCALATION ---------------------------------------------------------- */
-{ code:'T', stage:'escal', name:'Boltz-2 affinity positive control', status:'blocked', h:12,
-  label:'BLOCKED',
-  what:'Before trusting any predicted affinity, run the predictor on the target’s own best-known binder. Every affinity number then ships with a per-target reliability estimate instead of as a bare score.',
-  st:'Blocked on an external dependency: a Modal payment method. H100/H200/A100 are gated behind a card regardless of credit balance.' },
+      {
+        code: "S",
+        h: 52,
+        label: "BUILT AND VERIFIED",
+        name: "pocket vs interface classification",
+        st: "Built and verified: 9 of 9 checks pass. TNF-alpha’s SPD304 site returns destabiliser_candidate at 0.00 overlap with the TNFR2 epitope — the pocket that actually works touches no part of the interface it is meant to disrupt. A pocket asserted as orthosteric that does not touch the interface is now a detectable error rather than a plausible sentence.",
+        stage: "pocket",
+        status: "verified",
+        what: "interface_analysis.py, wired into the Modal app. Computes protein-protein interfaces from the deposited structure and overlaps them with each detected pocket, classifying by overlap fraction: orthosteric_candidate at 0.25 or above, allosteric_candidate at 0.10 or below, destabiliser_candidate where the pocket is buried inside the oligomer — with the fraction itself attached, so the call is auditable rather than asserted. This is the check that ties a pocket back to the input mechanism_hypothesis instead of assuming it.",
+      },
 
-{ code:'U', stage:'escal', name:'bioemu conformational ensembles', status:'blocked', h:18,
-  label:'BLOCKED',
-  what:'Generates conformational ensembles from sequence, to look for cryptic pockets where no apo/holo pair exists. Monomer-only; a poly-glycine linker is the planned workaround for multimers.',
-  st:'Blocked on an external dependency: a Modal payment method. Known behaviour from the literature: recovers 86% of validated cryptic pockets when seeded from holo, but only 56% from apo.' },
+      {
+        code: "W",
+        h: 42,
+        label: "BUILT AND WIRED IN",
+        name: "disorder_fraction",
+        st: "Built and wired into the Modal app as its own reported stage. MYC returns 0.828 against folded controls at 0.000 for CDK2 and 0.015 for CA2 — that separation is the entire reason the number is worth reporting. Failure returns null and never 0.0, because a folded protein and a failed prediction must not be allowed to look identical; that is the one way this module could lie.",
+        stage: "pocket",
+        status: "built",
+        what: "disorder.py, per-residue intrinsic disorder from sequence via metapredict — used to explain why some targets have no pocket to find, rather than reporting a low score with no reason attached. MIT-licensed and CPU-only, so it never needed the GPU column. It is kept as a module of its own, outside the Modal pocket-scan file, so that a metapredict build failure cannot take the whole app down.",
+      },
 
-{ code:'V', stage:'escal', name:'ESMFold / ESM2', status:'blocked', h:12,
-  label:'BLOCKED',
-  what:'Disorder proxy and pocket-residue constraint, for targets with no usable experimental structure.',
-  st:'Blocked on an external dependency: a Modal payment method.' },
+      /* ---- ESCALATION ---------------------------------------------------------- */
+      {
+        code: "T",
+        corrected: true,
+        h: 48,
+        label: "DEPLOYED AND SMOKE-TESTED",
+        name: "Boltz-2 cofolding — pose and complex (DOWNSTREAM ONLY)",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested, weights cached on a shared volume. Corrected after a wrong answer, and this is the correction that mattered most: cofolding models recall where the PDB put ligands rather than reading the structure they are given. When binding sites were destroyed three ways — every side chain deleted to glycine, the site packed shut with phenylalanines, the chemistry inverted — the models returned the same ligand pose in 42-52% of high-confidence cases at ligand pLDDT 70-85, and funnel metadynamics says those perturbed systems have P(bound) = 0.00. E4 then reproduced this on our own target and made it worse: the confidence is not merely uninformative, it is ANTI-DIAGNOSTIC. So it was moved out of the pocket-finding path entirely.",
+        stage: "escal",
+        status: "built",
+        what: "Structure prediction that runs strictly DOWNSTREAM of geometric pocket finding, never in place of it. Three legitimate jobs: pose for a site that has already been found; protein-protein complex prediction where no crystal exists; and chemotype-preference readout for a site whose geometry is already known. It cannot find a pocket and is no longer wired as if it could. The pose head, taken on its own, is good — on JAK1, confidence 0.974 with the canonical hinge contacts, Glu957 at 2.88 A and Leu959 at 3.07 A.",
+      },
 
-{ code:'W', stage:'escal', name:'disorder_fraction', status:'notbuilt', h:14,
-  label:'NOT BUILT',
-  what:'Per-residue disorder, used to explain why some targets have no pocket to find rather than reporting a low score with no reason attached.',
-  st:'Not built. metapredict is the right tool — MIT-licensed, and it separates MYC at 0.828 from folded controls at 0.015 — but it fails to build a wheel in the image.' },
+      {
+        caveat: true,
+        code: "T2",
+        h: 56,
+        label: "DEPLOYED AND SMOKE-TESTED",
+        name: "Boltz-2 affinity — a ranker, not a potency predictor",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested against the JAK1 control. Two numbers define how it may be used. Tofacitinib measures 0.50 nM and was predicted at 46.4 nM — 1.97 log units too weak. But the separation between actives and unrelated decoys was 2.36 log units, in the correct order, binder probability 0.75 against 0.37 and 0.11. The ordering is real; the magnitude is not. Use it to order candidates, never against a nanomolar go/no-go threshold, and never to quote a Kd.",
+        stage: "escal",
+        status: "verified",
+        what: "Predicted binding affinity for a named ligand at a site that has already been found. It is deployed as a RANKER: it orders candidates within one target, and its absolute value is not a Kd and must never be quoted as one. It carries its own positive control — run the predictor on the target’s best-known measured binder first and report both, and if it cannot recover that binder the predictions for that target are uninformative.",
+      },
 
-/* ---- SYNTHESIS ----------------------------------------------------------- */
-{ code:'X', stage:'synth', name:'falsification sweep', status:'partial', h:18,
-  label:'PARTIAL',
-  what:'Seven adversarial checks run against the assembled evidence before anything is reported: single-assay dominance, uncharacterised potency assay, single-series actives, frequent-hitter holo ligand, one-crystal-form pocket, accession mis-mapping, terminated programs. Checks that find nothing are recorded too.',
-  st:'The skill is written. It has never been executed.' },
+      {
+        code: "U",
+        h: 36,
+        label: "DEPLOYED AND SMOKE-TESTED",
+        name: "BioEmu conformational ensembles",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested. Frames come back pre-superposed — sixteen centres of mass within 0.045 A, optimal rotation identity to 5e-8 — so no alignment step is needed downstream. But the output is backbone plus C-beta only, 835 atoms for 169 residues, and fpocket and mdpocket both define pockets from side-chain atoms, so frames MUST be repacked before detection or every volume inflates. It also degrades on exactly our input: 86% of validated cryptic pockets recovered when seeded from holo, only 56% from apo — and apo is the normal case. Filter frames on radius of gyration, SASA and secondary-structure sanity before scoring anything on them.",
+        stage: "escal",
+        status: "built",
+        what: "Generates conformational ensembles from sequence, to look for cryptic pockets where no apo/holo pair exists. Monomer-only; a poly-glycine linker is the planned workaround for multimers.",
+      },
 
-{ code:'Y', stage:'synth', name:'typed JSON dossier', status:'partial', h:20,
-  label:'PARTIAL',
-  what:'The output contract: the two axes reported separately and never averaged, four precedent blocks kept distinct, and an explicit insufficient_evidence state instead of a defaulted score.',
-  st:'Template written. Assembly has never been run end to end.' },
+      {
+        caveat: true,
+        code: "V",
+        h: 46,
+        label: "DEPLOYED AND SMOKE-TESTED",
+        name: "ESMFold / ESM2",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested, and the smoke test is itself the finding: it does not do interfaces. On the IL-17A homodimer it produced 1 inter-chain contact against 97 in the deposited structure, centre-of-mass separation 24.7 A against 12.8 A, global dimer TM-score 0.328 — two separated monomers touching at a point, not an intertwined dimer. But it FLAGS ITS OWN FAILURE: pTM falls to 0.399 and average PAE rises to 18.26 on the dimer, against 0.905 and 3.66 on the monomer. That self-reporting is the useful part, and it is more than the cofolding stack manages. Use it as a filter, never as a PPI predictor.",
+        stage: "escal",
+        status: "built",
+        what: "Structure prediction for targets with no usable experimental structure, plus a disorder proxy and pocket-residue constraint. Tier 3 only — predicting a structure that already exists in the PDB is a defect, not a shortcut.",
+      },
 
-{ code:'Z', stage:'synth', name:'deploy as Managed Agent', status:'notbuilt', h:8,
-  label:'NOT BUILT',
-  what:'Compile the working prototype session into a deployed Claude Managed Agent via /managed-agent-deploy.',
-  st:'Not built.' },
+      /* ---- SYNTHESIS ----------------------------------------------------------- */
+      {
+        code: "X",
+        h: 18,
+        label: "PARTIAL",
+        name: "falsification sweep",
+        st: "The skill is written. It has never been executed as a sweep.",
+        stage: "synth",
+        status: "partial",
+        what: "Eight adversarial checks run against the assembled evidence before anything is reported: single-assay dominance, the cross-accession check, uncharacterised potency assay, single-series actives, frequent-hitter holo ligand, one-crystal-form pocket, accession mis-mapping, terminated programs. Checks that find nothing are recorded too. It attaches evidence and adjusts no number.",
+      },
 
-/* ---- EVALUATION ---------------------------------------------------------- */
-{ code:'E1', stage:'eval', name:'RA fixture set', status:'built', h:38,
-  label:'BUILT',
-  what:'Eight rheumatoid arthritis targets, holding disease constant. JAK1, JAK2, JAK3 and TYK2 went to small molecules; TNF, IL6R, CD20 and IL1B went to biologics only. One disease, and the only variable left is which modality won.',
-  st:'Built. Used as the ground truth for B, C, D and E.' },
+      {
+        code: "Y",
+        h: 20,
+        label: "PARTIAL",
+        name: "typed JSON dossier contract",
+        st: "Template written. The contract is the schema; Y2 is the code that has to fill it.",
+        stage: "synth",
+        status: "partial",
+        what: "The output contract itself: the two axes reported separately and never averaged, four precedent blocks kept distinct, and an explicit insufficient_evidence state instead of a defaulted score.",
+      },
 
-{ code:'E2', stage:'eval', name:'as-of retrospective', status:'partial', h:24,
-  label:'BUILT (FIXTURE), NOT RUN',
-  what:'Re-runs the fixture set at 2010-12-31, when RA reads biologic-only across every target. The JAK rows must flip between 2010 and 2013, or the as-of machinery is not actually doing anything.',
-  st:'The fixture is built. The retrospective has not been run.' },
+      {
+        code: "Y2",
+        h: 44,
+        label: "BUILT — VALIDATOR GATING",
+        name: "typed JSON dossier assembler + validator",
+        st: "Built and gating. Two complete dossiers now pass with zero violations, and they are the head-to-head pair in E5. This is the component that turns a set of working parts into a dossier — and it is also the component that found the twelve integration bugs, because until the parts run together each one had only ever been checked alone.",
+        stage: "synth",
+        status: "built",
+        what: "Walks the evidence produced by every upstream component into the typed contract and then validates it: required keys present, null where retrieval failed rather than a default, the two axes never merged, provenance attached to every numeric claim, insufficient_evidence emitted rather than a number invented to fill the space. The validator is a hard gate with named rule codes — AS_OF_LEAKAGE, FRACTION_WITHOUT_N — and the assembler does not return until it passes.",
+      },
 
-{ code:'E3', stage:'eval', name:'calibration fixtures', status:'verified', h:60,
-  label:'BUILT AND VERIFIED',
-  what:'The structures the pocket scan is calibrated against: KRAS holo/apo, a five-structure TNF-alpha apo ensemble, and IL-17A failure modes.',
-  st:'Verified. These are what N, H, I and O were tuned against, and what caught each of their counterexamples.' }
-];
+      {
+        code: "Z",
+        h: 8,
+        label: "NOT BUILT",
+        name: "deploy as Managed Agent",
+        st: "Not built.",
+        stage: "synth",
+        status: "notbuilt",
+        what: "Compile the working prototype session into a deployed Claude Managed Agent via /managed-agent-deploy.",
+      },
 
-const STATUS_META = {
-  verified: { tag:'VER', name:'BUILT AND VERIFIED',            hatch:3.6  },
-  built:    { tag:'BLT', name:'BUILT',                         hatch:6.8  },
-  partial:  { tag:'PRT', name:'PARTIAL',                       hatch:13   },
-  notbuilt: { tag:'—', name:'NOT BUILT',                  hatch:null },
-  blocked:  { tag:'BLK', name:'BLOCKED ON EXTERNAL DEPENDENCY',hatch:null }
-};
+      /* ---- EVALUATION ---------------------------------------------------------- */
+      {
+        code: "E1",
+        h: 38,
+        label: "BUILT",
+        name: "RA fixture set",
+        st: "Built. Used as the ground truth for B, C, D and E.",
+        stage: "eval",
+        status: "built",
+        what: "Eight rheumatoid arthritis targets, holding disease constant. JAK1, JAK2, JAK3 and TYK2 went to small molecules; TNF, IL6R, CD20 and IL1B went to biologics only. One disease, and the only variable left is which modality won.",
+      },
 
-const INTRO = {
-  head:'WHAT THIS IS',
-  body:[
-    'This is one station in a larger evidence gauntlet. Other stations handle genetics, expression, perturbation, PK/PD, safety and clinical precedent. This one takes a protein target and reports whether it can be drugged <b>with a small molecule</b> — and nothing else.',
-    'Two axes are reported separately and never averaged. <b>Retrieved precedent</b> is what has actually been made against the target: measured bioactivity, approved drugs split by modality, patents, terminated programs. <b>Computed tractability</b> is what the structure says about whether a small molecule could bind. They are allowed to disagree, and when they disagree the disagreement is the finding. There is no overall number.',
-    'The hard problems here turned out to be measurement problems, not prediction problems. Almost every tall block on this schematic is tall because a plausible-looking number was wrong for a boring reason — a salt form read as a biologic, an asymmetric unit read as a dimer, a cofactor read as a ligand, one lab’s assay read as a field of evidence — and the fix was to measure the measurement, not to model harder.'
-  ]
-};
+      {
+        code: "E2",
+        h: 66,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "as-of retrospective validation",
+        st: "Run, and it discriminates. JAK1, JAK2, JAK3 and TYK2 all go from 0 approved small molecules at a 2010 cutoff to 2, 2, 1 and 1 at 2013, while TNF, IL6R, CD20 and IL1B stay at 0 at every cutoff — the rows that should flip, flip, and the rows that should not, do not. TYK2 is the cleanest test in the set: its JH2 pseudokinase domain has 0 structures at a 2012 cutoff, and the first, 3ZON, is released 2013-04-10 — so what appears at the cutoff is a POCKET rather than a drug. The KRAS control at a 2012 cutoff collapses 18,245 activities to 2 and drops best potency by 4.73 log units.",
+        stage: "eval",
+        status: "verified",
+        what: "Re-runs the whole pipeline at a past cutoff date and checks that it reports what was knowable then rather than what is knowable now. Nobody in the field does this, which is exactly why it is worth doing — it is the only way to find out whether the machinery is answering the question or reading the answer off the present.",
+      },
 
-/* ============================================================================
-   GEOMETRY  —  isometric projection
-   screenX = (x - y) * cos(30)
-   screenY = (x + y) * sin(30) - height
-   ========================================================================= */
-const C30 = Math.cos(Math.PI/6);   // 0.8660254
-const S30 = Math.sin(Math.PI/6);   // 0.5
+      {
+        code: "E3",
+        h: 60,
+        label: "BUILT AND VERIFIED",
+        name: "calibration fixtures",
+        st: "Verified. These are what H, I, N, R and S were tuned against, what caught each of their counterexamples, and what retired O.",
+        stage: "eval",
+        status: "verified",
+        what: "The structures the pocket scan is calibrated against: KRAS holo/apo, a five-structure TNF-alpha apo ensemble, and IL-17A failure modes.",
+      },
 
-const L   = 52;     // block footprint side, world units
-const HX  = 134;    // screen px between stage columns
-const HXG = 64;     // extra screen px before the detached EVALUATION column
-const VY  = 132;    // screen px between rows within a stage
+      {
+        code: "E4",
+        h: 68,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "cofolding falsification — sealed-pocket control",
+        st: "Run. It scored BETTER. The mutant beat wild type on every pLDDT-family metric — complex pLDDT 0.940 rising to 0.957 — and its backbone came back at 0.73 A C-alpha RMSD to wild type, LOWER than the 1.02 A wild-type-versus-wild-type baseline. The switch loops move more between two wild-type seeds than they do between wild type and a nine-fold mutant. So: COFOLDING CONFIDENCE IS ANTI-DIAGNOSTIC FOR DRUGGABILITY, and there is no output signal that reports a site is gone. Reseeding is not sampling either — median pairwise seed dispersion 0.21 A, and 21 of 24 runs converged on the SI/II-P site: a real site, but a different one from the question that was asked.",
+        stage: "eval",
+        status: "verified",
+        what: "A destroyed-site control run against our own predictor rather than against a target. The KRAS switch-II pocket is sealed with nine phenylalanine substitutions, making it physically undruggable, and the model is then asked to fold it. If cofolding confidence carried any information at all about druggability, the mutant would have to score worse than wild type.",
+      },
 
-function P(x, y, z){ return [ (x - y) * C30, (x + y) * S30 - z ]; }
+      {
+        code: "E5",
+        h: 56,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "two-axis separation, head to head",
+        st: "Run, and the separation is earned rather than asserted. TNF beats JAK1 on every pocket metric — druggability 0.992 against 0.735, ensemble consensus 4 of 4 against 2 of 4 MEASUREMENTS rather than structures, so neither run claims the published criterion — while having zero approved small molecules against JAK1’s several. Retrieved precedent and computed tractability are reported side by side and never averaged, and this is the run where averaging them would have produced exactly the wrong answer on both targets at once.",
+        stage: "eval",
+        status: "verified",
+        what: "A head-to-head run of two targets chosen so that the two axes MUST disagree, to test that the never-average contract holds under pressure rather than only when the axes happen to agree.",
+      },
+    ];
 
-/* stage column screen-x, cumulative */
-const stageX = {};
-(function(){
-  let acc = 0;
-  STAGES.forEach((s, i) => {
-    if (i > 0) acc += HX + (s.detached ? HXG : 0);
-    stageX[s.key] = acc;
-  });
-})();
+    /* declaration order here is the order of the header count cells */
+    const STATUS_META = {
+      blocked: {
+        hatch: null,
+        key: "BLOCKED",
+        name: "BLOCKED ON EXTERNAL DEPENDENCY",
+        tag: "BLK",
+      },
+      built: { hatch: 6.8, key: "BUILT", name: "BUILT", tag: "BLT" },
+      deploying: {
+        dash: "2.2 3.4",
+        hatch: 6.8,
+        key: "DEPLOYING",
+        name: "DEPLOYING",
+        tag: "DEP",
+      },
+      notbuilt: { hatch: null, key: "NOT BUILT", name: "NOT BUILT", tag: "—" },
+      partial: { hatch: 13, key: "PARTIAL", name: "PARTIAL", tag: "PRT" },
+      verified: {
+        hatch: 3.6,
+        key: "VERIFIED",
+        name: "BUILT AND VERIFIED",
+        tag: "VER",
+      },
+      withdrawn: {
+        hatch: null,
+        key: "WITHDRAWN",
+        name: "WITHDRAWN",
+        tag: "WDN",
+      },
+    };
 
-/* Solve for world coords so that: stage index steps purely horizontally on
-   screen, row index steps purely vertically. Both directions are still real
-   moves in the world plane, so the projection above is what draws them. */
-function worldFor(sKey, row){
-  const u = stageX[sKey] / (2 * C30);   // (x - y)/2 component
-  const w = row * VY;                   // (x + y)/2 component  (VY / (2*S30) / 2 * 2)
-  return [ u + w, -u + w ];
-}
+    /* per-status silhouette: stroke weight + dash on the block edges */
+    const OUTLINE = {
+      notbuilt: { dash: "4 3", w: 1 },
+      withdrawn: { dash: "1.5 3", w: 1.2 },
+    };
 
-/* group data by stage, keep declaration order */
-const byStage = {};
-STAGES.forEach(s => byStage[s.key] = []);
-DATA.forEach(d => byStage[d.stage].push(d));
+    const INTRO = {
+      body: [
+        "This is one station in a larger evidence gauntlet. Other stations handle genetics, expression, perturbation, PK/PD, safety and clinical precedent. This one takes a protein target and reports whether it can be drugged <b>with a small molecule</b> — and nothing else.",
+        "Two axes are reported separately and never averaged. <b>Retrieved precedent</b> is what has actually been made against the target: measured bioactivity, approved drugs split by modality, patents, terminated programs. <b>Computed tractability</b> is what the structure says about whether a small molecule could bind. They are allowed to disagree, and when they disagree the disagreement is the finding. There is no overall number.",
+        "The hard problems here turned out to be measurement problems, not prediction problems. Almost every tall block on this schematic is tall because a plausible-looking number was wrong for a boring reason — a salt form read as a biologic, an asymmetric unit read as a dimer, a cofactor read as a ligand, one lab’s assay read as a field of evidence — and the fix was to measure the measurement, not to model harder.",
+        "Running the pipeline end to end has now found <b>twelve bugs</b>. In every single case the isolated result was more flattering than the integrated one — twelve consecutive times, never once the reverse. No component has ever looked worse alone than it did wired up. Components that gave a wrong answer and were corrected carry a <b>solid square</b> on the block and an <b>asterisk</b> in the index; everything unmarked was built right the first time. One correction — <b>O</b> — was severe enough that the finding is withdrawn rather than fixed, and it is left on the diagram struck through, because a retraction is a different state from never having built the thing.",
+        "The most important measured result on this schematic is a negative one, and it is <b>E4</b>. We sealed the KRAS switch-II pocket with nine phenylalanine substitutions — physically undruggable — and asked the model to fold it. It scored <b>higher</b> than wild type on every pLDDT-family metric, and its backbone came back closer to wild type (0.73 A) than two wild-type runs came to each other (1.02 A). <b>Cofolding confidence is anti-diagnostic for druggability.</b> There is no output signal that tells you a site is gone — which is why nothing in the escalation column is permitted to find a pocket.",
+        "<b>O is a retraction, kept on the diagram with its reason attached.</b> An earlier version of this pipeline reported a 651&times; druggability spread as a headline result. mdpocket showed the matcher behind it was tracking a pocket 7.7 A off-site with 12.2 A of internal inconsistency, that a 19-residue reference on a homotrimer collapses to 11 distinct numbers, and that within a single structure the two pockets it called the same site sat about 12.3 A apart. The claim is withdrawn, along with the 206.7-309.2 A³ volume range that came from the same matching step. A schematic that shows its own retraction is more trustworthy than one that quietly drops it.",
+      ],
+      head: "WHAT THIS IS",
+    };
 
-/* attach geometry */
-DATA.forEach(d => {
-  d.row = byStage[d.stage].indexOf(d);
-  const [wx, wy] = worldFor(d.stage, d.row);
-  d.wx = wx; d.wy = wy;
-  d.base = P(wx, wy, 0);        // base centre
-  d.apex = P(wx, wy, d.h);      // top-face centre
-});
+    /* ============================================================================
+           GEOMETRY  —  isometric projection
+           screenX = (x - y) * cos(30)
+           screenY = (x + y) * sin(30) - height
+           ========================================================================= */
+    const C30 = Math.cos(Math.PI / 6); // 0.8660254
+    const S30 = Math.sin(Math.PI / 6); // 0.5
 
-const SVGNS = 'http://www.w3.org/2000/svg';
-function el(tag, attrs){
-  const n = document.createElementNS(SVGNS, tag);
-  for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined) n.setAttribute(k, attrs[k]);
-  return n;
-}
+    const L = 52; // block footprint side, world units
+    const HX = 134; // screen px between stage columns
+    const HXG = 64; // extra screen px before the detached EVALUATION column
+    const VY = 132; // screen px between rows within a stage
 
-/* ---------- viewBox bounds ------------------------------------------------ */
-const rowsMax = Math.max(...STAGES.map(s => byStage[s.key].length));
-const VB = {
-  x: -74,
-  y: -162,
-  w: stageX[STAGES[STAGES.length-1].key] + L*C30 + 148,
-  h: (rowsMax-1)*VY + L*S30 + 162 + 32
-};
-
-/* ============================================================================
-   DIAGRAM RENDER
-   ========================================================================= */
-const svg = document.getElementById('diagram');
-svg.setAttribute('viewBox', `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
-
-/* --- defs: hatch patterns, one per (status x face) ------------------------ */
-const FACES = { top:{ang:-30, tint:0}, left:{ang:30, tint:0.06}, right:{ang:90, tint:0.13} };
-
-/* one hatch pattern per (status x face); prefix keeps ids unique per <svg> */
-function makeHatchDefs(prefix){
-  const defs = el('defs');
-  for (const sk in STATUS_META){
-    const sp = STATUS_META[sk].hatch;
-    if (!sp) continue;
-    for (const fk in FACES){
-      const p = el('pattern', {
-        id:`${prefix}-${sk}-${fk}`, patternUnits:'userSpaceOnUse',
-        width:sp, height:sp, patternTransform:`rotate(${FACES[fk].ang})`
-      });
-      p.appendChild(el('line', {
-        x1:-1, y1:sp/2, x2:sp+1, y2:sp/2,
-        stroke:'#1a1a1a', 'stroke-width':0.72
-      }));
-      defs.appendChild(p);
+    function P(x, y, z) {
+      return [(x - y) * C30, (x + y) * S30 - z];
     }
-  }
-  return defs;
-}
-svg.appendChild(makeHatchDefs('h'));
 
-/* --- layer order ---------------------------------------------------------- */
-const gGrid   = el('g', {id:'g-grid'});
-const gFrame  = el('g', {id:'g-frame'});
-const gLink   = el('g', {id:'g-link'});
-const gBlocks = el('g', {id:'g-blocks'});
-const gHead   = el('g', {id:'g-head'});
-[gGrid,gFrame,gLink,gBlocks,gHead].forEach(g => svg.appendChild(g));
+    /* stage column screen-x, cumulative */
+    const stageX = {};
+    (() => {
+      let acc = 0;
+      for (const [i, s] of STAGES.entries()) {
+        if (i > 0) {
+          acc += HX + (s.detached ? HXG : 0);
+        }
+        stageX[s.key] = acc;
+      }
+    })();
 
-/* --- faint isometric grid ------------------------------------------------- */
-(function grid(){
-  const G = 26;
-  // world bounds that cover the viewBox
-  const corners = [[VB.x,VB.y],[VB.x+VB.w,VB.y],[VB.x,VB.y+VB.h],[VB.x+VB.w,VB.y+VB.h]];
-  let xs=[], ys=[];
-  corners.forEach(([sx,sy]) => {
-    // invert projection at z = 0
-    const x = sy/(2*S30) + sx/(2*C30);
-    const y = sy/(2*S30) - sx/(2*C30);
-    xs.push(x); ys.push(y);
-  });
-  const x0 = Math.floor(Math.min(...xs)/G)*G, x1 = Math.ceil(Math.max(...xs)/G)*G;
-  const y0 = Math.floor(Math.min(...ys)/G)*G, y1 = Math.ceil(Math.max(...ys)/G)*G;
-  const attrs = {stroke:'#1a1a1a','stroke-width':0.4,'stroke-opacity':0.11};
-  for (let x = x0; x <= x1; x += G){
-    const a = P(x, y0, 0), b = P(x, y1, 0);
-    gGrid.appendChild(el('line', Object.assign({x1:a[0],y1:a[1],x2:b[0],y2:b[1]}, attrs)));
-  }
-  for (let y = y0; y <= y1; y += G){
-    const a = P(x0, y, 0), b = P(x1, y, 0);
-    gGrid.appendChild(el('line', Object.assign({x1:a[0],y1:a[1],x2:b[0],y2:b[1]}, attrs)));
-  }
-})();
+    /* Solve for world coords so that: stage index steps purely horizontally on
+           screen, row index steps purely vertically. Both directions are still real
+           moves in the world plane, so the projection above is what draws them. */
+    function worldFor(sKey, row) {
+      const u = stageX[sKey] / (2 * C30); // (x - y)/2 component
+      const w = row * VY; // (x + y)/2 component  (VY / (2*S30) / 2 * 2)
+      return [u + w, -u + w];
+    }
 
-/* --- stage headers -------------------------------------------------------- */
-STAGES.forEach(s => {
-  const X = stageX[s.key];
-  const g = el('g', {});
-  g.appendChild(el('line', {x1:X-L*C30, y1:-104, x2:X+L*C30, y2:-104,
-    stroke:'#1a1a1a','stroke-width':1.4}));
-  const num = el('text', {x:X-L*C30, y:-146, 'font-size':10, 'letter-spacing':1.6,
-    'fill-opacity':0.5});
-  num.textContent = s.n;
-  g.appendChild(num);
-  s.name.forEach((ln, i) => {
-    const t = el('text', {x:X, y:-128 + i*15, 'text-anchor':'middle',
-      'font-size':12.5, 'font-weight':700, 'letter-spacing':1.5});
-    t.textContent = ln;
-    g.appendChild(t);
-  });
-  const cnt = el('text', {x:X+L*C30, y:-146, 'text-anchor':'end',
-    'font-size':10, 'fill-opacity':0.5});
-  cnt.textContent = byStage[s.key].length;
-  g.appendChild(cnt);
-  gHead.appendChild(g);
-});
+    /* group data by stage, keep declaration order */
+    const byStage = {};
+    for (const s of STAGES) {
+      byStage[s.key] = [];
+    }
+    for (const d of DATA) {
+      byStage[d.stage].push(d);
+    }
 
-/* --- detached-evaluation divider ------------------------------------------ */
-(function divider(){
-  const evalS = STAGES.find(s => s.detached);
-  if (!evalS) return;
-  const prev = STAGES[STAGES.indexOf(evalS)-1];
-  const dx = (stageX[evalS.key] + stageX[prev.key]) / 2;
-  const yTop = -164, yBot = (rowsMax-1)*VY + L*S30 + 24;
-  gFrame.appendChild(el('line', {x1:dx, y1:yTop, x2:dx, y2:yBot,
-    stroke:'#1a1a1a','stroke-width':0.9,'stroke-dasharray':'5 5','stroke-opacity':0.55}));
-  const t = el('text', {x:dx-8, y:yBot-4, 'text-anchor':'end',
-    'font-size':9.5, 'letter-spacing':1.2, 'fill-opacity':0.5});
-  t.textContent = 'BESIDE THE PIPELINE, NOT IN IT →';
-  gFrame.appendChild(t);
-})();
+    /* attach geometry */
+    for (const d of DATA) {
+      d.row = byStage[d.stage].indexOf(d);
+      const [wx, wy] = worldFor(d.stage, d.row);
+      d.wx = wx;
+      d.wy = wy;
+      d.base = P(wx, wy, 0); // base centre
+      d.apex = P(wx, wy, d.h); // top-face centre
+    }
 
-/* --- connectors: intra-stage rails + inter-stage spine -------------------- */
-function diamond(x, y, r, filled){
-  return el('path', {
-    d:`M ${x} ${y-r} L ${x+r} ${y} L ${x} ${y+r} L ${x-r} ${y} Z`,
-    fill: filled ? '#1a1a1a' : '#d7d2ac',
-    stroke:'#1a1a1a', 'stroke-width':1
-  });
-}
-STAGES.forEach((s, si) => {
-  const list = byStage[s.key];
-  const X = stageX[s.key];
-  /* vertical rail through the column, behind the blocks */
-  for (let r = 0; r < list.length - 1; r++){
-    const yA = r*VY + L*S30;
-    const yB = (r+1)*VY - L*S30 - list[r+1].h;
-    gLink.appendChild(el('line', {x1:X, y1:r*VY, x2:X, y2:(r+1)*VY,
-      stroke:'#1a1a1a','stroke-width':1.1,'stroke-opacity':0.75}));
-    if (yB - yA > 11) gLink.appendChild(diamond(X, (yA+yB)/2, 3.6, false));
-  }
-  /* horizontal spine to the next stage, at row 0 ground level */
-  const next = STAGES[si+1];
-  if (next && !next.detached){
-    const x1 = X + L*C30, x2 = stageX[next.key] - L*C30;
-    gLink.appendChild(el('line', {x1, y1:0, x2, y2:0,
-      stroke:'#1a1a1a','stroke-width':1.3}));
-    gLink.appendChild(diamond((x1+x2)/2, 0, 4.2, false));
-  }
-});
+    const SVGNS = "http://www.w3.org/2000/svg";
+    function el(tag, attrs) {
+      const n = document.createElementNS(SVGNS, tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (v !== null && v !== undefined) {
+          n.setAttribute(k, v);
+        }
+      }
+      return n;
+    }
 
-/* --- blocks --------------------------------------------------------------- */
-const nodeEls = {};
+    /* ---------- viewBox bounds ------------------------------------------------ */
+    const rowsMax = Math.max(...STAGES.map((s) => byStage[s.key].length));
+    const VB = {
+      h: (rowsMax - 1) * VY + L * S30 + 162 + 32,
+      w: stageX[STAGES.at(-1).key] + L * C30 + 148,
+      x: -74,
+      y: -162,
+    };
 
-function facePath(pts){ return 'M ' + pts.map(p => p[0].toFixed(2)+' '+p[1].toFixed(2)).join(' L ') + ' Z'; }
+    /* ============================================================================
+           DIAGRAM RENDER
+           ========================================================================= */
+    const svg = document.getElementById("diagram");
+    svg.setAttribute("viewBox", `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
 
-DATA.forEach(d => {
-  const { wx, wy, h } = d;
-  const half = L/2;
-  const T = {                                   // top face corners, z = h
-    N:P(wx-half, wy-half, h), E:P(wx+half, wy-half, h),
-    S:P(wx+half, wy+half, h), W:P(wx-half, wy+half, h)
-  };
-  const B = {                                   // base corners, z = 0
-    N:P(wx-half, wy-half, 0), E:P(wx+half, wy-half, 0),
-    S:P(wx+half, wy+half, 0), W:P(wx-half, wy+half, 0)
-  };
-  const faces = {
-    top:   [T.N, T.E, T.S, T.W],
-    left:  [T.W, T.S, B.S, B.W],
-    right: [T.S, T.E, B.E, B.S]
-  };
+    /* --- defs: hatch patterns, one per (status x face) ------------------------ */
+    const FACES = {
+      left: { ang: 30, tint: 0.06 },
+      right: { ang: 90, tint: 0.13 },
+      top: { ang: -30, tint: 0 },
+    };
 
-  const g = el('g', {class:'block', 'data-code':d.code, tabindex:'0'});
-  const meta = STATUS_META[d.status];
-  const dashed = (d.status === 'notbuilt');
+    /* one hatch pattern per (status x face); prefix keeps ids unique per <svg> */
+    function makeHatchDefs(prefix) {
+      const defs = el("defs");
+      for (const [sk, sm] of Object.entries(STATUS_META)) {
+        const sp = sm.hatch;
+        const dsh = sm.dash || null;
+        if (!sp) {
+          continue;
+        }
+        for (const fk of Object.keys(FACES)) {
+          const p = el("pattern", {
+            height: sp,
+            id: `${prefix}-${sk}-${fk}`,
+            patternTransform: `rotate(${FACES[fk].ang})`,
+            patternUnits: "userSpaceOnUse",
+            width: sp,
+          });
+          p.appendChild(
+            el("line", {
+              stroke: "#1a1a1a",
+              "stroke-dasharray": dsh,
+              "stroke-width": 0.72,
+              x1: -1,
+              x2: sp + 1,
+              y1: sp / 2,
+              y2: sp / 2,
+            })
+          );
+          defs.appendChild(p);
+        }
+      }
+      return defs;
+    }
+    svg.appendChild(makeHatchDefs("h"));
 
-  for (const fk in faces){
-    const pth = facePath(faces[fk]);
-    /* opaque base so the grid does not read through the block */
-    g.appendChild(el('path', {d:pth, fill:'#d7d2ac', stroke:'none'}));
-    if (FACES[fk].tint > 0)
-      g.appendChild(el('path', {d:pth, fill:'#1a1a1a', 'fill-opacity':FACES[fk].tint, stroke:'none'}));
-    if (meta.hatch)
-      g.appendChild(el('path', {d:pth, fill:`url(#h-${d.status}-${fk})`, stroke:'none'}));
-    g.appendChild(el('path', {
-      d:pth, fill:'none', stroke:'#1a1a1a',
-      'stroke-width': dashed ? 1 : 1.5,
-      'stroke-dasharray': dashed ? '4 3' : null,
-      'stroke-linejoin':'miter'
-    }));
-  }
+    /* --- layer order ---------------------------------------------------------- */
+    const gGrid = el("g", { id: "g-grid" });
+    const gFrame = el("g", { id: "g-frame" });
+    const gLink = el("g", { id: "g-link" });
+    const gBlocks = el("g", { id: "g-blocks" });
+    const gHead = el("g", { id: "g-head" });
+    for (const g of [gGrid, gFrame, gLink, gBlocks, gHead]) {
+      svg.appendChild(g);
+    }
 
-  /* BLOCKED marker: heavy front edges + solid joint at the front corner */
-  if (d.status === 'blocked'){
-    g.appendChild(el('path', {
-      d:`M ${T.W[0]} ${T.W[1]} L ${T.S[0]} ${T.S[1]} L ${T.E[0]} ${T.E[1]}`,
-      fill:'none', stroke:'#1a1a1a', 'stroke-width':3.4, 'stroke-linejoin':'miter'
-    }));
-    g.appendChild(diamond(T.S[0], T.S[1], 4.6, true));
-  }
+    /* --- faint isometric grid ------------------------------------------------- */
+    (function grid() {
+      const G = 26;
+      // world bounds that cover the viewBox
+      const corners = [
+        [VB.x, VB.y],
+        [VB.x + VB.w, VB.y],
+        [VB.x, VB.y + VB.h],
+        [VB.x + VB.w, VB.y + VB.h],
+      ];
+      const xs = [],
+        ys = [];
+      for (const [sx, sy] of corners) {
+        // invert projection at z = 0
+        const x = sy / (2 * S30) + sx / (2 * C30);
+        const y = sy / (2 * S30) - sx / (2 * C30);
+        xs.push(x);
+        ys.push(y);
+      }
+      const x0 = Math.floor(Math.min(...xs) / G) * G,
+        x1 = Math.ceil(Math.max(...xs) / G) * G;
+      const y0 = Math.floor(Math.min(...ys) / G) * G,
+        y1 = Math.ceil(Math.max(...ys) / G) * G;
+      const attrs = {
+        stroke: "#1a1a1a",
+        "stroke-opacity": 0.11,
+        "stroke-width": 0.4,
+      };
+      for (let x = x0; x <= x1; x += G) {
+        const a = P(x, y0, 0),
+          b = P(x, y1, 0);
+        gGrid.appendChild(
+          el("line", { x1: a[0], x2: b[0], y1: a[1], y2: b[1], ...attrs })
+        );
+      }
+      for (let y = y0; y <= y1; y += G) {
+        const a = P(x0, y, 0),
+          b = P(x1, y, 0);
+        gGrid.appendChild(
+          el("line", { x1: a[0], x2: b[0], y1: a[1], y2: b[1], ...attrs })
+        );
+      }
+    })();
 
-  /* open-caveat marker — below the letter, clear of the glyph */
-  if (d.caveat){
-    const my = d.apex[1] + 17;
-    g.appendChild(el('path', {
-      d:`M ${d.apex[0]} ${my-4.4} L ${d.apex[0]+4.4} ${my} L ${d.apex[0]} ${my+4.4} L ${d.apex[0]-4.4} ${my} Z`,
-      fill:'none', stroke:'#1a1a1a', 'stroke-width':1.2
-    }));
-  }
+    /* --- stage headers -------------------------------------------------------- */
+    for (const s of STAGES) {
+      const X = stageX[s.key];
+      const g = el("g", {});
+      g.appendChild(
+        el("line", {
+          stroke: "#1a1a1a",
+          "stroke-width": 1.4,
+          x1: X - L * C30,
+          x2: X + L * C30,
+          y1: -104,
+          y2: -104,
+        })
+      );
+      const num = el("text", {
+        "fill-opacity": 0.5,
+        "font-size": 10,
+        "letter-spacing": 1.6,
+        x: X - L * C30,
+        y: -146,
+      });
+      num.textContent = s.n;
+      g.appendChild(num);
+      for (const [i, ln] of s.name.entries()) {
+        const t = el("text", {
+          "font-size": 12.5,
+          "font-weight": 700,
+          "letter-spacing": 1.5,
+          "text-anchor": "middle",
+          x: X,
+          y: -128 + i * 15,
+        });
+        t.textContent = ln;
+        g.appendChild(t);
+      }
+      const cnt = el("text", {
+        "fill-opacity": 0.5,
+        "font-size": 10,
+        "text-anchor": "end",
+        x: X + L * C30,
+        y: -146,
+      });
+      cnt.textContent = byStage[s.key].length;
+      g.appendChild(cnt);
+      gHead.appendChild(g);
+    }
 
-  /* highlight ring: ground footprint, drawn only when active */
-  const ring = el('path', {
-    d: facePath([B.N, B.E, B.S, B.W]),
-    fill:'none', stroke:'#1a1a1a', 'stroke-width':1.6,
-    'stroke-dasharray':'3 3', opacity:0
-  });
-  ring.setAttribute('class','ring');
-  g.appendChild(ring);
+    /* --- detached-evaluation divider ------------------------------------------ */
+    (function divider() {
+      const evalS = STAGES.find((s) => s.detached);
+      if (!evalS) {
+        return;
+      }
+      const prev = STAGES[STAGES.indexOf(evalS) - 1];
+      const dx = (stageX[evalS.key] + stageX[prev.key]) / 2;
+      const yTop = -164,
+        yBot = (rowsMax - 1) * VY + L * S30 + 24;
+      gFrame.appendChild(
+        el("line", {
+          stroke: "#1a1a1a",
+          "stroke-dasharray": "5 5",
+          "stroke-opacity": 0.55,
+          "stroke-width": 0.9,
+          x1: dx,
+          x2: dx,
+          y1: yTop,
+          y2: yBot,
+        })
+      );
+      const t = el("text", {
+        "fill-opacity": 0.5,
+        "font-size": 9.5,
+        "letter-spacing": 1.2,
+        "text-anchor": "end",
+        x: dx - 8,
+        y: yBot - 4,
+      });
+      t.textContent = "BESIDE THE PIPELINE, NOT IN IT →";
+      gFrame.appendChild(t);
+    })();
 
-  /* letter code on the top face */
-  const label = el('text', {
-    x:d.apex[0], y:d.apex[1] + (d.caveat ? 2 : 6.5),
-    'text-anchor':'middle',
-    'font-size': d.code.length > 1 ? 17 : 21,
-    'font-weight':700, 'letter-spacing': d.code.length > 1 ? 0 : 0.5
-  });
-  label.textContent = d.code;
-  g.appendChild(label);
+    /* --- connectors: intra-stage rails + inter-stage spine -------------------- */
+    function diamond(x, y, r, filled) {
+      return el("path", {
+        d: `M ${x} ${y - r} L ${x + r} ${y} L ${x} ${y + r} L ${x - r} ${y} Z`,
+        fill: filled ? "#1a1a1a" : "#d7d2ac",
+        stroke: "#1a1a1a",
+        "stroke-width": 1,
+      });
+    }
+    function arrow(x, y, r) {
+      return el("path", {
+        d: `M ${x} ${y} L ${x - r * 1.5} ${y - r * 0.8} L ${x - r * 1.5} ${y + r * 0.8} Z`,
+        fill: "#1a1a1a",
+        stroke: "none",
+      });
+    }
 
-  /* transparent hit area covering the whole prism */
-  g.appendChild(el('path', {
-    d: facePath([T.N, T.E, B.E, B.S, B.W, T.W]),
-    fill:'transparent', stroke:'transparent', 'stroke-width':6
-  }));
+    /* status decoration shared by the blocks and the legend swatches.
+           BLOCKED  — heavy front edges + solid joint at the front corner.
+           WITHDRAWN — struck front faces. A retracted finding, not an unbuilt one. */
+    function decorate(g, status, T, B, scale) {
+      const k = scale || 1;
+      if (status === "blocked") {
+        g.appendChild(
+          el("path", {
+            d: `M ${T.W[0]} ${T.W[1]} L ${T.S[0]} ${T.S[1]} L ${T.E[0]} ${T.E[1]}`,
+            fill: "none",
+            stroke: "#1a1a1a",
+            "stroke-linejoin": "miter",
+            "stroke-width": 3.4 * k,
+          })
+        );
+        g.appendChild(diamond(T.S[0], T.S[1], 4.6 * k, true));
+      }
+      if (status === "withdrawn") {
+        const strike = (a, b) =>
+          el("line", {
+            stroke: "#1a1a1a",
+            "stroke-linecap": "butt",
+            "stroke-width": 1.9 * k,
+            x1: a[0],
+            x2: b[0],
+            y1: a[1],
+            y2: b[1],
+          });
+        g.appendChild(strike(T.W, B.S)); // left face  \
+        g.appendChild(strike(T.S, B.W)); // left face  /
+        g.appendChild(strike(T.E, B.S)); // right face /
+        g.appendChild(strike(T.S, B.E)); // right face \
+      }
+    }
+    for (const [si, s] of STAGES.entries()) {
+      const list = byStage[s.key];
+      const X = stageX[s.key];
+      /* vertical rail through the column, behind the blocks */
+      for (let r = 0; r < list.length - 1; r += 1) {
+        const yA = r * VY + L * S30;
+        const yB = (r + 1) * VY - L * S30 - list[r + 1].h;
+        gLink.appendChild(
+          el("line", {
+            stroke: "#1a1a1a",
+            "stroke-opacity": 0.75,
+            "stroke-width": 1.1,
+            x1: X,
+            x2: X,
+            y1: r * VY,
+            y2: (r + 1) * VY,
+          })
+        );
+        if (yB - yA > 11) {
+          gLink.appendChild(diamond(X, (yA + yB) / 2, 3.6, false));
+        }
+      }
+      /* horizontal spine to the next stage, at row 0 ground level */
+      const next = STAGES[si + 1];
+      if (next && !next.detached) {
+        const x1 = X + L * C30,
+          x2 = stageX[next.key] - L * C30;
+        gLink.appendChild(
+          el("line", {
+            stroke: "#1a1a1a",
+            "stroke-width": 1.3,
+            x1,
+            x2: x2 - 6,
+            y1: 0,
+            y2: 0,
+          })
+        );
+        gLink.appendChild(diamond((x1 + x2) / 2, 0, 4.2, false));
+        /* arrowhead: evidence flows downstream. The ONE exception is the
+               graph ask-back, drawn separately below as a narrow return path. */
+        gLink.appendChild(arrow(x2, 0, 5));
+      }
+    }
 
-  gBlocks.appendChild(g);
-  nodeEls[d.code] = { g, ring, label };
+    /* --- standing notes under a stage header. ESCALATION being downstream is a
+           correction, not a layout note; EVALUATION measures the pipeline, not a target. */
+    (function stageNotes() {
+      const NOTES = {
+        escal: [
+          "DOWNSTREAM OF POCKET FINDING.",
+          "NOTHING HERE FINDS A POCKET.",
+        ],
+        eval: ["EVIDENCE ABOUT THE PIPELINE,", "NOT ABOUT ANY ONE TARGET."],
+      };
+      for (const [key, lines] of Object.entries(NOTES)) {
+        const X = stageX[key];
+        if (X === undefined) {
+          continue;
+        }
+        for (const [i, ln] of lines.entries()) {
+          const t = el("text", {
+            "fill-opacity": 0.62,
+            "font-size": 8.5,
+            "letter-spacing": 0.9,
+            "text-anchor": "middle",
+            x: X,
+            y: -92 + i * 11,
+          });
+          t.textContent = ln;
+          gFrame.appendChild(t);
+        }
+      }
+    })();
 
-  g.addEventListener('mouseenter', () => setHover(d.code));
-  g.addEventListener('mouseleave', () => setHover(null));
-  g.addEventListener('focus',      () => setHover(d.code));
-  g.addEventListener('blur',       () => setHover(null));
-  g.addEventListener('click',      () => setSelected(selected === d.code ? null : d.code));
-});
+    /* --- blocks --------------------------------------------------------------- */
+    const nodeEls = {};
 
-/* ============================================================================
-   SIDEBAR
-   ========================================================================= */
-const rowEls = {};
-(function sidebar(){
-  const sb = document.getElementById('sidebar');
-  const head = document.createElement('div');
-  head.className = 'side-head';
-  head.innerHTML = '<span>COMPONENT INDEX</span><span>' + DATA.length + '</span>';
-  sb.appendChild(head);
+    function facePath(pts) {
+      return `M ${pts.map((p) => `${p[0].toFixed(2)} ${p[1].toFixed(2)}`).join(" L ")} Z`;
+    }
 
-  STAGES.forEach(s => {
-    const g = document.createElement('div'); g.className = 'grp';
-    const h = document.createElement('div'); h.className = 'grp-head';
-    h.innerHTML = '<div class="grp-name">' + s.n + ' · ' + s.title + '</div>' +
-                  (s.note ? '<div class="grp-note">' + s.note + '</div>' : '');
-    g.appendChild(h);
-    const rows = document.createElement('div'); rows.className = 'grp-rows';
-    byStage[s.key].forEach(d => {
-      const r = document.createElement('div');
-      r.className = 'row';
-      r.innerHTML = '<span class="code">' + d.code + '</span>' +
-                    '<span class="nm" title="' + d.name + '">' + d.name + '</span>' +
-                    '<span class="tg">' + STATUS_META[d.status].tag + '</span>';
-      r.addEventListener('mouseenter', () => setHover(d.code));
-      r.addEventListener('mouseleave', () => setHover(null));
-      r.addEventListener('click', () => setSelected(selected === d.code ? null : d.code));
-      rows.appendChild(r);
-      rowEls[d.code] = r;
+    for (const d of DATA) {
+      const { wx, wy, h } = d;
+      const half = L / 2;
+      const T = {
+        // top face corners, z = h
+        E: P(wx + half, wy - half, h),
+        N: P(wx - half, wy - half, h),
+        S: P(wx + half, wy + half, h),
+        W: P(wx - half, wy + half, h),
+      };
+      const B = {
+        // base corners, z = 0
+        E: P(wx + half, wy - half, 0),
+        N: P(wx - half, wy - half, 0),
+        S: P(wx + half, wy + half, 0),
+        W: P(wx - half, wy + half, 0),
+      };
+      const faces = {
+        left: [T.W, T.S, B.S, B.W],
+        right: [T.S, T.E, B.E, B.S],
+        top: [T.N, T.E, T.S, T.W],
+      };
+
+      const g = el("g", { class: "block", "data-code": d.code, tabindex: "0" });
+      const meta = STATUS_META[d.status];
+      const ol = OUTLINE[d.status] || { dash: null, w: 1.5 };
+
+      for (const [fk, fpts] of Object.entries(faces)) {
+        const pth = facePath(fpts);
+        /* opaque base so the grid does not read through the block */
+        g.appendChild(el("path", { d: pth, fill: "#d7d2ac", stroke: "none" }));
+        if (FACES[fk].tint > 0) {
+          g.appendChild(
+            el("path", {
+              d: pth,
+              fill: "#1a1a1a",
+              "fill-opacity": FACES[fk].tint,
+              stroke: "none",
+            })
+          );
+        }
+        if (meta.hatch) {
+          g.appendChild(
+            el("path", {
+              d: pth,
+              fill: `url(#h-${d.status}-${fk})`,
+              stroke: "none",
+            })
+          );
+        }
+        g.appendChild(
+          el("path", {
+            d: pth,
+            fill: "none",
+            stroke: "#1a1a1a",
+            "stroke-dasharray": ol.dash,
+            "stroke-linejoin": "miter",
+            "stroke-width": ol.w,
+          })
+        );
+      }
+
+      decorate(g, d.status, T, B, 1);
+
+      /* top-face markers, below the letter and clear of the glyph.
+             open diamond = open caveat.  solid square = corrected after a wrong answer. */
+      const marks = [];
+      if (d.caveat) {
+        marks.push("caveat");
+      }
+      if (d.corrected) {
+        marks.push("corrected");
+      }
+      /* two markers straddle the centre; a lone marker sits on it */
+      const markSpread = marks.length > 1 ? 7 : 0;
+      for (const [i, mk] of marks.entries()) {
+        const mx = d.apex[0] + (i === 0 ? -markSpread : markSpread);
+        const my = d.apex[1] + 17;
+        if (mk === "caveat") {
+          g.appendChild(
+            el("path", {
+              d: `M ${mx} ${my - 4.4} L ${mx + 4.4} ${my} L ${mx} ${my + 4.4} L ${mx - 4.4} ${my} Z`,
+              fill: "none",
+              stroke: "#1a1a1a",
+              "stroke-width": 1.2,
+            })
+          );
+        } else {
+          g.appendChild(
+            el("rect", {
+              fill: "#1a1a1a",
+              height: 7.2,
+              stroke: "none",
+              width: 7.2,
+              x: mx - 3.6,
+              y: my - 3.6,
+            })
+          );
+        }
+      }
+
+      /* highlight ring: ground footprint, drawn only when active */
+      const ring = el("path", {
+        d: facePath([B.N, B.E, B.S, B.W]),
+        fill: "none",
+        opacity: 0,
+        stroke: "#1a1a1a",
+        "stroke-dasharray": "3 3",
+        "stroke-width": 1.6,
+      });
+      ring.setAttribute("class", "ring");
+      g.appendChild(ring);
+
+      /* letter code on the top face */
+      const label = el("text", {
+        "font-size": d.code.length > 1 ? 17 : 21,
+        "font-weight": 700,
+        "letter-spacing": d.code.length > 1 ? 0 : 0.5,
+        "text-anchor": "middle",
+        x: d.apex[0],
+        y: d.apex[1] + (marks.length ? 2 : 6.5),
+      });
+      label.textContent = d.code;
+      g.appendChild(label);
+
+      /* transparent hit area covering the whole prism */
+      g.appendChild(
+        el("path", {
+          d: facePath([T.N, T.E, B.E, B.S, B.W, T.W]),
+          fill: "transparent",
+          stroke: "transparent",
+          "stroke-width": 6,
+        })
+      );
+
+      gBlocks.appendChild(g);
+      nodeEls[d.code] = { g, label, ring };
+
+      g.addEventListener("mouseenter", () => setHover(d.code));
+      g.addEventListener("mouseleave", () => setHover(null));
+      g.addEventListener("focus", () => setHover(d.code));
+      g.addEventListener("blur", () => setHover(null));
+      g.addEventListener("click", () =>
+        setSelected(selected === d.code ? null : d.code)
+      );
+    }
+
+    /* ============================================================================
+           SIDEBAR
+           ========================================================================= */
+    const rowEls = {};
+    (function sidebar() {
+      const sb = document.getElementById("sidebar");
+      const head = document.createElement("div");
+      head.className = "side-head";
+      head.innerHTML = `<span>COMPONENT INDEX</span><span>${DATA.length}</span>`;
+      sb.appendChild(head);
+
+      for (const s of STAGES) {
+        const g = document.createElement("div");
+        g.className = "grp";
+        const h = document.createElement("div");
+        h.className = "grp-head";
+        h.innerHTML =
+          `<div class="grp-name">${s.n} · ${s.title}</div>` +
+          (s.note ? `<div class="grp-note">${s.note}</div>` : "");
+        g.appendChild(h);
+        const rows = document.createElement("div");
+        rows.className = "grp-rows";
+        for (const d of byStage[s.key]) {
+          const r = document.createElement("div");
+          r.className = `row${d.status === "withdrawn" ? " wdr" : ""}`;
+          r.innerHTML =
+            `<span class="code">${d.code}</span>` +
+            `<span class="nm" title="${d.name}">${d.name}</span>` +
+            `<span class="tg">${STATUS_META[d.status].tag}${d.corrected ? "*" : ""}</span>`;
+          r.addEventListener("mouseenter", () => setHover(d.code));
+          r.addEventListener("mouseleave", () => setHover(null));
+          r.addEventListener("click", () =>
+            setSelected(selected === d.code ? null : d.code)
+          );
+          rows.appendChild(r);
+          rowEls[d.code] = r;
+        }
+        g.appendChild(rows);
+        sb.appendChild(g);
+      }
+    })();
+
+    /* ============================================================================
+           HEADER COUNTS
+           ========================================================================= */
+    (function counts() {
+      const c = {};
+      for (const d of DATA) {
+        c[d.status] = (c[d.status] || 0) + 1;
+      }
+      /* one cell per status that actually occurs, in STATUS_META declaration order */
+      const cells = [["tot", DATA.length, "COMPONENTS"]];
+      for (const sk of Object.keys(STATUS_META)) {
+        if (c[sk]) {
+          cells.push(["", c[sk], STATUS_META[sk].key]);
+        }
+      }
+      cells.push(["", STAGES.length, "STAGES"]);
+      document.getElementById("counts").innerHTML = cells
+        .map(
+          ([cls, n, k]) =>
+            `<div class="count ${cls}"><span class="n">${n}</span><span class="k">${k}</span></div>`
+        )
+        .join("");
+    })();
+
+    /* ============================================================================
+           LEGEND  (small isometric swatches, generated the same way as the blocks)
+           ========================================================================= */
+    (function legend() {
+      const present = {};
+      for (const d of DATA) {
+        present[d.status] = true;
+      }
+      const items = [
+        [
+          "verified",
+          "BUILT AND VERIFIED",
+          "Dense hatch. A counterexample was found, fixed, and re-tested.",
+        ],
+        ["built", "BUILT", "Medium hatch. Working; not adversarially tested."],
+        [
+          "deploying",
+          "DEPLOYING",
+          "Broken hatch. Image builds, deploy in flight, not yet exercised.",
+        ],
+        [
+          "partial",
+          "PARTIAL",
+          "Sparse hatch. Written or working, not wired in or never run.",
+        ],
+        [
+          "notbuilt",
+          "NOT BUILT",
+          "Outline, dashed edges. No pipeline code exists.",
+        ],
+        [
+          "withdrawn",
+          "WITHDRAWN",
+          "Struck faces, dotted edges. It was built, it ran, and its finding is retracted. Not the same as never built.",
+        ],
+        [
+          "blocked",
+          "BLOCKED",
+          "Outline, heavy front edge, solid joint. External dependency.",
+        ],
+      ].filter(([sk]) => present[sk]);
+      const box = document.getElementById("legend");
+      for (const [sk, nm, txt] of items) {
+        const wrap = document.createElement("div");
+        wrap.className = "lg-item";
+        const s = document.createElementNS(SVGNS, "svg");
+        s.setAttribute("width", 52);
+        s.setAttribute("height", 44);
+        s.setAttribute("viewBox", "-24 -30 52 44");
+        /* own defs so the swatch does not depend on cross-<svg> id resolution */
+        const pfx = `lg${sk}`;
+        s.appendChild(makeHatchDefs(pfx));
+        const hh = 16,
+          ll = 15,
+          hf = ll / 2;
+        const T = {
+          E: P(hf, -hf, hh),
+          N: P(-hf, -hf, hh),
+          S: P(hf, hf, hh),
+          W: P(-hf, hf, hh),
+        };
+        const Bs = {
+          E: P(hf, -hf, 0),
+          N: P(-hf, -hf, 0),
+          S: P(hf, hf, 0),
+          W: P(-hf, hf, 0),
+        };
+        const fs = {
+          left: [T.W, T.S, Bs.S, Bs.W],
+          right: [T.S, T.E, Bs.E, Bs.S],
+          top: [T.N, T.E, T.S, T.W],
+        };
+        const ol = OUTLINE[sk] || { dash: null, w: 1.4 };
+        for (const [fk, fpts] of Object.entries(fs)) {
+          const p = facePath(fpts);
+          s.appendChild(el("path", { d: p, fill: "#d7d2ac" }));
+          if (FACES[fk].tint > 0) {
+            s.appendChild(
+              el("path", {
+                d: p,
+                fill: "#1a1a1a",
+                "fill-opacity": FACES[fk].tint,
+              })
+            );
+          }
+          if (STATUS_META[sk].hatch) {
+            s.appendChild(
+              el("path", { d: p, fill: `url(#${pfx}-${sk}-${fk})` })
+            );
+          }
+          s.appendChild(
+            el("path", {
+              d: p,
+              fill: "none",
+              stroke: "#1a1a1a",
+              "stroke-dasharray": ol.dash,
+              "stroke-width": ol.w,
+            })
+          );
+        }
+        decorate(s, sk, T, Bs, 0.85);
+        wrap.appendChild(s);
+        const t = document.createElement("div");
+        t.className = "lt";
+        t.innerHTML = `<b>${nm}</b>${txt}`;
+        wrap.appendChild(t);
+        box.appendChild(wrap);
+      }
+      const nCorr = DATA.filter((d) => d.corrected).length;
+      const extra = document.createElement("div");
+      extra.className = "lg-item";
+      extra.innerHTML =
+        '<div class="lt" style="max-width:236px"><b>READING THE SCHEMATIC</b>' +
+        "Block height is verification work, not importance. Tall blocks are tall because " +
+        "something was measured, broke, and was re-measured. Open diamond on a top face " +
+        "= built with an open caveat. Small diamonds on the connectors are stage joints; " +
+        "arrowheads mark one-way flow.</div>";
+      box.appendChild(extra);
+
+      const corr = document.createElement("div");
+      corr.className = "lg-item";
+      corr.innerHTML =
+        '<svg width="30" height="30" viewBox="-15 -15 30 30">' +
+        '<rect x="-5" y="-5" width="10" height="10" fill="#1a1a1a"></rect>' +
+        "</svg>" +
+        `<div class="lt" style="max-width:236px"><b>CORRECTED &nbsp;(${nCorr})</b>` +
+        "Solid square on the top face, asterisk on the index tag: this component gave a " +
+        "wrong answer and was corrected. Unmarked means built right the first time. " +
+        `The ${nCorr} corrected blocks, plus the one struck through, are what this ` +
+        "diagram exists to record.</div>";
+      box.appendChild(corr);
+
+      /* the two headline results. They are findings about the pipeline itself, so they
+             live in the legend rather than hiding inside a single component panel. */
+      const head1 = document.createElement("div");
+      head1.className = "lg-item";
+      head1.innerHTML =
+        '<div class="lt" style="max-width:290px"><b>COFOLDING CONFIDENCE IS ANTI-DIAGNOSTIC</b>' +
+        "Sealing the KRAS switch-II pocket with nine phenylalanines made it physically " +
+        "undruggable — and <i>raised</i> every pLDDT-family score (complex pLDDT 0.940 &rarr; " +
+        "0.957), with backbone RMSD to wild type (0.73 A) coming in BELOW the " +
+        "wild-type-versus-wild-type baseline (1.02 A). Median seed dispersion 0.21 A; 21 of 24 " +
+        "runs converged on SI/II-P — a real site, but not the one asked about. Confidence does " +
+        "not know the site is gone. See E4.</div>";
+      box.appendChild(head1);
+
+      const head2 = document.createElement("div");
+      head2.className = "lg-item";
+      head2.innerHTML =
+        '<div class="lt" style="max-width:290px"><b>WITHDRAWN &nbsp;&mdash;&nbsp; THE 651&times; SPREAD</b>' +
+        "An earlier version of this pipeline reported a 651&times; druggability spread as a " +
+        "headline result. It was wrong. mdpocket showed the matcher was tracking a pocket 7.7 A " +
+        "off-site with 12.2 A of internal inconsistency; a 19-residue reference on a homotrimer " +
+        "collapses to 11 distinct numbers; and within one structure the D=1.6 and D=2.4 " +
+        '"same site" pockets sit about 12.3 A apart (about 18.4 A on 2AZ5). The 206.7-309.2 A³ ' +
+        "volume range beside it is void too — same matching step. The claim is withdrawn and " +
+        "stays on the diagram struck through. See O.</div>";
+      box.appendChild(head2);
+    })();
+
+    /* ============================================================================
+           INTERACTION
+           ========================================================================= */
+    let selected = null,
+      hovered = null,
+      tab = "what";
+
+    function setHover(code) {
+      hovered = code;
+      paint();
+    }
+    function setSelected(code) {
+      selected = code;
+      paint();
+    }
+
+    for (const b of document.querySelectorAll(".tab")) {
+      b.addEventListener("click", () => {
+        tab = b.getAttribute("data-tab");
+        paint();
+      });
+    }
+
+    function byCode(code) {
+      return DATA.find((d) => d.code === code);
+    }
+
+    /* bump every declared edge of one block to the active weight */
+    function emphasise(g) {
+      for (const p of g.querySelectorAll('path[stroke="#1a1a1a"]')) {
+        if (!p.classList.contains("ring")) {
+          p.setAttribute(
+            "stroke-width",
+            Math.max(
+              Number.parseFloat(p.getAttribute("stroke-width") || 1),
+              2.2
+            )
+          );
+        }
+      }
+    }
+
+    function paintBlocks(active) {
+      for (const d of DATA) {
+        const n = nodeEls[d.code];
+        const lit = d.code === active || d.code === selected;
+        n.ring.setAttribute("opacity", lit ? 1 : 0);
+        n.g.setAttribute("opacity", active && d.code !== active ? 0.34 : 1);
+        n.label.setAttribute("fill", "#1a1a1a");
+        if (lit) {
+          emphasise(n.g);
+        } else {
+          /* restore declared weights */
+          restoreWeights(d);
+        }
+      }
+    }
+
+    function paintSidebar(active) {
+      for (const d of DATA) {
+        const r = rowEls[d.code];
+        r.classList.toggle("sel", d.code === selected);
+        r.classList.toggle(
+          "dim",
+          !!active && d.code !== active && d.code !== selected
+        );
+      }
+    }
+
+    function paint() {
+      const active = hovered || selected;
+      for (const b of document.querySelectorAll(".tab")) {
+        b.classList.toggle("on", b.getAttribute("data-tab") === tab);
+      }
+      paintBlocks(active);
+      paintSidebar(active);
+      renderPanel(active ? byCode(active) : null);
+    }
+
+    /* the paint() stroke bump is destructive, so remember the declared weights */
+    const declaredWeights = {};
+    for (const d of DATA) {
+      declaredWeights[d.code] = [];
+      for (const [i, p] of nodeEls[d.code].g
+        .querySelectorAll("path")
+        .entries()) {
+        declaredWeights[d.code][i] = p.getAttribute("stroke-width");
+      }
+    }
+    function restoreWeights(d) {
+      for (const [i, p] of nodeEls[d.code].g
+        .querySelectorAll("path")
+        .entries()) {
+        const w = declaredWeights[d.code][i];
+        if (w === null || w === undefined) {
+          p.removeAttribute("stroke-width");
+        } else {
+          p.setAttribute("stroke-width", w);
+        }
+      }
+    }
+
+    function renderPanel(d) {
+      const body = document.getElementById("pbody");
+      if (!d) {
+        body.innerHTML =
+          '<div class="p-kicker">' +
+          INTRO.head +
+          "</div>" +
+          INTRO.body.map((p) => `<p class="p-text">${p}</p>`).join("") +
+          '<hr class="p-rule thin">' +
+          '<div class="p-kicker">THE TWO AXES</div>' +
+          '<ul class="p-list">' +
+          "<li><b>Axis 1 &mdash; retrieved precedent.</b> Looked up, not computed. The stronger axis when it exists.</li>" +
+          "<li><b>Axis 2 &mdash; computed tractability.</b> Computed, with declared blind spots.</li>" +
+          "<li>Never averaged. No overall number. Disagreement is reported, not resolved.</li>" +
+          "</ul>" +
+          '<hr class="p-rule thin">' +
+          '<div class="p-kicker">WHAT THE PIPELINE HAS MEASURED ABOUT ITSELF</div>' +
+          '<ul class="p-list">' +
+          "<li><b>E4 &mdash; cofolding confidence is anti-diagnostic.</b> A pocket sealed shut with nine " +
+          "phenylalanines scored <i>higher</i>, not lower: complex pLDDT 0.940 &rarr; 0.957, backbone " +
+          "0.73 A from wild type against a 1.02 A wild-type baseline.</li>" +
+          "<li><b>T2 &mdash; the affinity head ranks, it does not measure.</b> 1.97 log units too weak on " +
+          "tofacitinib, but 2.36 log units of separation between actives and decoys. Order candidates " +
+          "with it; never quote a Kd from it.</li>" +
+          "<li><b>V &mdash; ESMFold fails on interfaces and flags its own failure.</b> 1 contact where the " +
+          "deposited structure has 97, TM-score 0.328 &mdash; and pTM 0.399 says so. The self-report is " +
+          "the usable part.</li>" +
+          "<li><b>E2 &mdash; the retrospective discriminates.</b> JAK1/2/3 and TYK2 go 0 &rarr; 2/2/1/1 " +
+          "between a 2010 and a 2013 cutoff; TNF, IL6R, CD20 and IL1B stay at 0 throughout.</li>" +
+          "<li><b>E5 &mdash; the two axes stay apart.</b> TNF beats JAK1 on every pocket metric while " +
+          "having zero approved small molecules. Averaging would invert both answers.</li>" +
+          "<li><b>O &mdash; withdrawn.</b> The 651&times; spread was never a spread of one site.</li>" +
+          "</ul>" +
+          '<div class="p-hint">HOVER A BLOCK OR AN INDEX ROW TO READ IT.<br>CLICK TO PIN.</div>';
+        return;
+      }
+      const stage = STAGES.find((s) => s.key === d.stage);
+      const neg =
+        d.status === "blocked" ||
+        d.status === "notbuilt" ||
+        d.status === "withdrawn";
+      const content =
+        tab === "what"
+          ? '<div class="p-kicker">WHAT IT DOES</div><p class="p-text">' +
+            d.what +
+            "</p>"
+          : '<div class="p-kicker">STATUS</div>' +
+            '<div class="p-status' +
+            (neg ? " neg" : "") +
+            '">' +
+            d.label +
+            "</div>" +
+            '<p class="p-text" style="margin-top:11px">' +
+            d.st +
+            "</p>";
+
+      body.innerHTML =
+        '<div class="p-code">' +
+        d.code +
+        "</div>" +
+        '<div class="p-name">' +
+        d.name +
+        "</div>" +
+        '<div class="p-stage">' +
+        stage.n +
+        " · " +
+        stage.title +
+        "</div>" +
+        '<hr class="p-rule">' +
+        content +
+        '<hr class="p-rule thin">' +
+        '<div class="p-meta">' +
+        "FILL &nbsp;" +
+        STATUS_META[d.status].name +
+        "<br>" +
+        "HEIGHT &nbsp;" +
+        d.h +
+        " / 68 — verification depth" +
+        (d.caveat ? "<br>MARKER &nbsp;open diamond — open caveat" : "") +
+        (d.corrected
+          ? "<br>MARKER &nbsp;solid square — corrected after a wrong answer"
+          : "") +
+        (d.status === "withdrawn"
+          ? "<br>MARKER &nbsp;struck faces — finding retracted"
+          : "") +
+        "</div>";
+    }
+
+    paint();
+
+    /* keyboard: escape unpins */
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        setSelected(null);
+      }
     });
-    g.appendChild(rows);
-    sb.appendChild(g);
-  });
-})();
-
-/* ============================================================================
-   HEADER COUNTS
-   ========================================================================= */
-(function counts(){
-  const c = {};
-  DATA.forEach(d => c[d.status] = (c[d.status]||0) + 1);
-  const cells = [
-    ['tot', DATA.length,       'COMPONENTS'],
-    ['',    c.verified||0,     'VERIFIED'],
-    ['',    c.built||0,        'BUILT'],
-    ['',    c.partial||0,      'PARTIAL'],
-    ['',    c.notbuilt||0,     'NOT BUILT'],
-    ['',    c.blocked||0,      'BLOCKED'],
-    ['',    STAGES.length,     'STAGES']
-  ];
-  document.getElementById('counts').innerHTML = cells.map(([cls,n,k]) =>
-    '<div class="count ' + cls + '"><span class="n">' + n + '</span>' +
-    '<span class="k">' + k + '</span></div>').join('');
-})();
-
-/* ============================================================================
-   LEGEND  (small isometric swatches, generated the same way as the blocks)
-   ========================================================================= */
-(function legend(){
-  const items = [
-    ['verified', 'BUILT AND VERIFIED', 'Dense hatch. A counterexample was found, fixed, and re-tested.'],
-    ['built',    'BUILT',              'Medium hatch. Working; not adversarially tested.'],
-    ['partial',  'PARTIAL',            'Sparse hatch. Written or working, not wired in or never run.'],
-    ['notbuilt', 'NOT BUILT',          'Outline, dashed edges. No pipeline code exists.'],
-    ['blocked',  'BLOCKED',            'Outline, heavy front edge, solid joint. External dependency.']
-  ];
-  const box = document.getElementById('legend');
-  items.forEach(([sk, nm, txt]) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'lg-item';
-    const s = document.createElementNS(SVGNS, 'svg');
-    s.setAttribute('width', 52); s.setAttribute('height', 44);
-    s.setAttribute('viewBox', '-24 -30 52 44');
-    /* own defs so the swatch does not depend on cross-<svg> id resolution */
-    const pfx = 'lg' + sk;
-    s.appendChild(makeHatchDefs(pfx));
-    const hh = 16, ll = 15, hf = ll/2;
-    const T = { N:P(-hf,-hf,hh), E:P(hf,-hf,hh), S:P(hf,hf,hh), W:P(-hf,hf,hh) };
-    const Bs= { N:P(-hf,-hf,0),  E:P(hf,-hf,0),  S:P(hf,hf,0),  W:P(-hf,hf,0) };
-    const fs = { top:[T.N,T.E,T.S,T.W], left:[T.W,T.S,Bs.S,Bs.W], right:[T.S,T.E,Bs.E,Bs.S] };
-    const dashed = sk === 'notbuilt';
-    for (const fk in fs){
-      const p = facePath(fs[fk]);
-      s.appendChild(el('path',{d:p, fill:'#d7d2ac'}));
-      if (FACES[fk].tint>0) s.appendChild(el('path',{d:p, fill:'#1a1a1a','fill-opacity':FACES[fk].tint}));
-      if (STATUS_META[sk].hatch) s.appendChild(el('path',{d:p, fill:`url(#${pfx}-${sk}-${fk})`}));
-      s.appendChild(el('path',{d:p, fill:'none', stroke:'#1a1a1a',
-        'stroke-width':dashed?1:1.4, 'stroke-dasharray':dashed?'4 3':null}));
-    }
-    if (sk === 'blocked'){
-      s.appendChild(el('path',{d:`M ${T.W[0]} ${T.W[1]} L ${T.S[0]} ${T.S[1]} L ${T.E[0]} ${T.E[1]}`,
-        fill:'none', stroke:'#1a1a1a','stroke-width':3}));
-      s.appendChild(diamond(T.S[0], T.S[1], 4, true));
-    }
-    wrap.appendChild(s);
-    const t = document.createElement('div');
-    t.className = 'lt';
-    t.innerHTML = '<b>' + nm + '</b>' + txt;
-    wrap.appendChild(t);
-    box.appendChild(wrap);
-  });
-  const extra = document.createElement('div');
-  extra.className = 'lg-item';
-  extra.innerHTML =
-    '<div class="lt" style="max-width:230px"><b>READING THE SCHEMATIC</b>' +
-    'Block height is verification work, not importance. Tall blocks are tall because ' +
-    'something was measured, broke, and was re-measured. Open diamond on a top face ' +
-    '= built with an open caveat. Small diamonds on the connectors are stage joints.</div>';
-  box.appendChild(extra);
-})();
-
-/* ============================================================================
-   INTERACTION
-   ========================================================================= */
-let selected = null, hovered = null, tab = 'what';
-
-function setHover(code){ hovered = code; paint(); }
-function setSelected(code){ selected = code; paint(); }
-
-document.querySelectorAll('.tab').forEach(b => {
-  b.addEventListener('click', () => { tab = b.dataset.tab; paint(); });
-});
-
-function byCode(code){ return DATA.find(d => d.code === code); }
-
-function paint(){
-  const active = hovered || selected;
-
-  /* tabs */
-  document.querySelectorAll('.tab').forEach(b =>
-    b.classList.toggle('on', b.dataset.tab === tab));
-
-  /* blocks */
-  DATA.forEach(d => {
-    const n = nodeEls[d.code];
-    const isActive = (d.code === active);
-    const isSel    = (d.code === selected);
-    n.ring.setAttribute('opacity', (isActive || isSel) ? 1 : 0);
-    n.g.setAttribute('opacity', (active && !isActive) ? 0.34 : 1);
-    n.label.setAttribute('fill', '#1a1a1a');
-    if (isActive || isSel){
-      n.g.querySelectorAll('path[stroke="#1a1a1a"]').forEach(p => {
-        if (!p.classList.contains('ring')) p.setAttribute('stroke-width',
-          Math.max(parseFloat(p.getAttribute('stroke-width')||1) , 2.2));
-      });
-    } else {
-      /* restore declared weights */
-      restoreWeights(d);
-    }
-  });
-
-  /* sidebar */
-  DATA.forEach(d => {
-    const r = rowEls[d.code];
-    r.classList.toggle('sel', d.code === selected);
-    r.classList.toggle('dim', !!active && d.code !== active && d.code !== selected);
-  });
-
-  renderPanel(active ? byCode(active) : null);
-}
-
-/* the paint() stroke bump is destructive, so remember the declared weights */
-const declaredWeights = {};
-DATA.forEach(d => {
-  declaredWeights[d.code] = [];
-  nodeEls[d.code].g.querySelectorAll('path').forEach((p, i) => {
-    declaredWeights[d.code][i] = p.getAttribute('stroke-width');
-  });
-});
-function restoreWeights(d){
-  nodeEls[d.code].g.querySelectorAll('path').forEach((p, i) => {
-    const w = declaredWeights[d.code][i];
-    if (w === null || w === undefined) p.removeAttribute('stroke-width');
-    else p.setAttribute('stroke-width', w);
-  });
-}
-
-function renderPanel(d){
-  const body = document.getElementById('pbody');
-  if (!d){
-    body.innerHTML =
-      '<div class="p-kicker">' + INTRO.head + '</div>' +
-      INTRO.body.map(p => '<p class="p-text">' + p + '</p>').join('') +
-      '<hr class="p-rule thin">' +
-      '<div class="p-kicker">THE TWO AXES</div>' +
-      '<ul class="p-list">' +
-        '<li><b>Axis 1 &mdash; retrieved precedent.</b> Looked up, not computed. The stronger axis when it exists.</li>' +
-        '<li><b>Axis 2 &mdash; computed tractability.</b> Computed, with declared blind spots.</li>' +
-        '<li>Never averaged. No overall number. Disagreement is reported, not resolved.</li>' +
-      '</ul>' +
-      '<div class="p-hint">HOVER A BLOCK OR AN INDEX ROW TO READ IT.<br>CLICK TO PIN.</div>';
-    return;
-  }
-  const stage = STAGES.find(s => s.key === d.stage);
-  const neg = (d.status === 'blocked' || d.status === 'notbuilt');
-  const content = (tab === 'what')
-    ? '<div class="p-kicker">WHAT IT DOES</div><p class="p-text">' + d.what + '</p>'
-    : '<div class="p-kicker">STATUS</div>' +
-      '<div class="p-status' + (neg ? ' neg' : '') + '">' + d.label + '</div>' +
-      '<p class="p-text" style="margin-top:11px">' + d.st + '</p>';
-
-  body.innerHTML =
-    '<div class="p-code">' + d.code + '</div>' +
-    '<div class="p-name">' + d.name + '</div>' +
-    '<div class="p-stage">' + stage.n + ' · ' + stage.title + '</div>' +
-    '<hr class="p-rule">' +
-    content +
-    '<hr class="p-rule thin">' +
-    '<div class="p-meta">' +
-      'FILL &nbsp;' + STATUS_META[d.status].name + '<br>' +
-      'HEIGHT &nbsp;' + d.h + ' / 68 — verification depth' +
-      (d.caveat ? '<br>MARKER &nbsp;open caveat' : '') +
-    '</div>';
-}
-
-paint();
-
-/* keyboard: escape unpins */
-document.addEventListener('keydown', e => { if (e.key === 'Escape') setSelected(null); });
-</script>
-</body>
+    </script>
+  </body>
 </html>

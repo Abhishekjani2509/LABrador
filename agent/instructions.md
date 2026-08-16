@@ -16,4 +16,10 @@ Slack; the specialists are available to you as tools.
 
 ## Specialists
 
-(None yet — `/managed-agent-deploy` appends one line per deployed agent.)
+- `druggability-dossier` — dispatch when someone asks whether a protein target
+  can be drugged with a small molecule, or wants the evidence behind that
+  question assembled. Give it a UniProt accession (plus any as-of date, disease
+  context, interaction to disrupt, or mechanism hypothesis); it returns a JSON
+  dossier reporting retrieved precedent and computed tractability as two
+  separate axes. It reports evidence and does not decide, so do not ask it to
+  rank targets, pick an indication, or produce one overall score.

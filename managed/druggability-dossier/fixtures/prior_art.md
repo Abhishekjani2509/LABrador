@@ -168,11 +168,32 @@ table stakes, not a differentiator. What differentiates is that we carry
 *provenance and a potency figure* alongside the modality call, where Open
 Targets carries a bare boolean.
 
-1. **The magnitude of druggability-score irreproducibility.** Detection
-   instability is published (~85% pocket identity under mere rotation, ~59%
-   PDB-vs-AF2); score inflation on uncleaned holo is published as a distribution
-   shift. **No published fold-range of the score across an apo ensemble with
-   volume held constant.** Ours: 650× with ±16% volume.
+1. **The magnitude of druggability-score irreproducibility — RETRACTED as a
+   contribution, kept as a record.** Detection instability is published (~85%
+   pocket identity under mere rotation, ~59% PDB-vs-AF2); score inflation on
+   uncleaned holo is published as a distribution shift. This item used to claim
+   that no fold-range of the score across an apo ensemble with volume held
+   constant had been published, and offered **651× with ±16% volume** as ours.
+   **That claim is withdrawn.** Volume was never held constant, because the
+   pockets being compared were never the same pocket: they were matched across
+   structures on shared residue numbers, and mdpocket showed the matcher was
+   tracking a cavity 7.7 Å off-site with 12.2 Å of internal inconsistency
+   between structures. A 19-residue reference on a homotrimer collapses to 11
+   distinct residue numbers, so a C3-symmetric site is unresolvable in principle
+   by that method. Both halves are void — the 651× spread and the 206.7–309.2 Å³
+   volume range beside it — because both came out of the same matching step. See
+   the VOID section of `pocket-scan/SKILL.md` and `tnf_result_VOID` in
+   `pocket_calibration.json`.
+
+   What survives is a smaller and better-supported claim: fixing the site by
+   construction with mdpocket characterization mode, instead of matching after
+   the fact, cut the ensemble volume CV from roughly 28% to roughly 10% — an
+   inflation of about 2.8-fold, essentially all of it from one structure. Quote
+   that to two significant figures: three identical reruns of one ensemble gave
+   CVs of 12.1 / 11.3 / 10.8%, so about one percentage point of any CV is
+   fpocket's Monte-Carlo volume estimator. And note what it was measured on —
+   `site_from_density`, not the ligand site. It is a measurement of
+   reproducibility, not of the SPD304 site.
 2. **Mechanism as a routing decision.** Existing taxonomies (PocketMiner's
    forward/reverse + four backbone rearrangements; CryptoBank's
    buried/superficial × fragment/ligand) are descriptive. Using mechanism class
@@ -198,9 +219,11 @@ published in 2018 — our contribution is magnitude on the raw score, not the
 observation.
 
 **CryptoBench** operationalises crypticity as pocket-residue RMSD > 2 Å. **Our
-TNF-alpha case at 1.62 Å sits below that threshold and the site is present in
-all five apo structures — so it is NOT cryptic by either standard.** Report it
-as occluded.
+TNF-alpha case at roughly 1.6 Å sits below that threshold and the site is
+present in all five apo structures — so it is NOT cryptic by either standard.**
+Report it as occluded. Two significant figures on that displacement, and the
+protocol matters: 1.62 Å is hand calibration, the deployed default returns
+~1.55 Å, and both sit well below 2 Å, so the call does not turn on the decimals.
 
 ## Method lesson
 

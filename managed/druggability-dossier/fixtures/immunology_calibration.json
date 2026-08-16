@@ -54,12 +54,7 @@
     "symptom": "Chain selection defaulted to every chain in the file, which is the crystallographic asymmetric unit, not the biological assembly.",
     "measured_impact": {
       "9SQX": {
-        "asu_chains": [
-          "A",
-          "B",
-          "C",
-          "D"
-        ],
+        "asu_chains": ["A", "B", "C", "D"],
         "preferred_assembly": "dimer",
         "before": {
           "site_pocket_rank": 9,
@@ -76,17 +71,12 @@
       "4OBE": {
         "preferred_assembly": "monomer",
         "before": {
-          "chains": [
-            "A",
-            "B"
-          ],
+          "chains": ["A", "B"],
           "druggability": 0.257,
           "rank": 6
         },
         "after": {
-          "chains": [
-            "A"
-          ],
+          "chains": ["A"],
           "note": "matches the original hand-prepped calibration again"
         },
         "reading": "a silent regression introduced by defaulting to all chains; the assembly annotation fixed it without guesswork."
