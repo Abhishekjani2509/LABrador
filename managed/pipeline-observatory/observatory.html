@@ -32,9 +32,9 @@
     <title>The Glassbox — Pipeline Observatory</title>
     <style>
     /* ---------------------------------------------------------------
-               TOKENS. Two inks on warm paper, plus one alarm colour reserved
-               exclusively for honesty flags and degraded steps.
-               --------------------------------------------------------------- */
+                       TOKENS. Two inks on warm paper, plus one alarm colour reserved
+                       exclusively for honesty flags and degraded steps.
+                       --------------------------------------------------------------- */
     :root {
       --bg: #d7d2ac;
       --paper: #e2ddbc;
@@ -567,18 +567,21 @@
      * Returns null when no public record exists — which is itself a finding,
      * and is shown as a NO PUBLIC RECORD marker rather than being hidden.
      */
+    const NCT_RE = /NCT\d{8}/;
+    const DOI_RE = /10\.\d{4,9}\/\S+/;
+    const PDB_RE = /[0-9][A-Za-z0-9]{3}/;
     function externalUrl(kind, id) {
       if (kind === "nct") {
-        const m = /NCT\d{8}/.exec(id);
-        return m ? "https://clinicaltrials.gov/study/" + m[0] : null;
+        const m = NCT_RE.exec(id);
+        return m ? `https://clinicaltrials.gov/study/${m[0]}` : null;
       }
       if (kind === "doi") {
-        const m = /10\.\d{4,9}\/\S+/.exec(id);
-        return m ? "https://doi.org/" + m[0] : null;
+        const m = DOI_RE.exec(id);
+        return m ? `https://doi.org/${m[0]}` : null;
       }
       if (kind === "structure") {
-        const m = /[0-9][A-Za-z0-9]{3}/.exec(id);
-        return m ? "https://www.rcsb.org/structure/" + m[0] : null;
+        const m = PDB_RE.exec(id);
+        return m ? `https://www.rcsb.org/structure/${m[0]}` : null;
       }
       // price_observation and synthetic ids are internal to a fixture. There
       // is nothing to click, and pretending otherwise would be the exact
@@ -606,7 +609,7 @@
       } else {
         text = String(value);
       }
-      return unit ? text + " " + unit : text;
+      return unit ? `${text} ${unit}` : text;
     }
 
     // --- SECTION: "WHAT WENT IN" ----------------------------------------
@@ -614,7 +617,7 @@
       const s = el("section", "block");
       s.append(el("h3", null, "What went in"));
       s.append(el("p", "plain", env.inputs.humanSummary));
-      s.append(el("p", "muted", "Source: " + env.inputs.source));
+      s.append(el("p", "muted", `Source: ${env.inputs.source}`));
       s.append(
         el(
           "p",
@@ -647,7 +650,7 @@
       for (const [kind, rows] of byKind) {
         const group = el("div", "srcgroup");
         group.append(
-          el("h4", null, (KIND_LABEL[kind] || kind) + " (" + rows.length + ")")
+          el("h4", null, `${KIND_LABEL[kind] || kind} (${rows.length})`)
         );
         const list = el("ul", "ids");
         for (const row of rows) {
@@ -705,7 +708,7 @@
         const row = el("div", "flag");
         row.append(el("span", "tag", flag.label));
         const txt = el("div", "txt");
-        txt.append(el("div", "scope", "Applies to: " + flag.scope));
+        txt.append(el("div", "scope", `Applies to: ${flag.scope}`));
         txt.append(el("div", "detail", flag.detail));
         row.append(txt);
         box.append(row);
@@ -720,9 +723,9 @@
       s.append(el("h3", null, "What was passed on"));
       const box = el("div", "handoff");
       if (env.handoff) {
-        box.append(el("div", "to", "Next step: " + env.handoff.toNode));
+        box.append(el("div", "to", `Next step: ${env.handoff.toNode}`));
         box.append(el("p", "plain", env.handoff.payloadSummary));
-        box.append(el("p", "muted", "Translated by: " + env.handoff.adapter));
+        box.append(el("p", "muted", `Translated by: ${env.handoff.adapter}`));
       } else {
         box.append(el("div", "to", "Terminal step"));
         box.append(
@@ -756,7 +759,7 @@
       head.append(el("span", "idx", String(index + 1)));
       head.append(el("span", "name", env.node));
       head.append(
-        el("span", "pill" + (env.status === "ok" ? "" : " bad"), env.status)
+        el("span", `pill${env.status === "ok" ? "" : " bad"}`, env.status)
       );
       const meta = el(
         "span",
@@ -780,7 +783,7 @@
       const run = el("section", "block");
       run.append(el("h3", null, "How this step was run"));
       run.append(el("p", "muted", env.version.runner));
-      run.append(el("p", "muted", "Started at " + env.startedAt));
+      run.append(el("p", "muted", `Started at ${env.startedAt}`));
       panel.append(run);
       return panel;
     }
@@ -789,14 +792,14 @@
     function renderRail(trace, mount) {
       trace.envelopes.forEach((env, i) => {
         const box = el("div", "rail-node");
-        box.append(el("div", "kicker", "Step " + (i + 1)));
+        box.append(el("div", "kicker", `Step ${i + 1}`));
         box.append(el("div", "n", env.node));
         box.append(
           el(
             "div",
             "muted",
             env.handoff
-              ? "hands on: " + env.handoff.toNode
+              ? `hands on: ${env.handoff.toNode}`
               : "terminal — nothing handed on"
           )
         );
@@ -809,16 +812,16 @@
 
     // --- Run metadata strip ----------------------------------------------
     function renderRunMeta(trace, mount) {
-      const first = trace.envelopes[0];
+      const [first] = trace.envelopes;
       const rows = [
         ["Thesis fixture", trace.run.fixtureId],
         ["Generated", trace.generatedAt],
         ["Commit", first ? first.version.commit : "unknown"],
         [
           "Economics seed",
-          trace.run.seed + " / " + trace.run.simulations + " draws",
+          `${trace.run.seed} / ${trace.run.simulations} draws`,
         ],
-        ["Planned enrolment window", trace.run.plannedMonths + " months"],
+        ["Planned enrolment window", `${trace.run.plannedMonths} months`],
         ["Chain status", trace.verdict.status],
       ];
       for (const [label, value] of rows) {
@@ -844,7 +847,7 @@
       const list = el("ol", "ancestry");
       for (const step of trace.verdict.ancestry) {
         const li = el("li");
-        li.append(el("div", "who", step.node + " — " + step.status));
+        li.append(el("div", "who", `${step.node} — ${step.status}`));
         li.append(el("div", null, step.summary));
         list.append(li);
       }
@@ -862,7 +865,7 @@
         const row = el("div", "flag");
         row.append(el("span", "tag", flag.label));
         const txt = el("div", "txt");
-        txt.append(el("div", "scope", "Applies to: " + flag.scope));
+        txt.append(el("div", "scope", `Applies to: ${flag.scope}`));
         txt.append(el("div", "detail", flag.detail));
         row.append(txt);
         box.append(row);
@@ -877,10 +880,10 @@
       let trace;
       try {
         trace = JSON.parse(raw);
-      } catch (err) {
+      } catch {
         trace = null;
       }
-      if (!(trace && trace.envelopes) || trace.envelopes.length === 0) {
+      if (!trace?.envelopes || trace.envelopes.length === 0) {
         // An empty page is better than an invented one.
         const warn = el("div", "fallback");
         warn.append(
