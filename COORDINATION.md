@@ -373,3 +373,5 @@ envelope alongside each IndicationThesis — dataSources = the papers/graph ids
 the hypothesis came from. WHY: the chain's FIRST link is otherwise invisible.
 ACCEPTANCE: a thesis arrives with its envelope; trace-demo prepends it.
 EFFORT: S (once the node exists).
+
+- **2026-08-16 00:57 UTC** — merged `pipeline-observatory` (MERGED) — glassbox: lint pass (templates, optional chain, catch binding) · glassbox: biome formatting pass · glassbox: DESIGN.md (envelope spec, instrumentation gaps, runbook) + COORDINATION par10 assignments · glassbox: trace envelope demo + non-CS observatory page (real run artifact included) — typecheck+check green.
