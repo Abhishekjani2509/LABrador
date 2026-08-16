@@ -629,3 +629,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 03:13 UTC** — merged `rafwiewiora/druggability-dossier` (97c26dd, tier-2: rename-location on graph-viewer.html) — typecheck+check green.
 
 - **2026-08-16 03:15 UTC** — merged `abhishek-jani` (MERGED) — thesis-bridge: hyp_gen slate -> IndicationThesis, on the real IRAK4/RA graph — typecheck+check green.
+
+- **2026-08-16 03:16 UTC** — merged `AbrehamT/Hypothesis_Generator` (MERGED) — Render a slate in four modes: prose, table, trace, full — typecheck+check green.
