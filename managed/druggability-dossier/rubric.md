@@ -24,8 +24,10 @@ python3 .claude/skills/assemble-dossier/validate_dossier.py \
         /mnt/session/outputs/druggability-dossier.json
 ```
 
-It carries **16 rule functions emitting 17 violation codes**, and it is covered
-by 86 unit tests in `test_validate_dossier.py` beside it. It exits **0** with no
+It carries **17 rule functions emitting 18 violation codes**, and it is covered
+by the unit-test suite in `test_validate_dossier.py` beside it — run
+`python3 -m unittest test_validate_dossier` for the current count rather than
+trusting a number written here, which has now gone stale twice. It exits **0** with no
 violations, **1** with them, and **2** if invoked with no argument; on violations
 it prints one `  [CODE] path: message` line per finding, sorted.
 
@@ -37,12 +39,35 @@ ones the validator does not cover; they are still decided from the file.
 Where this rubric and the validator could ever disagree, **the validator wins**
 and this document is the stale one. It is the machine grader; this is its index.
 
+**Known gap in this index, measured 2026-08-15.** The validator emits **18**
+codes; the list below enumerates **17**. The one with no entry here is
+**`INTERFACE_MIXED_UNRESOLVED`** (rule function
+`check_mixed_interface_is_resolvable`, registry position 12 — it sorts between
+criteria 12 and 13 below). It fires when
+`tractability.pocket_vs_interface.classification` is `mixed` without the four
+things that make `mixed` actionable: at least two distinct values in
+`classifications_seen`, per-copy values in `pocket_interface_overlap` rather
+than one scalar, a `partner_pdb_id`, and `matches_mechanism_hypothesis` not set
+to `true` — plus the converse, `classifications_seen` naming two labels while
+`classification` reports just one of them. It is **enforced** by the validator
+and merely unnumbered here, so a clean exit still covers it; grade it from the
+validator's output. Renumbering the list is left to whoever owns the criteria
+sequence, since it shifts criteria 13–17 and the 18–21 block below.
+
 ## Criteria 1–17 — exactly the validator's rules
 
 Listed in the validator's own registry order, with the trigger that fails them.
 
 1. **`WELL_FORMED` — the file parses and the template is filled.** A JSON object;
-   all 16 required top-level keys present; every enumerated field
+   all 16 required top-level keys present — the output template now carries a
+   **17th top-level key, `input`**, echoing the five contract fields so a
+   consumer can key a cache on
+   `(input.uniprot_accession, input.mechanism_hypothesis, input.as_of_date)`,
+   but `REQUIRED_TOP_LEVEL` does **not** list it, so a dossier that omits the
+   block still passes this criterion today (verified 2026-08-15: the validator
+   contains no reference to `input` at all). Treat a missing `input` block as a
+   validator gap to be fixed in `validate_dossier.py`, not as a passing
+   dossier; every enumerated field
    (`verdict`, `verdict_basis`, `structure.tier`,
    `tractability.cryptic_pocket_risk`, `tractability.cryptic_mechanism`,
    `cryptic_potency_prior.expected_ceiling`,

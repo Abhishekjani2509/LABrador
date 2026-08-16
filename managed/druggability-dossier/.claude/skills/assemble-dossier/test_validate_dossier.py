@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -452,6 +453,67 @@ class TestSameSiteBasis(unittest.TestCase):
         d["tractability"]["pocket_volume_a3"].update({"min": 141.0, "max": 198.8})
         v = [x for x in validate_dossier(d) if x.rule == "SITE_INCONSISTENT"]
         self.assertTrue(any("different pocket" in x.message for x in v), v)
+
+    def test_a_misspelt_site_definition_cannot_silently_disable_rule_4b(self):
+        """FAILS AGAINST THE PRE-CHANGE VALIDATOR, and this one is a dead guard.
+
+        The template offers `mdpocket_site_definition_used` as a three-value
+        enum, and `check_site_consistency` reads it with an exact
+        `== "site_from_density"`. It was in no `ENUMS` entry, so any other
+        string passed — and the rule 4b off-site check, the one that exists
+        because `site_from_density`'s centroid sat 29.57 A from the TNF ligand,
+        simply stopped running. Silently, with the geometry still reported.
+
+        Same shape as the `isinstance(ev, dict)` guards this file already
+        documents: the code reads as if it is doing something.
+        """
+        d = broken(TNF)
+        d["tractability"]["mdpocket_site_definition_used"] = "density"
+        d["tractability"]["pocket_volume_a3"].update({"min": 141.0, "max": 198.8})
+        v = validate_dossier(d)
+        self.assertIn(
+            "WELL_FORMED",
+            rules(v),
+            "a value outside the template's own enum was accepted",
+        )
+        self.assertTrue(
+            any(
+                x.path == "tractability.mdpocket_site_definition_used"
+                for x in v
+                if x.rule == "WELL_FORMED"
+            ),
+            f"the misspelling was not named: {v}",
+        )
+
+    def test_every_pipe_enum_in_the_template_is_enum_checked(self):
+        """The general form, so a NEW unchecked enum cannot appear either.
+
+        A pipe-separated placeholder in the template is a promise that only
+        those values are legal. If the validator has no `ENUMS` entry for it,
+        the promise is unenforced and any rule keying on an exact string is a
+        dead guard waiting to happen.
+        """
+        from test_template_drift import load_template
+
+        import validate_dossier as m
+
+        def pipe_paths(node, path=""):
+            if isinstance(node, dict):
+                for k, val in node.items():
+                    yield from pipe_paths(val, f"{path}.{k}" if path else str(k))
+            elif isinstance(node, list):
+                for val in node:
+                    yield from pipe_paths(val, path)
+            elif isinstance(node, str) and " | " in node and not path.rsplit(".", 1)[-1].startswith("_"):
+                yield path
+
+        unchecked = sorted(p for p in pipe_paths(load_template()) if p not in m.ENUMS)
+        self.assertEqual(
+            unchecked,
+            [],
+            "the template advertises these as enums and the validator does not "
+            f"check them: {unchecked}",
+        )
 
     def test_on_site_density_geometry_is_fine(self):
         """JAK1's two site definitions agree at 1.86 A, well inside the threshold."""
@@ -902,6 +964,47 @@ class TestWellFormed(unittest.TestCase):
         d["verdict"] = 0.82
         self.assertIn("WELL_FORMED", rules(validate_dossier(d)))
 
+    def test_the_input_echo_block_is_required(self):
+        """FAILS AGAINST THE PRE-CHANGE VALIDATOR — `input` was template-only.
+
+        A downstream team was told to key a cache on
+        (accession, mechanism_hypothesis, as_of_date) and none of the three
+        survived into the output, so the promise was unsupportable. The template
+        grew a top-level `input` block echoing all five contract fields and the
+        validator did not notice, which meant the block was documented and not
+        enforced — a dossier could omit it entirely and pass.
+        """
+        d = broken(JAK1)
+        del d["input"]
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "WELL_FORMED" and x.path == "input"
+        ]
+        self.assertTrue(v, "the input echo block is not enforced")
+
+    def test_both_examples_carry_the_input_echo(self):
+        """And it echoes the request, so it is not the resolved accession.
+
+        `input.uniprot_accession` is what the caller said;
+        `target.uniprot_accession` is what it resolved to. They coincide on both
+        worked examples because both were invoked with an accession — that is a
+        fact about these two runs, not an invariant.
+        """
+        for name, d in (("JAK1", JAK1), ("TNF", TNF)):
+            with self.subTest(dossier=name):
+                self.assertIn("input", d)
+                for field in (
+                    "uniprot_accession",
+                    "as_of_date",
+                    "disease_context",
+                    "interaction_to_disrupt",
+                    "mechanism_hypothesis",
+                ):
+                    self.assertIn(field, d["input"])
+                # The top-level as_of_date stays authoritative; the echo agrees.
+                self.assertEqual(d["input"]["as_of_date"], d["as_of_date"])
+
 
 # ---------------------------------------------------------------------------
 # The fixtures, run as data
@@ -1284,6 +1387,53 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
             m.NEGATIVE_VERDICTS, {"not_tractable", "insufficient_evidence"}
         )
 
+    def test_the_rule_inventory_is_pinned(self):
+        """SKILL.md quotes these two counts. Pin them so the prose cannot lie.
+
+        This is the `rubric.md` "86 unit tests" failure generalised: a count
+        written into prose goes stale silently, because nothing reads prose. The
+        cheap fix is not to stop quoting counts, it is to assert them — a
+        maintainer who adds a rule then gets a failure naming the sentence to
+        update.
+        """
+        import validate_dossier as m
+
+        self.assertEqual(len(m.RULES), 17, "SKILL.md says seventeen rule functions")
+        types = {
+            "ASSAY_PROVENANCE_MISSING", "AS_OF_LEAKAGE", "AXES_AVERAGED",
+            "AXIS_CONFLICT_UNDECLARED", "CRYPTIC_MISCLAIM",
+            "DRUGGABILITY_LOAD_BEARING", "DRUGGABILITY_POINT_ESTIMATE",
+            "FRACTION_WITHOUT_N", "INSUFFICIENT_EVIDENCE_AVOIDED",
+            "INTERFACE_MIXED_UNRESOLVED", "MODALITY_LEAK", "NULL_IS_NOT_ZERO",
+            "NUMBER_WITHOUT_PROVENANCE", "SAME_SITE_BASIS_INVALID",
+            "SAME_SITE_BASIS_MISSING", "SITE_INCONSISTENT", "VOLUME_NOT_PRIMARY",
+            "WELL_FORMED",
+        }
+        self.assertEqual(len(types), 18, "SKILL.md says eighteen violation types")
+        src = Path(m.__file__).read_text(encoding="utf-8")
+        emitted = set(re.findall(r'Violation\(\s*"([A-Z_]+)"', src))
+        self.assertEqual(emitted, types, "the violation-type inventory moved")
+
+    def test_the_interface_vocabulary_matches_the_tool(self):
+        """The validator's enum must not be shorter than what pocket-scan emits.
+
+        `modal_app.py`'s aggregation step emits `mixed` and
+        `no_pocket_to_classify` alongside the four `classify_pocket` labels. An
+        enum missing any of them forces a real value to be laundered through
+        `not_found`, which is what happened to `mixed`.
+        """
+        import validate_dossier as m
+
+        self.assertEqual(
+            m.ENUMS["tractability.pocket_vs_interface.classification"],
+            m.INTERFACE_CLASSES,
+        )
+        self.assertTrue(m.SUBSTANTIVE_INTERFACE_CLASSES < m.INTERFACE_CLASSES)
+        # `mixed` is NOT substantive: it does not name one mechanism, so the
+        # substantive-class clauses in `check_site_consistency` must not claim
+        # it. `check_mixed_interface_is_resolvable` owns it instead.
+        self.assertNotIn("mixed", m.SUBSTANTIVE_INTERFACE_CLASSES)
+
     def test_the_volume_guide_does_not_classify(self):
         """Rule 4a: it is a proposal and gates nothing.
 
@@ -1561,6 +1711,122 @@ class TestMixedInterfaceClassification(unittest.TestCase):
                 self.assertNotIn(
                     "INTERFACE_MIXED_UNRESOLVED", rules(validate_dossier(d))
                 )
+
+    def test_numbering_mismatch_is_legal_too(self):
+        """FAILS PRE-CHANGE. The vocabulary fix stopped one value short.
+
+        `modal_app` emits a SEVENTH consensus value for the case where every
+        classification on a structure was excluded:
+        `numbering_mismatch_not_interpretable`. Admitting `mixed` and
+        `no_pocket_to_classify` and not this one leaves the same laundering
+        pressure on a rarer path — and it is an abstention, so it demands
+        nothing.
+        """
+        d = broken(JAK1)
+        d["tractability"]["pocket_vs_interface"]["classification"] = (
+            "numbering_mismatch_not_interpretable"
+        )
+        v = validate_dossier(d)
+        self.assertNotIn("WELL_FORMED", rules(v), msg=str(v))
+        self.assertNotIn("INTERFACE_MIXED_UNRESOLVED", rules(v), msg=str(v))
+
+
+class TestSelectionBasisVocabulary(unittest.TestCase):
+    """The site-selection vocabulary must match the tool's, all six of it."""
+
+    def test_no_pocket_overlapped_ligand_site_is_a_real_basis(self):
+        """FAILS PRE-CHANGE. `modal_app.py:4390` emits it; the enum had five.
+
+        It fires when a holo ligand site exists and NO pocket touches it at that
+        clustering value — which is the exact false-negative rule 4 was written
+        around (TNF-alpha 0.002 at D=1.6 on a co-crystallised 570 Da ligand,
+        because the cluster fell below fpocket's `-i 15` floor and was discarded
+        silently). Rejecting the basis forces that case to be laundered.
+        """
+        d = with_druggability_range(JAK1)
+        for block in ("pocket_volume_a3", "pocket_druggability"):
+            d["tractability"][block]["site_pocket_selected_by"] = [
+                "no_pocket_overlapped_ligand_site"
+            ]
+        v = [x for x in validate_dossier(d) if x.rule == "SAME_SITE_BASIS_MISSING"]
+        self.assertFalse(v, f"a real pocket_scan basis was rejected: {v}")
+
+    def test_it_does_not_identify_a_site_so_it_may_not_be_pooled(self):
+        """And it is the strongest case of that: no pocket found the site.
+
+        Legal to report is not the same as legal to pool. This basis means the
+        measurement is anchored to nothing at all, so pooling several of them
+        into one spread compares different pockets — the same defect as
+        `max_druggability_no_ligand_site`, one degree worse.
+        """
+        d = with_druggability_range(JAK1)
+        d["tractability"]["pocket_druggability"]["site_pocket_selected_by"] = [
+            "no_pocket_overlapped_ligand_site"
+        ]
+        v = [x for x in validate_dossier(d) if x.rule == "SAME_SITE_BASIS_INVALID"]
+        self.assertTrue(v, "an unanchored basis was pooled across 4 measurements")
+        self.assertIn("must not be pooled", v[0].message)
+
+    def test_four_of_the_six_bases_do_not_identify_a_site(self):
+        """Pinned, because four artifacts quoted this count and three were wrong.
+
+        `assemble-dossier/SKILL.md` said "two of its five possible values"; the
+        validator's own comment said "The two forbidden ones" above a
+        three-element set; CLAUDE.md and rubric.md said "three of those five".
+        The set was five-of-which-three and is now six-of-which-four, and this
+        assertion is what stops the next miscount propagating silently.
+        """
+        import validate_dossier as m
+
+        self.assertEqual(len(m.SELECTION_BASES), 6)
+        self.assertEqual(len(m.NOT_A_SAME_SITE_BASIS), 4)
+        self.assertTrue(m.NOT_A_SAME_SITE_BASIS < m.SELECTION_BASES)
+
+
+class TestModalityIsAlwaysCarried(unittest.TestCase):
+    def test_a_small_molecule_entry_with_no_modality_is_caught(self):
+        """FAILS PRE-CHANGE. `mod is not None and mod != ...` let null through.
+
+        rubric.md says every entry in these two blocks *carries*
+        `modality: "small_molecule"`, and the validator only objected to a WRONG
+        value, never a missing one. This is the single field where a silent
+        omission is the exact failure the dossier exists to prevent: the whole
+        point of rule 1 is that modality was READ per drug, and an absent field
+        is indistinguishable from never having looked.
+        """
+        d = broken(JAK1)
+        d["target_precedent"]["approved_small_molecules"][0].pop("modality", None)
+        v = [x for x in validate_dossier(d) if x.rule == "MODALITY_LEAK"]
+        self.assertTrue(v, "a small-molecule entry with no modality passed")
+        self.assertTrue(any("was never read" in x.message for x in v), v)
+
+    def test_a_null_modality_is_caught_too(self):
+        d = broken(JAK1)
+        d["target_precedent"]["approved_small_molecules"][0]["modality"] = None
+        self.assertIn("MODALITY_LEAK", rules(validate_dossier(d)))
+
+    def test_the_usan_stem_constant_is_the_one_actually_used(self):
+        """`BIOLOGIC_NAME_STEMS` was dead, and its contents were wrong.
+
+        It carried `"nib-cept"`, which is not a USAN stem and could never match
+        the `endswith` test the rule actually ran. A constant nothing reads is a
+        constant nobody can argue with, which is the opposite of why the
+        thresholds in this module are named.
+        """
+        import validate_dossier as m
+
+        self.assertEqual(m.BIOLOGIC_NAME_STEMS, ("mab", "cept"))
+        d = broken(JAK1)
+        d["target_precedent"]["approved_small_molecules"].append(
+            {
+                "name": "etanercept",
+                "year": 1998,
+                "modality": "small_molecule",
+                "source": "chembl_v.drugs_by_accession",
+            }
+        )
+        v = [x for x in validate_dossier(d) if x.rule == "MODALITY_LEAK"]
+        self.assertTrue(any("USAN stem" in x.message for x in v))
 
 
 if __name__ == "__main__":

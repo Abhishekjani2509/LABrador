@@ -1,6 +1,14 @@
 {
   "_example": "TNF-alpha (P01375), measured end-to-end. Two things at once. (1) The axis_conflict worked example: zero approved small molecules against five approved biologics, and an oral small molecule in phase 2 anyway. (2) The REFUSAL worked example, and this is now the more instructive half. A full six-entry pocket run completed successfully and produced a volume range, a druggability range and a fold-range — and none of it is in the dossier body, because 10 of the 12 measurements were selected by site_signature_unreliable_homooligomer, a basis that by construction cannot tell one protomer's site from another's on a C3-symmetric trimer. Pooling them anyway yields a druggability fold-range of exactly 651.0, which is the withdrawn '651-fold spread' reappearing from the same cause. The tool did not fail; it reported honestly that it could not identify the site, and the dossier is obliged to stop there. Compare jak1_P23458.json, where the same tool on the same day returned 4 of 4 by ligand_site_jaccard and the numbers ARE reported.",
   "_retrieved": "2026-08-15",
+  "input": {
+    "_note": "Verbatim echo of the request, never inferred and never back-filled. This run was invoked with the accession only; every other contract field was absent and is null here because it was not supplied, not because it could not be retrieved. `target.uniprot_accession` is the RESOLVED accession; this one is what the caller said.",
+    "uniprot_accession": "P01375",
+    "as_of_date": null,
+    "disease_context": null,
+    "interaction_to_disrupt": null,
+    "mechanism_hypothesis": null
+  },
   "target": {
     "uniprot_accession": "P01375",
     "gene_symbol": "TNF",
