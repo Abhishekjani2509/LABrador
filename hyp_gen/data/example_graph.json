@@ -38,27 +38,21 @@
       "id": "t1",
       "name": "pirfenidone",
       "kind": "small_molecule",
-      "aliases": [
-        "Esbriet"
-      ],
+      "aliases": ["Esbriet"],
       "mentions": 14
     },
     {
       "id": "t2",
       "name": "nintedanib",
       "kind": "small_molecule",
-      "aliases": [
-        "BIBF 1120"
-      ],
+      "aliases": ["BIBF 1120"],
       "mentions": 12
     },
     {
       "id": "t3",
       "name": "TGF-beta1",
       "kind": "protein",
-      "aliases": [
-        "TGFB1"
-      ],
+      "aliases": ["TGFB1"],
       "mentions": 19
     },
     {
@@ -72,18 +66,14 @@
       "id": "t5",
       "name": "idiopathic pulmonary fibrosis",
       "kind": "disease",
-      "aliases": [
-        "IPF"
-      ],
+      "aliases": ["IPF"],
       "mentions": 21
     },
     {
       "id": "t6",
       "name": "PDGFR",
       "kind": "protein",
-      "aliases": [
-        "PDGF receptor"
-      ],
+      "aliases": ["PDGF receptor"],
       "mentions": 9
     },
     {
@@ -111,18 +101,14 @@
       "id": "t10",
       "name": "precision-cut lung slice",
       "kind": "method",
-      "aliases": [
-        "PCLS"
-      ],
+      "aliases": ["PCLS"],
       "mentions": 6
     },
     {
       "id": "t11",
       "name": "systemic sclerosis ILD",
       "kind": "disease",
-      "aliases": [
-        "SSc-ILD"
-      ],
+      "aliases": ["SSc-ILD"],
       "mentions": 5
     },
     {
@@ -530,10 +516,7 @@
       "from": "t1",
       "how": "inhibits",
       "to": "t3",
-      "yes": [
-        "f1",
-        "f13"
-      ],
+      "yes": ["f1", "f13"],
       "no": [],
       "no_effect": [],
       "state": "agreed",
@@ -553,9 +536,7 @@
       "from": "t2",
       "how": "inhibits",
       "to": "t6",
-      "yes": [
-        "f2"
-      ],
+      "yes": ["f2"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -575,9 +556,7 @@
       "from": "t3",
       "how": "drives",
       "to": "t4",
-      "yes": [
-        "f3"
-      ],
+      "yes": ["f3"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -597,9 +576,7 @@
       "from": "t4",
       "how": "contributes_to",
       "to": "t5",
-      "yes": [
-        "f4"
-      ],
+      "yes": ["f4"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -619,9 +596,7 @@
       "from": "t8",
       "how": "activates",
       "to": "t9",
-      "yes": [
-        "f5"
-      ],
+      "yes": ["f5"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -641,12 +616,8 @@
       "from": "t9",
       "how": "suppresses",
       "to": "t7",
-      "yes": [
-        "f6"
-      ],
-      "no": [
-        "f7"
-      ],
+      "yes": ["f6"],
+      "no": ["f7"],
       "no_effect": [],
       "state": "disagreed",
       "why": "different animal age",
@@ -665,9 +636,7 @@
       "from": "t7",
       "how": "contributes_to",
       "to": "t5",
-      "yes": [
-        "f8"
-      ],
+      "yes": ["f8"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -687,9 +656,7 @@
       "from": "t2",
       "how": "slows",
       "to": "t11",
-      "yes": [
-        "f9"
-      ],
+      "yes": ["f9"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -709,9 +676,7 @@
       "from": "t3",
       "how": "drives",
       "to": "t7",
-      "yes": [
-        "f10"
-      ],
+      "yes": ["f10"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -731,9 +696,7 @@
       "from": "t12",
       "how": "sustains",
       "to": "t3",
-      "yes": [
-        "f11"
-      ],
+      "yes": ["f11"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -753,9 +716,7 @@
       "from": "t10",
       "how": "measures",
       "to": "t4",
-      "yes": [
-        "f12"
-      ],
+      "yes": ["f12"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -775,9 +736,7 @@
       "from": "t12",
       "how": "contributes_to",
       "to": "t5",
-      "yes": [
-        "f14"
-      ],
+      "yes": ["f14"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -797,9 +756,7 @@
       "from": "t2",
       "how": "inhibits",
       "to": "t3",
-      "yes": [
-        "f15"
-      ],
+      "yes": ["f15"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -819,9 +776,7 @@
       "from": "t1",
       "how": "inhibits",
       "to": "t4",
-      "yes": [
-        "f16"
-      ],
+      "yes": ["f16"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -841,9 +796,7 @@
       "from": "t2",
       "how": "inhibits",
       "to": "t4",
-      "yes": [
-        "f17"
-      ],
+      "yes": ["f17"],
       "no": [],
       "no_effect": [],
       "state": "single_source",
@@ -862,29 +815,16 @@
   "gaps": [
     {
       "id": "g1",
-      "missing": [
-        "t8",
-        "t5"
-      ],
-      "implied_by": [
-        "L5",
-        "L6",
-        "L7"
-      ],
+      "missing": ["t8", "t5"],
+      "implied_by": ["L5", "L6", "L7"],
       "note": "nobody states metformin affects IPF directly",
       "confidence": 0.38,
       "searched_in_round": null
     },
     {
       "id": "g2",
-      "missing": [
-        "t1",
-        "t11"
-      ],
-      "implied_by": [
-        "L1",
-        "L8"
-      ],
+      "missing": ["t1", "t11"],
+      "implied_by": ["L1", "L8"],
       "note": "pirfenidone is never linked to SSc-ILD despite the shared antifibrotic target",
       "confidence": 0.31,
       "searched_in_round": 2
