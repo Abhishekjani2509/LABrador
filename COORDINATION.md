@@ -69,12 +69,13 @@ are dead — do not create files under them.
   tractability) and nominates UniProt targets from it; handles `no_effect`,
   `hedged_only`, failed-graph status, and gene-vs-protein kinds.
 
-**Soliman — research-evidence-mapper** *(implementation landed 2026-08-15 late)*
+**Soliman — research-evidence-mapper** *(DEPLOYED 2026-08-15 late — second live Managed Agent, first product one)*
 - SCHEMA.md / CONTRACT.md / BUILD.md design packet, now plus: agent
   CLAUDE.md, three skills (literature-search, claim-extraction,
   graph-assembly with deterministic assemble.py), and first run artifacts
-  (`runs/g_1a4f`). Not yet re-reviewed against BUILD.md's verification
-  criteria — owner to update this row.
+  (`runs/g_1a4f`). Deployed: manifest + acl + eve wrapper landed, plus a
+  shared-runtime MCP fail-fast watchdog (surfaces never-reached-tools in
+  minutes instead of after the timeout budget).
 
 **Moamen — sandbox-capability-probe** *(done — throwaway, served its purpose)*
 - The only deployed Managed Agent. Proved: bundled scripts execute in the
