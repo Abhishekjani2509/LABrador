@@ -435,10 +435,6 @@ class UniProtVerifier:
 # promotion to dossier inputs
 # ---------------------------------------------------------------------------
 
-def norm_text(text):
-    return " " + NON_WORD.sub(" ", (text or "").lower()).strip() + " "
-
-
 def symbol_in(text, symbol):
     """Symbol present in a quote, hyphen- and case-insensitively."""
     flat = NON_WORD.sub("", (text or "").lower())
