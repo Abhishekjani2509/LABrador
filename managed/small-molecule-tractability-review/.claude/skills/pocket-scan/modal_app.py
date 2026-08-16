@@ -2862,14 +2862,13 @@ def _buried_core_flag(
             if hit
             else None
         ),
+        # THE MEASURED VALUES ONLY. The cut points and their PROPOSED/NOT
+        # CALIBRATED status are constants and used to be re-emitted inside every
+        # classified pocket — ~500 characters x every pocket x every clustering
+        # value x every structure, which is a payload cap spent on repeating
+        # three numbers. They are stated once, at
+        # `pocket_vs_interface._buried_core_thresholds`.
         "buried_core_criteria": {
-            "_status": "PROPOSED, NOT CALIBRATED — from a single observed case "
-                       "(IRAK4 death domain, druggability 0.890 at rank 1 of 134, "
-                       "enclosure 0.998, gain 0.020). Do not present these cut "
-                       "points as measured. They gate a flag, never a filter.",
-            "enclosure_min": BURIED_CORE_ENCLOSURE_MIN,
-            "subunit_enclosure_gain_max": BURIED_CORE_SUBUNIT_GAIN_MAX,
-            "apolar_lining_fraction_min": BURIED_CORE_APOLAR_FRACTION_MIN,
             "enclosure": enclosure,
             "subunit_enclosure_gain": subunit_gain,
             "apolar_lining_fraction": apolar_fraction,
@@ -2878,6 +2877,17 @@ def _buried_core_flag(
             "hydrophobic_lining": greasy,
         },
     }
+
+
+BURIED_CORE_THRESHOLDS_NOTE = {
+    "_status": "PROPOSED, NOT CALIBRATED — from a single observed case (IRAK4 "
+               "death domain, druggability 0.890 at rank 1 of 134, enclosure "
+               "0.998, gain 0.020). Do not present these cut points as "
+               "measured. They gate a flag, never a filter.",
+    "enclosure_min": BURIED_CORE_ENCLOSURE_MIN,
+    "subunit_enclosure_gain_max": BURIED_CORE_SUBUNIT_GAIN_MAX,
+    "apolar_lining_fraction_min": BURIED_CORE_APOLAR_FRACTION_MIN,
+}
 
 
 # Below this fraction of residue-name agreement, two entries are not on a common
@@ -3083,17 +3093,12 @@ def _classify_site_pocket(
             "before_offset": raw_agree,
             "min_compared_to_apply": NUMBERING_MIN_COMPARED_FOR_OFFSET,
             "note": numbering_note,
-            "_why": (
-                "A constant numbering offset between two depositions of one "
-                "protein is the normal case, not an anomaly — TL1A carries "
-                "three at once (0, +67, +71) and IL-17A carries +23. Recovering "
-                "it is a vote over residue names and costs one pass. Applied "
-                "only when it converts an ILLEGAL comparison into a legal one "
-                "over at least "
-                f"{NUMBERING_MIN_COMPARED_FOR_OFFSET} positions and strictly "
-                "increases the number of name-agreeing positions, so an entry "
-                "already on the partner's numbering is never shifted."
-            ),
+            # `_why` deliberately NOT here. This dict is emitted once per
+            # classified pocket per clustering value per structure, and a ~450
+            # character explanation repeated that many times is how a payload
+            # reaches a size cap and then truncates its own trailing
+            # explanation. It is stated once, at
+            # `pocket_vs_interface._numbering_offset_rule`.
         }
         if numbering_note:
             d["notes"] = list(d.get("notes") or []) + [numbering_note]
@@ -5959,6 +5964,14 @@ def pocket_scan(
                     # record carrying every external label that applies, rather
                     # than having to join two blocks by rank to find out
                     # whether a pocket is anchored on anything at all.
+                    # `thresholds` is a block of constants that
+                    # `interface_analysis.classify_pocket` returns on EVERY
+                    # pocket. Hoisted once, popped everywhere else — same
+                    # reasoning as the buried-core cut points.
+                    for _c in by_rank.values():
+                        th = _c.pop("thresholds", None)
+                        if th and "_classification_thresholds" not in interface_out:
+                            interface_out["_classification_thresholds"] = th
                     blk = (results[pid].get("by_clustering") or {}).get(dkey) or {}
                     for row in blk.get("pocket_table") or []:
                         c = by_rank.get(str(row.get("rank")))
@@ -6055,7 +6068,31 @@ def pocket_scan(
                         ),
                     }
             interface_out["per_structure"] = per_struct
-            interface_out["per_structure_by_fpocket_rank"] = per_struct_by_rank
+            # NOT `per_struct_by_rank` — that is the SAME object already
+            # serialised inside every structure, and emitting it twice was the
+            # single largest line item in the payload: 156,009 characters of a
+            # 529,048-character IL-13 run, against a consumer cap of 180,000.
+            # A duplicate is not a second measurement.
+            interface_out["per_structure_by_fpocket_rank"] = (
+                "MOVED, NOT REMOVED: read "
+                "structures.<PDB>.pocket_vs_interface.<D>.by_fpocket_rank, "
+                "which is the identical content. It was duplicated here and "
+                "cost ~156 kB on a two-structure run."
+            )
+            interface_out["_buried_core_thresholds"] = BURIED_CORE_THRESHOLDS_NOTE
+            interface_out["_numbering_offset_rule"] = (
+                "A constant numbering offset between two depositions of one "
+                "protein is the normal case, not an anomaly — TL1A carries "
+                "three at once (0, +67, +71) and IL-17A carries +23. Recovering "
+                "it is a vote over residue names and costs one pass. It is "
+                "APPLIED only when it converts an illegal comparison into a "
+                "legal one over at least "
+                f"{NUMBERING_MIN_COMPARED_FOR_OFFSET} shared positions AND "
+                "strictly increases the number of name-agreeing positions, so "
+                "an entry already on the partner's numbering is never shifted. "
+                "Per-pocket values are in "
+                "pocket_vs_interface.<D>.numbering_offset_to_partner."
+            )
             # AGGREGATE, NEVER FIRST-WINS. Two symmetry copies of one ligand in
             # one structure can land either side of the overlap boundary:
             # measured on 8DYG ligand U5Q, copy A classified
