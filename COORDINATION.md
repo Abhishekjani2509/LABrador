@@ -162,14 +162,29 @@ are dead — do not create files under them.
 - [x] Implementation drop, deploy, router wrapper, `acl.ts` (`{public: true}`),
       manifest. Agent live and verified end to end.
 - [x] Committed session id in CONTRACT.md — scrubbed 2026-08-16.
-- [ ] **`fixtures/` still missing** (BUILD.md step 1). One question each:
-      well-studied, sparse, genuinely disputed. The well-studied candidate is
-      validated (EGFR mutations → TKI response, >=2000 corpus papers, six
-      first authors on five continents); the other two are not written.
-- [ ] **`expand_node` and `resolve_link` have never executed.** Only
-      `new_question` and `test_gap` have run. `resolve_link` is the likeliest
-      to break first — it is the ask that biases queries toward the
-      under-represented side AND reads figures, and neither path has run.
+- [x] **`fixtures/` written** — three questions, each corpus-validated and
+      each grading something specific: EGFR/TKI (`deep`, dense consensus),
+      antioxidants-and-metastasis (`standard`, real conflict where one paper
+      challenges the other in its own text), microbiome-and-FOP (`deep`, one
+      primary study appearing as three corpus records). See fixtures/README.md.
+- [x] **`resolve_link` verified in production** (g_5cb6 round 2): prior state
+      loaded from memory, `rounds[]` records both asks, a new link stamped
+      `changed_in_round: 2`, raw-JSON contract held, duplicates 0.
+- [ ] **`expand_node` still never executed** — last unexercised ask type.
+- [ ] **The figure path (`ask-image`) has never fired, and the gate may be why.**
+      `resolve_link` is exactly where policy permits figures, yet the run made
+      21 MCP calls and zero `ask-image` calls. CLAUDE.md only permits a figure
+      read "for a paper that already gave you a finding from its text", and
+      with `used: 1` there was barely a candidate. Either loosen the gate or
+      the capability is dead code. Deciding this matters because dose and
+      timepoint conditions — the `where` field `explain_disagreement` runs on —
+      are often stated only in figure axes.
+- [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64`,
+      `changed_in_round: 1`; the round added a neighbouring link instead. For
+      an ask whose purpose is "more evidence on this exact relationship", not
+      touching the target is a miss worth investigating.
+- [ ] **Over-fetch / under-extract ratio is widening**: `found: 96, read: 3,
+      used: 1` at `standard`. Search is cheap, extraction is the bottleneck.
 - [ ] **Findings are not idempotent across a retried round.** `main()` appends
       without deduping on id, so a retried round double-counts findings and
       inflates `agreement` and `independence` for every affected link. Real
