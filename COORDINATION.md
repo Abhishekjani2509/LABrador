@@ -222,20 +222,34 @@ are dead — do not create files under them.
 *Done items moved to §3 per §7.6 — this list is open work only.*
 
 - [ ] **`expand_node` has never executed** — the last unexercised ask type.
-- [ ] **The figure path (`ask-image`) has never fired, and the gate is the
-      suspect.** `resolve_link` is exactly where policy permits figures, yet
-      that run made 21 MCP calls and zero `ask-image` calls. `CLAUDE.md` only
-      permits a figure read "for a paper that already gave you a finding from
-      its text", and with `used: 1` there was barely a candidate — so the gate
-      may be written so tightly it never opens. Worth settling because dose and
-      timepoint conditions, the `where` field `explain_disagreement` runs on,
-      are often stated only in figure axes.
+- [x] **Figure path fires, and the gate was the whole cause.** A/B on an
+      identical `resolve_link` request, only the gate changed: v3 made 21 MCP
+      calls and zero `ask-image`; v4 read a figure and produced a
+      `section: "figure_caption"` finding with a verbatim quote —
+      *"Fig. 2 Ad-shIRAK4 alleviated the degree of synovitis in the
+      osteoarthritis rabbit model"* — carrying `where: osteoarthritis rabbit
+      model synovium`, which is exactly the condition data
+      `explain_disagreement` compares. `coverage.figures_read` now reports it.
+      The fix was framing: "read figures on X only, and only for a paper
+      that…" reads as a reason not to; "reading figures is expected, with a
+      budget of 6 per round" reads as an instruction.
 - [ ] **`resolve_link` did not move its target.** L3 stayed `agreed 0.64` at
       `changed_in_round: 1`; the round added a neighbouring link instead. For
       an ask whose whole purpose is "more evidence on this exact relationship",
       leaving the target untouched is a miss.
-- [ ] **Re-measure the call ratio on the next deployed run.** The CLI should
-      shift calls from sandbox to corpus. That is a prediction until measured.
+- [x] **Ratio re-measured — and the prediction was wrong.** v4 round: 16 MCP
+      vs 41 local calls, i.e. local went UP. The CLI *is* used (confirmed in
+      the session trace, not the console stream — the console does not render
+      bash command contents, which cost me a false "CLI unused" reading). The
+      remaining local calls are: re-deriving the input schema by grepping
+      assemble.py, writing a `build.py` to marshal `round.json`, and a dry run
+      against a **copy** of memory before the real `--save`. That last one is
+      the agent protecting live state from a bad write — good judgement, not
+      waste, and worth keeping.
+- [ ] **Ship an `example-round.json` beside assemble.py.** The avoidable part
+      of the overhead is the agent reverse-engineering the bundle schema from
+      source every round; an example to copy removes it. SKILL.md documents the
+      shape already, which was evidently not enough.
 - [ ] **Long-lived Paperclip auth.** `Authorization: Bearer` is proven against
       the MCP; which header it accepts for a **long-lived API key** is still
       untested, and the CLI cannot mint one (`paperclip login` is browser-OAuth
