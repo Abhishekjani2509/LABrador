@@ -293,6 +293,16 @@ Gate 5 is the one that is easy to skip and cheap to check. It is also the only
 gate that can make a *perfectly reasoned* ask worthless, so check it first — it
 costs one field read and it retires the whole question.
 
+**Gate 5's `or coverage.truncated` half is NOT implemented in
+`graph_read.py`.** `LITERATURE_NOT_EXHAUSTED` tests `stop_reason != "complete"`
+and nothing else, so a graph that is `complete` **and** `truncated` fails the
+gate in the script while passing it in this table. That combination is a real
+state — `coverage_notes()` reads `truncated: true` as "this is a sample, not the
+literature" — and it is the one case where the script blocks an ask this rule
+allows. Not fixed here because changing it moves `literature_not_exhausted` and
+`mechanical_gates_clear` for every consumer of `--ask-context`; read the two
+coverage fields yourself when they disagree.
+
 ```bash
 python3 graph_read.py <graph.json> --ask-context
 python3 graph_read.py <graph.json> --check-ask '<ask json>'
@@ -388,6 +398,24 @@ Every ask states four things in `question`:
 Two identifiers is a floor, not a target, and it cannot see whether they sit on
 opposite sides of the dispute. Clearing it is not the same as writing an
 answerable ask.
+
+**And the floor is looser and blinder than it reads.** Measured on the worked
+TL1A ask, which clears it 11 tokens to 2:
+
+- the PDB-code pattern is `[0-9][A-Z0-9]{3}`, which matches **any bare
+  four-digit number**. Seven of that ask's eleven "identifiers" are `1840`,
+  `2049`, `2826`, `1024`, `8863` — buried-surface measurements — plus `2026`,
+  a date. Only five are real PDB ids. Any ask quoting two numbers clears the
+  gate.
+- **UniProt accessions are not recognised at all**, nor is anything lowercase.
+  `Q93038` is the accession the entire DR3 census is keyed on and the single
+  most load-bearing identifier in that ask, and it counts for nothing; so do
+  `O95150` and `O95407`, and so does `3k51` written in lower case.
+
+So the gate admits an ask carrying two measurements and no sources, and can
+refuse one whose evidence is an accession census. It is a syntax check on a
+string. It is not a check that the ask names its sources, and it was never able
+to be.
 
 ### Where a pending ask lives, and why it can never block
 

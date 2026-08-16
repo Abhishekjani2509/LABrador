@@ -278,15 +278,36 @@ domain. The older inclusive 29/21 double-counted it and summed to 54 against a
 real total of 52; it stays rejected. TYK2 also now carries a holo count for the
 first time: **46 holo / 5 apo / 1 undetermined**.
 
-BCL-2 is the one place where **this key is worse than the better answer, and
-that needs saying plainly.** Its 40 is the superseded MW-window value, whose
-1200 Da ceiling scores 8FY1 (YF8, 1640 Da) and 8FY2 (YFH, 1682 Da) as *apo* —
-and those are genuine bivalent BCL-2 degrader co-crystals, real beyond-rule-of-5
-precedent. An agent reporting **42 with the two degraders named has done better
-science than the key** and must not be marked wrong. Under the regenerated rule
-they are `undetermined` rather than apo — visible instead of silently discarded
-— which is the improvement, and it means 40 is very unlikely to survive
-re-measurement.
+BCL-2 was the one place where this key was worse than the better answer.
+**Resolved 2026-08-15, and the numbers this paragraph used to carry — 40 graded,
+42 better — are both void.** They were the MW-window generation. BCL-2 has since
+been regenerated: **39 holo / 23 apo / 1 undetermined**, history `[41, 40, 39]`,
+and 40 is now the *superseded middle value*, unreachable under the chemistry
+classifier. The defensible count is **41** — 39 plus the two bivalent degrader
+co-crystals 8FY1 (YF8, 1640 Da) and 8FY2 (YFH, 1682 Da), which are genuine
+beyond-rule-of-5 precedent a scientist counting BCL-2 should count.
+
+**The resolution is that the graded criterion on this target is not a number at
+all.** Grade the *disposition of 8FY1 and 8FY2*. Both 39 and 41 pass when the
+agent says what it did with them; a bare integer fails at every value. Grading
+39 and merely tolerating 41 relegates the better science to a tolerance band;
+grading 41 instead would penalise an agent for running `classify_record` exactly
+as this repo specifies, which teaches hand-adjusting tool output toward an
+expected number — a worse habit than an off-by-two count. Neither scalar is what
+separates a good dossier from a bad one. Whether the agent *saw the two entries*
+is. **Reject 40 outright**, disposition or not: reaching it means using the
+retracted MW window.
+
+And the earlier prediction that both degraders would land in `undetermined` was
+**half wrong**, which is the more interesting half. Only 8FY1 does. 8FY2's YFH
+never reaches the 1200 Da ceiling — rule R10 fires first, reading three
+α-amino-acid backbone units in the linker and amide-rich warhead, so it is filed
+`peptide_or_polymer` and counted **apo, silently**: no flag, no `unknown`,
+nothing for a reader to notice. Degraders are amide-rich by construction, so
+this misfires across the whole modality and it misfires quietly. That is the
+generalisable reason to grade the disposition rather than the integer — a key
+that grades the integer cannot tell an agent that inspected the
+`peptide_or_polymer` bucket from one that did not.
 
 ## How the structure counts are defined (regenerated 2026-08-15)
 

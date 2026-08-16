@@ -56,6 +56,13 @@ for the rules and for why this is a new verdict rather than a flag.
 
 MEASURED ACCURACY, NOT A CLAIM. Every figure below re-measured 2026-08-15 with
 all rules added since; the two originals are unchanged.
+
+REPRODUCE THEM: `python3 tests/test_v2.py` from this directory prints every
+figure below in one offline, stdlib-only pass. The harnesses and their cached
+`pdb_v.chemcomps` rows are in `tests/` — see `tests/README.md`. Until
+2026-08-15 they lived only in session scratch, which made every figure here
+unverifiable from a checkout; if a number below ever disagrees with what the
+harness prints, THE HARNESS WINS and the citation is what needs fixing.
   * 262-component ground-truth set (the four historical failures, every member
     of `modal_app.COFACTORS` and `NON_LIGANDS`, every member of
     `neighbour_precedent.EXCLUDED_LIGANDS`, known true-positive inhibitors,

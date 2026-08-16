@@ -741,13 +741,21 @@ so record how the site was chosen.** `pocket_scan` returns
 `site_pocket_selected_by` per structure per clustering value; copy those values
 into `pocket_volume_a3.site_pocket_selected_by` and
 `pocket_druggability.site_pocket_selected_by` — a single string when one basis
-covers the pool, a list when several do. The five possible values are
+covers the pool, a list when several do. The seven possible values are
 `ligand_site_jaccard`, `site_signature_overlap`,
-`site_signature_unreliable_homooligomer`, `max_druggability_no_ligand_site` and
-`no_pocket_matched_site_signature`. The last three do **not** identify a site —
-one is "the most druggable pocket anywhere in the chain", the others are
-residue-number matches a homo-oligomer makes ambiguous in principle — so values
-carrying them must be reported per structure, never pooled into one spread.
+`site_signature_unreliable_homooligomer`, `max_druggability_no_ligand_site`,
+`no_pocket_matched_site_signature`, `no_pocket_overlapped_ligand_site` and
+`site_signature_unreliable_foreign_polymer`. **The last five do NOT identify a
+site.** One is "the most druggable pocket anywhere in the chain"; two are
+residue-number matches a homo-oligomer makes ambiguous in principle; one means no
+pocket overlapped the ligand at all; and `site_signature_unreliable_foreign_polymer`
+means the donor's residue numbers were imported from a **different polymer** —
+measured on 8QFZ, where 9 of 13 signature residues belonged to the bicyclic
+peptide ligand rather than to TSLP, leaving 4. Note that is a different failure
+from `collapsed_by`, which counts numbers lost to *identical protomers*; one TNF
+run carries `collapsed_by: 8` and `foreign_polymer_residues_dropped: 0` in the
+same payload. Values carrying any of the five must be reported per structure and
+never pooled into one spread.
 Say which route established the site in `tractability.site_hypothesis_basis`
 (holo ligand site, persistence across the ensemble, or not established).
 
