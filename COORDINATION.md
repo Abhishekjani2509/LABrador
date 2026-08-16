@@ -302,6 +302,8 @@ are dead — do not create files under them.
 | ~~**Adapter A**~~ | **Built 2026-08-15 late (owner Abhishek; Soliman to review)**: `managed/trial-recruitment-forecaster/evidence-bridge.ts` — mapper `findings[]` → thesis `Evidence[]`, run against the REAL `research-evidence-mapper/runs/g_1a4f.json` (12 findings → 11 rows; f6 dropped, `background_only`). `no_effect` convention settled: passthrough to the third `direction` value (§6 item 3), never collapsed. `claim` carries the verbatim quote + triple; `source` is `doi:`/`PMID:` and a paper with neither drops the row; `strength` copies the mapper's own `_STUDY_QUALITY` table (assemble.py:199) ×0.8 preprint; `background_only`/`hedged_only` excluded, mirroring Rafal's `graph_read.py:31`. **REAL-ARTIFACT CAVEAT for Soliman**: g_1a4f deviates from SCHEMA.md — findings lack `round` and `flags`, papers lack `round`, findings carry an undocumented `claim` paraphrase, and `findings/r2.json` is a full snapshot rather than an append-only round chunk (concatenating chunks double-counts). Also untested: no `no_effect` finding exists in any real graph yet. | done (Abhishek; Soliman to review) |
 | ~~**Adapter B**~~ | **Built 2026-08-15 late (owner Abhishek)**: `managed/trial-recruitment-forecaster/economics-bridge.ts` — overlay script shipped (delay years + triangular `launch_delay_years` range + counterfactual pricing, best-effort against the demo fixture, read-only on Vince's dir); **Vince to confirm the `launch_year` application convention**. The two "obvious" wirings remain wrong and are documented in the file header: score→PoS is a category error; months→stage_durations only shifts cost timing. The value-bearing slot is launch delay, which the engine already prices (`value_lost_per_launch_delay_year` ≈ $5.06M/yr on the demo fixture). | done (Abhishek; Vince to confirm convention) |
 | **Orchestrator** | one command running thesis → evidence → recruitment → economics. NOTE: Vince's `hypothesis-highlander` claims this layer as a meta-search — decide whether it IS the orchestrator or sits above a simpler one | Cyrus + Vince |
+| **HAZARD: mapper assembler data loss (URGENT — Soliman)** | assemble.py applies THIS round's local id maps (p1/t1/…) to PRIOR findings: on id collision, prior evidence is silently repointed, quote-check-failed, and DISCARDED. Reproduced twice — including with the shipped example-round.json verbatim (13 findings destroyed, 12→4), the very file SKILL.md tells the agent to copy. Fix: namespace round-local ids before apply, and state the no-collision rule in SKILL.md. Also: findings/r<N>.json is a full snapshot, contradicting the append-only promise (SCHEMA.md:141). | Soliman |
+| **HAZARD: run_intake.py broken on main (Rafal)** | KeyError 'symbol_candidates' on every input — merge regression (graph_read.py on main dropped the key + symbol_key fn the pre-merge copy had). graph_read.py itself is fine. | Rafal |
 | **Highlander↔nodes interop** | highlander says "module-agnostic" but its calls against the real node contracts (thesis.ts, RecruitabilityResult, ProgramInput, mapper graphs) are unverified — its test_interop.py runs against stubs. **Forecaster side VERIFIED 2026-08-15 late (Abhishek, read-only): the two `RecruitabilityResult` fields it reads (`score`, `simulatedMonthsToEnroll`) match exactly, but its hand-mirrored thesis has drifted — `uniprotAccession` is top-level instead of `target.uniprotAccession` (silently lost in BOTH directions, verified) and `Evidence.direction` lacks `no_effect`, so a real bridged thesis hard-fails its `validate()`. Report + mismatch table + minimal fix: [`managed/trial-recruitment-forecaster/INTEROP-highlander.md`](./managed/trial-recruitment-forecaster/INTEROP-highlander.md). Economics / mapper / tractability sides still open.** | Vince + node owners (forecaster side done) |
 | ~~HAZARD: rename collision~~ | **Resolved 2026-08-15 late**: git's directory-rename detection mapped both Rafal's and Soliman's old-path commits onto the renamed dirs; new files were accepted at the detected locations. `scripts/integrate.ts` escalates this class and `fixDeadPaths` catches any residue. | done |
 | **Mapper `targets[]` schema** | The tractability node's one mandatory input is `uniprot_accession`, and `kind: "protein"` cannot distinguish a drug target from a readout. Proposal: `things[].uniprot_accession` + `gene_symbol` + `resolved_by` + `ambiguity[]`, plus an ordered `targets[]` block. Resolution must key on the **quote, not the entity name** — resolving the string "IL-6" yields P05231 (ligand) while receptor-blockade evidence is P08887, and without an explicit unresolved state the pipeline confidently assesses the wrong protein. Rafal's `graph-intake` already consumes mapper graphs, so this is a contract change against a live consumer. | Soliman + Rafal (needs Rafal's OK before implementation) |
@@ -337,15 +339,12 @@ Ratification is now a sign-off, not a design session.**
 5. Confirm the adapters in §5 and their owners (both are built; Vince to
    confirm the `launch_year` application convention for B; Soliman to review
    A's mapping and the SCHEMA.md deviations it found in `runs/g_1a4f`).
-6. **SCHEMA.md: `how` needs an enum** (raised by Rafal's graph-intake,
-   2026-08-15 late): every other categorical field is enumerated, but `how`
-   is open vocabulary — so "drug inhibits IRAK4" (a target) and "drug
-   reduces IL-6" (a downstream effect) are structurally identical. Soliman
-   to enumerate at least the target-nominating verbs. **Now backed by real
-   evidence**: the first real graph (g_1a4f) types "IRAK4 inhibition" as a
-   small_molecule intervention with no protein/gene entity anywhere —
-   consumers can't find targets without either typed entities or a `how`
-   enum (see Rafal's e6d946c commit message for the full post-mortem).
+6. ~~SCHEMA.md: `how` needs an enum~~ **DONE by Soliman** (b3049ae,
+   2026-08-16): `how` closed to an enum; interventions must link to targets
+   (verified in production, 0 orphans); entities merge on UniProt accession.
+   Remaining check for consumers: graph-intake's DIRECT_ACTION verb list
+   must match the new enum (`decreases` was missing — 7 of 8 production
+   edges landed in needs_adjudication).
 
 Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
 
@@ -555,8 +554,8 @@ table whenever an edge changes state — same rule as §2–§5.)*
 | 2 | Mapper schema: `how` enum + typed protein/gene entities, round/flags, r2.json chunk contract | Soliman | intake + evidence-bridge run a new real graph with no workarounds |
 | 3 | Highlander repairs: accept `no_effect`, read `target.uniprotAccession`, align score curve, adopt canonical bridges, real-contract tests | Vince | interop tests import real shapes and pass |
 | 4 | Adapter B launch_year convention | Vince + Abhishek | one sentence in the economics README |
-| 5 | Tractability end-to-end run + dossier→thesis adapter (adapter UNOWNED) | Rafal + team ($ for Modal GPU) | one real dossier JSON lands in a thesis |
-| 6 | hyp_gen emits IndicationThesis (or adapter) so the thesis chain has an entry point | Abraham+ | a thesis produced by code reaches the forecaster |
+| 5 | ~~$ blocker~~ assemble-dossier LANDED with two measured validator-clean dossiers (JAK1, TNF) committed as examples. Remaining: dossier→thesis adapter (Adapter C — **Abhishek building**, in trial-recruitment-forecaster) + fix run_intake regression (Rafal, §5 hazard) | Abhishek / Rafal | a committed dossier's verdict lands in a thesis Evidence row |
+| 6 | hyp_gen→thesis adapter (**Abhishek building** as thesis-bridge in trial-recruitment-forecaster — research showed the slate carries every field except biomarker/endpoint, which an analyst frame supplies; Abraham to adopt or veto the mapping) | Abhishek → Abraham | a slate hypothesis parses as IndicationThesis and reaches the forecaster |
 | 7 | Orchestrator decision: highlander on top vs simple runner (extend trace-demo.ts) | Cyrus + Vince | `one command → traced verdict` |
 | 8 | Glassbox envelopes per node (§10) + runtime envelopes for deployed agents | all / Cyrus | every node call traced |
 
