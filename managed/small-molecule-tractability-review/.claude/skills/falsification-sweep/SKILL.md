@@ -4,7 +4,10 @@ description: >
   Attacks a druggability claim before it is reported — checks whether reported
   actives collapse to one assay, one series or one lab, whether a holo ligand is
   a known frequent hitter, whether a pocket appears in only one crystal form, and
-  what clinical programs were terminated and why. Routes the rare finding that is
+  what clinical programs were terminated and why. Treats a low fpocket
+  druggability score as a property of the score rather than of the pocket — 41%
+  of pockets with a drug-like ligand physically bound score below 0.1 — so it is
+  never entered as a finding against a site. Routes the rare finding that is
   a literature-provenance question back to the upstream graph as an ask, under a
   five-gate rule that refuses anything a local table can settle. Records checks
   that found nothing as well as checks that found something. It does NOT produce
@@ -120,8 +123,17 @@ A structure is not evidence just because something is bound. Check the ligand:
 
 - **Frequent hitters.** 2AZ5's ligand — chemical component **`307`**, despite PDB
   titles saying SPD304 — is bis-electrophilic and widely regarded as promiscuous
-  and cytotoxic. Its site scores 0.346 at best, against 0.708 for the sotorasib
-  pocket. Consistent with a micromolar tool compound, not a drug.
+  and cytotoxic. **That is the finding, and it stands on the chemistry alone.**
+  The old supporting clause — "its site scores 0.346 at best against 0.708 for
+  the sotorasib pocket, consistent with a micromolar tool compound, not a drug" —
+  is **withdrawn as support**. Both numbers are real and the *inference* from
+  their gap is not: after check 5a, a 0.35-versus-0.71 gap is well inside the
+  spread the score produces across pockets that all have an approved drug bound
+  in them — EGFR 6LUD scores **0.013** with osimertinib in it and RORgt 6C1P
+  **0.009** with a ligand in it, against KRAS 6OIM's 0.708 — so a gap that size
+  discriminates a tool compound from a drug not at all. Judge the ligand on its
+  chemistry — bis-electrophile, cytotoxicity, promiscuity reports — never on the
+  score of the pocket it sits in.
 - **Cofactors and buffer components.** GDP, ATP, PEG, glycerol, sulfate,
   cryoprotectants. A pocket that exists around a cryoprotectant is an artifact.
 - **Covalent warheads** bind sites that may not be addressable non-covalently.
@@ -132,6 +144,47 @@ Run the ensemble. A pocket present in one entry and absent in five is a finding.
 So is a druggability score that swings by orders of magnitude across an ensemble
 — **but only if every value in the swing describes the same site**, and that is
 exactly what this section used to get wrong.
+
+#### 5a. A LOW DRUGGABILITY SCORE IS NOT A FINDING. Attack it, do not report it.
+
+Added 2026-08-15, and it inverts the direction this check used to point. The
+sweep exists to attack claims, and a low druggability score reads like a
+falsification result — the pocket looked good, the score says otherwise. It is
+not one. Measured over 15 targets, 67 structures and 134 measurements:
+
+- on **37 holo structures where a drug-like ligand is physically bound and the
+  scored pocket is anchored to that ligand** — certain positives by construction,
+  spanning all 10 known-druggable targets — the median score is **0.320**, **25
+  of 37 fall below 0.5** and **15 of 37 (41%) fall below 0.1**;
+- EGFR 6LUD with osimertinib bound scores **0.013**; JAK1's median is **0.009**
+  across nine approved drugs; RORgt 6C1P is **0.009 at rank 55 of 60**; TYK2
+  6NZP with deucravacitinib is **0.169**; BCL-2 6QGK is **0.025**; NLRP3 runs
+  **0.001–0.018** across seven holo crystals including one clinical compound;
+- target-level AUC is **0.720 with a 95% CI of 0.44–0.94** at D=1.6 — the
+  interval includes chance — and **0.520** at D=2.4;
+- and it is **inverted** at target level: MYC, zero holo structures and canonical
+  undruggable, has a D=2.4 median of **0.75**, above KRAS, BCL-2, JAK1, EGFR and
+  NLRP3.
+
+So the honest sweep finding on a low score is about the *score*, not the target:
+**record that the pocket scored low, record the 41% false-negative rate beside
+it, and do not enter it in `findings` as evidence against the pocket.** A
+falsification block that lists "druggability 0.02, site may not be real" has
+manufactured a finding out of a measurement error rate.
+
+**What to attack instead, on the same data:** the D=1.6 site volume, which
+separated all 15 targets at AUC 1.000. And when volume and druggability
+disagree — a 290 Å³ EGFR site scoring 0.013 — that disagreement is the finding.
+Report it; do not resolve it in either direction. The volume guide it would be
+resolved against (≥240 Å³ druggable, ≤210 Å³ hard) is an **uncalibrated
+proposal**, a 17% margin fitted post hoc on n=15 with only 5 hard targets, and
+it gates nothing.
+
+**Do not reach for persistence as the replacement.** The site pocket was
+detected in 100% of structures for all 15 targets, so persistence is **AUC
+0.500** and the published consensus criterion on top of it gives 0.560 while
+**ranking MYC first at 0.80**. Substituting it reproduces the same inversion one
+rung down.
 
 #### RETRACTED — the 651-fold TNF-alpha druggability spread
 
@@ -403,6 +456,15 @@ resolve `axis_conflict`. If a finding seems to demand a different verdict, put
 the finding in the dossier and let the reader decide. The moment falsification
 starts adjusting numbers, the numbers stop being measurements.
 
+**The sharpest instance of this is now check 5a.** A low druggability score is
+the most verdict-shaped thing this sweep will ever be handed — it looks like the
+pocket claim collapsing under attack — and it is a measurement error 41% of the
+time on pockets with a drug physically bound in them. `DRUGGABILITY_LOAD_BEARING`
+in `validate_dossier.py` blocks it from reaching a `not_tractable` or
+`insufficient_evidence` verdict, but the validator only sees structured fields:
+writing "the pocket scores 0.02 and is probably not real" into
+`falsification.findings` as prose routes around it entirely. Do not.
+
 ### Treating absence of terminated programs as a good sign
 
 No terminated programs may mean the target was never tried. For a target with
@@ -451,7 +513,10 @@ citation is how a dossier becomes untrustworthy.
 Populate `falsification`:
 
 - `checks_run` — every check from this skill, by name, whether or not it fired.
-  Check 9 is included on every run; "ran, did not fire" is its normal result
+  Check 9 is included on every run; "ran, did not fire" is its normal result.
+  **Check 5a is included on every run too, and it can only ever "not fire" as a
+  finding** — its result is a note recording the score and the 41% false-negative
+  rate beside it. A 5a entry in `findings` is a defect
 - `findings` — what came back, each with its source
 - `survived` — true only if no finding materially undercuts the precedent claim;
   false with an explanation otherwise; never null after a run

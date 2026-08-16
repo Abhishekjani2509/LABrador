@@ -299,5 +299,73 @@
         "rule": "Report ensemble composition, not just the spread."
       }
     }
+  },
+  "POCKETMINER_EVALUATED_2026_08_15": {
+    "_why_in_set": "The comparator we cited for two months, finally run. It reproduces its published accuracy and inverts on our four calibration cases. Kept as the negative control for 'a single-structure cryptic predictor could replace the ensemble'.",
+    "source": "github.com/Mickdub/gvp branch pocket_pred, released weights models/pocketminer",
+    "install": "own env required - TF pin. micromamba create -p ./env -c conda-forge python=3.11 numpy scipy pandas tqdm mdtraj 'tensorflow>=2.13'; pip install tf-keras; MUST run with TF_USE_LEGACY_KERAS=1",
+    "runtime": "0.31-0.51 s per structure, CPU only, no GPU, no Modal. Model load 4.7 s once per process.",
+    "reproduction_of_published_metric": {
+      "shipped_test_set_pooled_roc_auc": 0.868,
+      "published": 0.87,
+      "shipped_val_set_roc_auc": 0.897,
+      "note": "the install is correct and the weights are genuine; the failure below is not an installation artifact"
+    },
+    "leakage_check": "none of 4OBE/6OIM/1TNF/2AZ5/7ALV/6NPY/3V2Y appear in PocketMiner's 185-structure dataset - fully out of sample",
+    "operating_threshold": {
+      "value": 0.5362,
+      "derivation": "Youden's J on the shipped validation set, the authors' own rule (src/optimal_threshold_protein_performance.py:13-19)",
+      "fraction_of_all_residues_called_positive": "0.32 to 0.54 across our four structures - 'flagged' is nearly content-free at this threshold"
+    },
+    "THE_FINDING": {
+      "claim": "On our four calibration cases PocketMiner's signal is inverted: the only site that fails to beat its own spatial null is the only true cryptic site.",
+      "method": "2000 random same-size spatially-contiguous patches per structure; p = fraction scoring >= the real site",
+      "kras_switch_ii_apo_4OBE": {"truth": "cryptic, 8.8 A collapse", "site_mean": 0.632, "null_mean": 0.495, "p": 0.203, "beats_null": false},
+      "tnfa_spd304_apo_1TNF": {"truth": "NOT cryptic, subunit occlusion ~1.6 A", "site_mean": 0.673, "null_mean": 0.519, "p": 0.002, "beats_null": true},
+      "nlrp3_mcc950_apo_6NPY": {"truth": "NOT cryptic, pre-formed 0.95 A", "site_mean": 0.821, "null_mean": 0.483, "p": 0.006, "beats_null": true},
+      "s1pr1_orthosteric_3V2Y": {"truth": "NOT cryptic, pre-formed 1.83 A", "site_mean": 0.711, "null_mean": 0.471, "p": 0.010, "beats_null": true},
+      "kras_given_every_chance": {
+        "all_22_sotorasib_contacts_p": 0.234,
+        "switch_ii_57_76_p": 0.303,
+        "sotorasib_contacts_within_switch_ii_p": 0.088,
+        "five_measured_mobile_residues_p": 0.132,
+        "note": "no definition reaches p<0.05"
+      }
+    },
+    "MULTICHAIN_VERDICT": {
+      "refuses_multichain": false,
+      "correction": "prior_art.md said it refuses multi-chain input. That is WRONG about the released code and is withdrawn. There is no chain check anywhere in pocket_pred.",
+      "what_it_does_instead": "flattens all chains into one residue list and runs the sequence-position encoding through the chain break",
+      "order_dependence_test": {
+        "manipulation": "1TNF chains A,B,C -> C,B,A, identical coordinates",
+        "mean_abs_delta": 0.1114,
+        "max_abs_delta": 0.3852,
+        "pearson_r": 0.811,
+        "residues_crossing_threshold": "38 of 152",
+        "reading": "a multi-chain prediction is not a well-defined function of the structure"
+      },
+      "single_protomer_test": {
+        "trimer_site_mean": 0.673, "trimer_background": 0.500, "trimer_enrichment": 0.174,
+        "protomer_site_mean": 0.392, "protomer_background": 0.442, "protomer_enrichment": -0.050,
+        "site_residues_above_threshold_trimer": "34/42",
+        "site_residues_above_threshold_protomer": "2/14",
+        "same_14_residues_mean_drop": 0.291,
+        "whole_chain_A_shift_for_comparison": 0.034,
+        "reading": "the interface site is invisible on one protomer, and the drop is concentrated at the interface rather than being a global offset"
+      },
+      "consequence": "for an oligomeric interface site there is no valid way to run PocketMiner: multi-chain is order-dependent and single-chain cannot see the site"
+    },
+    "RELEASED_CODE_DEFECTS": {
+      "1_keras3_silent_partial_restore": {
+        "severity": "produces confident noise with no error",
+        "detail": "under TF>=2.16/Keras 3, tf.train.Checkpoint.restore leaves 93 of 197 model variables at random init including the final (200,1) output kernel; util.load_checkpoint prints 'CHECKPOINT RESTORED FROM ...' unconditionally and never calls assert_consumed()",
+        "measured": "two runs of the identical script differ by up to 0.41 in per-residue probability",
+        "fix": "TF_USE_LEGACY_KERAS=1 + tf-keras -> 177 variables, 0 unrestored, bit-identical across processes",
+        "detector": "tf.train.Checkpoint(model=m).restore(path).assert_existing_objects_matched() - under Keras 3 it names a real weight, under Keras 2 the only unmatched object is save_counter"
+      },
+      "2_cannot_read_incomplete_backbone": "process_strucs reshapes to (n_residues,4,3); 2AZ5 biological assembly (4x Leu157 with no backbone O) raises ValueError: cannot reshape array of size 6492 into shape (542,4,3)",
+      "3_demo_path_wrong": "xtal_predict.py points at ../data/ACE2.pdb; file is at ../data/training-data/ACE2.pdb"
+    },
+    "DECISION": "NOT WIRED IN. It changes no call we make: it cannot lower cryptic_pocket_risk (it misses the canonical cryptic site), cannot raise one (it fires on everything), and cannot change next_experiment because the backbone-collapse vs occlusion split that drives it is exactly what PocketMiner gets backwards here."
   }
 }

@@ -67,6 +67,10 @@ def with_druggability_range(base: dict) -> dict:
         "min": 310.0,
         "max": 545.0,
         "spread_pct": 43.1,
+        "clustering_d": [1.6, 2.4],
+        # Rule 4a: the primary number is the D=1.6 figure specifically, carried
+        # separately from the spread that pools both clustering values.
+        "primary_d1_6_a3": 310.0,
         "site_pocket_selected_by": ["ligand_site_jaccard", "site_signature_overlap"],
     }
     d["tractability"]["pocket_druggability"] = {
@@ -74,7 +78,13 @@ def with_druggability_range(base: dict) -> dict:
         "max": 0.735,
         "fold_range": 1.8,
         "site_pocket_selected_by": ["ligand_site_jaccard", "site_signature_overlap"],
+        # Rule 4.0: only legal value, and the rate travels with the number.
+        "load_bearing": False,
         "_provenance": "shipped fpocket 3-descriptor logistic regression",
+        "_false_negative_rate": (
+            "15 of 37 ligand-anchored holo pockets (41%) score below 0.1; "
+            "target-level AUC 0.720, 95% CI 0.44-0.94"
+        ),
     }
     d["tractability"]["method"]["ensemble_pdb_ids"] = ["3EYG", "4E4N"]
     d["tractability"]["ensemble_consensus_fraction"]["n_structures"] = 2
@@ -1116,6 +1126,267 @@ class TestTargetsFixture(unittest.TestCase):
         self.assertNotIn("MODALITY_LEAK", v)
         self.assertNotIn("AXIS_CONFLICT_UNDECLARED", v)
         self.assertNotIn("INSUFFICIENT_EVIDENCE_AVOIDED", v)
+
+
+
+# ---------------------------------------------------------------------------
+# R5b — druggability is reported and carries nothing (rule 4.0)
+#
+# EVERY TEST IN THIS CLASS AND THE NEXT FAILS AGAINST THE PRE-2026-08-15
+# VALIDATOR. That is the point: before `check_druggability_not_load_bearing`
+# and `check_volume_is_primary` existed, a dossier could reach `not_tractable`
+# on a druggability of 0.013 measured at a pocket with osimertinib physically
+# bound in it (EGFR 6LUD, real) and pass clean, because nothing in the file read
+# the druggability value against the verdict at all — `check_druggability_is_a_
+# range` only ever asked whether it was a range.
+# ---------------------------------------------------------------------------
+
+
+def _computed_negative(base: dict) -> dict:
+    """A dossier whose negative verdict rests on the computed axis."""
+    d = broken(base)
+    d["verdict"] = "not_tractable"
+    d["verdict_basis"] = "computed_tractability"
+    return d
+
+
+class TestDruggabilityNotLoadBearing(unittest.TestCase):
+    def test_load_bearing_true_is_rejected(self):
+        """The field is a declaration and only one value is legal."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_druggability"]["load_bearing"] = True
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "DRUGGABILITY_LOAD_BEARING"
+            and x.path.endswith("load_bearing")
+        ]
+        self.assertTrue(v)
+        self.assertIn("0.720", v[0].message)
+
+    def test_load_bearing_missing_is_rejected(self):
+        """Silence is not the same as declaring it non-load-bearing."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_druggability"].pop("load_bearing", None)
+        self.assertIn(
+            "DRUGGABILITY_LOAD_BEARING", rules(validate_dossier(d))
+        )
+
+    def test_the_false_negative_rate_travels_with_the_number(self):
+        """A reader who meets a 0.02 later cannot discount it without the rate."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_druggability"]["_false_negative_rate"] = ""
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "DRUGGABILITY_LOAD_BEARING"
+            and x.path.endswith("_false_negative_rate")
+        ]
+        self.assertTrue(v)
+        self.assertIn("41%", v[0].message)
+
+    def test_a_negative_verdict_on_druggability_alone_is_rejected(self):
+        """The EGFR 6LUD shape: 0.013 with a drug in the pocket, no volume.
+
+        This is the exact failure the rule exists for. 15 of 37 pockets with a
+        drug-like ligand physically bound score below 0.1, so a low score is not
+        evidence of anything on its own.
+        """
+        d = _computed_negative(JAK1)
+        d["tractability"]["pocket_druggability"]["min"] = 0.013
+        d["tractability"]["pocket_druggability"]["max"] = 0.089
+        d["tractability"]["pocket_volume_a3"]["min"] = None
+        d["tractability"]["pocket_volume_a3"]["max"] = None
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = None
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "DRUGGABILITY_LOAD_BEARING" and x.path == "verdict"
+        ]
+        self.assertTrue(v)
+        self.assertIn("may not carry a negative verdict", v[0].message)
+
+    def test_insufficient_evidence_on_druggability_alone_is_rejected_too(self):
+        """Both negative verdicts, not just not_tractable."""
+        d = _computed_negative(JAK1)
+        d["verdict"] = "insufficient_evidence"
+        d["verdict_basis"] = "both"
+        d["tractability"]["pocket_druggability"]["max"] = 0.009
+        for k in ("min", "max", "primary_d1_6_a3"):
+            d["tractability"]["pocket_volume_a3"][k] = None
+        self.assertIn("DRUGGABILITY_LOAD_BEARING", rules(validate_dossier(d)))
+
+    def test_a_negative_verdict_WITH_volume_behind_it_is_legal(self):
+        """The rule must not ban negative verdicts, only unsupported ones.
+
+        TL1A's measured D=1.6 volume is 136.9 A^3 — the smallest in the set. A
+        negative verdict resting on THAT is resting on the primary number, which
+        is what the rule wants, so nothing may fire.
+        """
+        d = _computed_negative(JAK1)
+        d["tractability"]["pocket_druggability"]["max"] = 0.173
+        d["tractability"]["pocket_volume_a3"]["min"] = 136.9
+        d["tractability"]["pocket_volume_a3"]["max"] = 136.9
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = 136.9
+        self.assertNotIn("DRUGGABILITY_LOAD_BEARING", rules(validate_dossier(d)))
+
+    def test_a_high_volume_beside_a_low_druggability_is_a_conflict_to_report(self):
+        """The judgement call, encoded: report the disagreement, resolve neither.
+
+        EGFR is the measured case — D=1.6 volume 290.2 A^3, and 6LUD with
+        osimertinib bound scoring 0.013. A dossier carrying both and saying
+        nothing about it has silently picked a side.
+        """
+        d = broken(JAK1)
+        d["tractability"]["pocket_druggability"]["min"] = 0.013
+        d["tractability"]["pocket_druggability"]["max"] = 0.475
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = 290.2
+        d["tractability"]["caveat"] = None
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "DRUGGABILITY_LOAD_BEARING"
+            and x.path == "tractability.caveat"
+        ]
+        self.assertTrue(v)
+        self.assertIn("uncalibrated proposal", v[0].message)
+
+    def test_the_conflict_is_satisfied_by_saying_so(self):
+        """And a caveat that names it clears the rule — it wants disclosure."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_druggability"]["min"] = 0.013
+        d["tractability"]["pocket_druggability"]["max"] = 0.475
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = 290.2
+        d["tractability"]["caveat"] = (
+            "Druggability 0.013-0.475 disagrees with a 290.2 A^3 D=1.6 volume. "
+            "Reported, not resolved."
+        )
+        self.assertNotIn("DRUGGABILITY_LOAD_BEARING", rules(validate_dossier(d)))
+
+    def test_the_measured_constants_are_pinned(self):
+        """The thresholds are the measurement, so pin them as data.
+
+        If someone widens the false-negative band or turns the volume guide into
+        a classifier, this fails and names the number that moved.
+        """
+        import validate_dossier as m
+
+        self.assertEqual(m.DRUGGABILITY_FALSE_NEGATIVE_BAND, 0.5)
+        self.assertEqual(m.DRUGGABILITY_FALSE_NEGATIVE_FLOOR, 0.1)
+        self.assertEqual(m.PRIMARY_VOLUME_CLUSTERING_D, 1.6)
+        self.assertEqual(m.MERGED_VOLUME_A3, 1000.0)
+        # Uncalibrated proposal, fitted post hoc on n=15 with a 17% margin.
+        # Measured: every hard target <= 207 A^3, every druggable one >= 242.
+        self.assertEqual(m.VOLUME_GUIDE_DRUGGABLE_A3, 240.0)
+        self.assertEqual(m.VOLUME_GUIDE_HARD_A3, 210.0)
+        self.assertLess(m.VOLUME_GUIDE_HARD_A3, m.VOLUME_GUIDE_DRUGGABLE_A3)
+        self.assertEqual(
+            m.NEGATIVE_VERDICTS, {"not_tractable", "insufficient_evidence"}
+        )
+
+    def test_the_volume_guide_does_not_classify(self):
+        """Rule 4a: it is a proposal and gates nothing.
+
+        A target sitting between the two guide values is UNCLASSIFIED by it, and
+        a dossier calling such a target tractable must not be objected to on
+        those grounds. This test exists to stop the guide being quietly promoted
+        into a threshold later.
+        """
+        d = broken(JAK1)
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = 225.0
+        d["verdict"] = "small_molecule_tractable"
+        v = rules(validate_dossier(d))
+        self.assertNotIn("DRUGGABILITY_LOAD_BEARING", v)
+        self.assertNotIn("VOLUME_NOT_PRIMARY", v)
+
+    def test_persistence_is_still_legal_as_a_SITE_LOCATION_basis(self):
+        """Rule 4c bans persistence as a quality signal, not as a locator.
+
+        Persistence is AUC 0.500 — the site pocket was detected in 100% of
+        structures for all 15 targets — and the published consensus criterion on
+        top of it ranks MYC first at 0.80. So it must never stand in for
+        druggability. It is still how `site_from_density` is defined and still a
+        legal answer to "how was this site located", and nothing may object.
+        """
+        d = broken(JAK1)
+        d["tractability"]["site_hypothesis_basis"] = (
+            "persistence across the ensemble — no holo ligand to anchor to"
+        )
+        self.assertNotIn("DRUGGABILITY_LOAD_BEARING", rules(validate_dossier(d)))
+
+
+# ---------------------------------------------------------------------------
+# R5c — volume at D=1.6 is the primary number (rule 4a)
+# ---------------------------------------------------------------------------
+
+
+class TestVolumeIsPrimary(unittest.TestCase):
+    def test_geometry_without_the_d1_6_primary_is_rejected(self):
+        """The shape BOTH real runs had before this rule existed."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = None
+        d["not_found"] = [
+            e
+            for e in d["not_found"]
+            if "primary_d1_6_a3" not in str(e.get("field", ""))
+        ]
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "VOLUME_NOT_PRIMARY"
+            and x.path.endswith("primary_d1_6_a3")
+        ]
+        self.assertTrue(v)
+        self.assertIn("AUC 1.000", v[0].message)
+
+    def test_a_not_found_line_excuses_the_missing_primary(self):
+        """Same discipline as every other null: say why, and it is legal.
+
+        This is how the shipped JAK1 example passes — it declines the D=1.6
+        figure rather than inventing one from a spread that pools both D values.
+        """
+        d = broken(JAK1)
+        self.assertIsNone(d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"])
+        self.assertNotIn("VOLUME_NOT_PRIMARY", rules(validate_dossier(d)))
+
+    def test_a_merged_volume_is_not_a_site_volume(self):
+        """Above ~1000 A^3 the site has merged with its neighbours.
+
+        1152.3 A^3 is the measured D=2.4 merge on a real fixture. Quoting it as
+        a D=1.6 primary number is quoting a mega-cavity no molecule occupies.
+        """
+        d = broken(JAK1)
+        d["tractability"]["pocket_volume_a3"]["primary_d1_6_a3"] = 1152.3
+        v = [x for x in validate_dossier(d) if x.rule == "VOLUME_NOT_PRIMARY"]
+        self.assertTrue(v)
+        self.assertIn("merged", v[0].message)
+
+    def test_a_spread_with_no_clustering_record_is_rejected(self):
+        """D=1.6 and D=2.4 do not measure the same cavity."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_volume_a3"]["clustering_d"] = None
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "VOLUME_NOT_PRIMARY" and x.path.endswith("clustering_d")
+        ]
+        self.assertTrue(v)
+
+    def test_a_refused_block_is_not_asked_for_a_primary(self):
+        """TNF reports no geometry at all, so there is nothing to be primary."""
+        self.assertNotIn("VOLUME_NOT_PRIMARY", rules(validate_dossier(TNF)))
+
+    def test_druggability_alone_still_demands_the_primary_volume(self):
+        """Reporting the demoted number and not the promoted one."""
+        d = broken(JAK1)
+        for k in ("min", "max", "primary_d1_6_a3"):
+            d["tractability"]["pocket_volume_a3"][k] = None
+        d["not_found"] = [
+            e
+            for e in d["not_found"]
+            if "pocket_volume_a3" not in str(e.get("field", ""))
+        ]
+        self.assertIn("VOLUME_NOT_PRIMARY", rules(validate_dossier(d)))
 
 
 if __name__ == "__main__":

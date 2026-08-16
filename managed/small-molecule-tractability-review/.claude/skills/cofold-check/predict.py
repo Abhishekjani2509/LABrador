@@ -19,14 +19,19 @@ It computes, per run, the things that are measurable per run:
 * the linker that had to be inserted to reach a multimer (``bioemu_ensemble``).
 
 It does NOT ship a calibration constant for any of these tools, and it does not
-declare any of them unreliable. We have single-case observations that look like
-they should generalise — one compound, one complex, one target — and the whole
-point of this project is to refuse conclusions drawn from one example. Those
-observations are carried in ``OBSERVATIONS`` with their sample size stated and
-``benchmarked: False`` on every one, so a reader can weigh them. A proper
-benchmark is running separately; when it lands, ``OBSERVATIONS`` is what needs
-re-checking, and nothing downstream will need un-picking because no correction
-was ever applied to a returned number.
+declare any of them unreliable. Observations about the tools are carried in
+``OBSERVATIONS`` with their sample size stated, so a reader can weigh them.
+
+The cross-target benchmark landed on 2026-08-15 and ALL THREE of the former
+n=1 observations moved: the sealed-pocket claim was overturned as stated (the
+pLDDT family drops on 5 of 5 targets; ipTM/ligand-ipTM are the unreliable ones),
+the 1.97-log affinity bias was overturned (no offset detectable over 17 pairs,
+and within-target ranking is NOT supported), and the ESMFold interface failure
+was reproduced exactly and shown to be an input-construction artifact. Every one
+had failed in the flattering direction. Nothing downstream needed un-picking,
+because no correction was ever applied to a returned number — and that is still
+true after the benchmark: a benchmarked observation is a statement about a
+population of targets, and your run is one draw from it.
 """
 
 from __future__ import annotations
@@ -51,15 +56,29 @@ __all__ = [
 # OBSERVATIONS
 #
 # Things we have actually seen on our own targets. Every entry states its
-# sample size and carries ``benchmarked: False``. NONE of these is applied to a
-# returned number as a correction, a gate or a downweighting. They are attached
-# to the payload so a caller can weigh them, and that is all.
+# sample size and carries an explicit ``benchmarked`` flag. NONE of these is
+# applied to a returned number as a correction, a gate or a downweighting. They
+# are attached to the payload so a caller can weigh them, and that is all.
 #
-# The distinction that matters: "n=1 target" observations describe one thing
-# that happened. Per-run quantities (seed dispersion, the positive-control log
-# error, the contact count) are recomputed fresh on every call and are the
-# numbers you should actually act on.
+# As of the 2026-08-15 cross-target benchmark, three entries carry
+# ``benchmarked: True`` with a real n (sealed-pocket confidence, 5 targets /
+# 30 folds; affinity, 17 pairs / 2 targets; ESMFold at interfaces, 14 complexes
+# / 28 runs). Each of those entries also carries a ``supersedes`` field naming
+# the n=1 claim it replaced, because all three of the originals were wrong in
+# the flattering direction and a reader who remembers the old figure needs to
+# see it withdrawn rather than silently absent.
+#
+# The distinction that still matters: a benchmarked observation is a statement
+# about a POPULATION of targets, and your run is one draw from it. Per-run
+# quantities (seed dispersion, the positive-control log error, the contact
+# count) are recomputed fresh on every call and are the numbers you should
+# actually act on.
 # ---------------------------------------------------------------------------
+# NOTE ON KEY NAMES: the first three keys below are HISTORICAL. They were named
+# for the single case each originally rested on (KRAS, tofacitinib, IL-17A) and
+# the names are kept so existing lookups still resolve, but the contents are now
+# 5-target, 17-pair and 14-complex benchmarks respectively. The payload labels
+# they are returned under were renamed to match the contents.
 OBSERVATIONS: dict[str, Any] = {
     "kras_sealed_pocket_confidence": {
         "what_was_measured": (
@@ -67,109 +86,306 @@ OBSERVATIONS: dict[str, Any] = {
             "been destroyed."
         ),
         "how": (
-            "KRAS switch-II pocket sealed shut with nine phenylalanine "
-            "substitutions (physically undruggable by construction), folded, "
-            "and compared against wild type."
+            "A known ligand site sealed shut with nine phenylalanine "
+            "substitutions (physically undruggable by construction) under one "
+            "uniform rule — pocket-lining residues within 5.0 A of the cognate "
+            "ligand in the holo assembly, the nine with the smallest side "
+            "chains mutated to Phe — then wild type and mutant each cofolded "
+            "with the cognate ligand and compared. Run on FIVE targets: KRAS "
+            "switch-II (6OIM/sotorasib), the JAK1 ATP site (4E4N), the "
+            "TNF-alpha trimer-interface site (2AZ5/SPD304), the IL-17A dimer "
+            "cavity (5HI3) and the BCL-2 BH3 groove (6O0K)."
         ),
-        "sample_size": {"targets": 1, "target": "KRAS", "mutants": 1, "seeds": 2},
-        "replicated_on_other_targets": False,
-        "benchmarked": False,
-        "generalises": "UNKNOWN — one target, one mutant. Not tested elsewhere.",
+        "sample_size": {
+            "targets": 5,
+            "target_list": ["KRAS", "JAK1", "TNFa", "IL17A", "BCL2"],
+            "states_per_target": 2,
+            "seeds_per_state": 3,
+            "total_folds": 30,
+        },
+        "replicated_on_other_targets": True,
+        "benchmarked": True,
+        "benchmark_date": "2026-08-15",
+        "generalises": (
+            "MEASURED over 5 targets. The DIRECTION generalises — the pLDDT "
+            "family drops on 5 of 5. The MAGNITUDE does not: it ranges from "
+            "-0.143 (KRAS, visible) to -0.019 (JAK1, invisible in practice). "
+            "Still NOT applied to any returned number."
+        ),
+        "supersedes": (
+            "The previous entry here was ONE target (KRAS) at TWO seeds and "
+            "reported the sealed mutant scoring HIGHER than wild type on every "
+            "pLDDT-family metric (complex pLDDT 0.940 -> 0.957, confidence "
+            "0.919 -> 0.927) with a 0.73 A backbone RMSD to wild type against a "
+            "1.02 A wild-type-vs-wild-type baseline. That claim is WITHDRAWN. "
+            "Its 1.02 A baseline was seed noise from two seeds; the proper "
+            "3-seed baseline on KRAS is 0.23 A."
+        ),
         "result": {
-            "complex_plddt_wild_type": 0.940,
-            "complex_plddt_nine_phe_mutant": 0.957,
-            "confidence_wild_type": 0.919,
-            "confidence_nine_phe_mutant": 0.927,
-            "mutant_scored_higher_on": "every pLDDT-family metric",
-            "ca_rmsd_mutant_vs_wild_type_a": 0.73,
-            "ca_rmsd_wild_type_vs_wild_type_baseline_a": 1.02,
-            "only_metric_that_moved": "average PAE",
+            "metric_notices_beyond_2x_seed_sd": {
+                "confidence_score": "5 of 5",
+                "complex_plddt": "5 of 5",
+                "complex_iplddt": "5 of 5",
+                "iptm": "3 of 5",
+                "ligand_iptm": "3 of 5",
+                "ptm": "2 of 5",
+                "avg_pae": "2 of 5",
+                "complex_pde": "2 of 5",
+            },
+            "complex_plddt_wild_type_to_sealed": {
+                "KRAS": [0.9547, 0.8122, -0.143],
+                "JAK1": [0.9666, 0.9480, -0.019],
+                "TNFa": [0.8585, 0.8295, -0.029],
+                "IL17A": [0.7912, 0.7511, -0.040],
+                "BCL2": [0.8094, 0.7632, -0.046],
+            },
+            "_complex_plddt_note": "[wild type, sealed, delta]; seed sd 0.0009-0.0166",
+            "ligand_iptm_ROSE_when_pocket_sealed": {
+                "TNFa": [0.8639, 0.9064],
+                "IL17A_flat": [0.9262, 0.9248],
+            },
+            "backbone_ca_rmsd_wt_vs_sealed_against_wt_vs_wt_baseline_a": {
+                "KRAS": [1.37, 0.23],
+                "JAK1": [0.83, 0.26],
+                "IL17A": [5.82, 2.98],
+                "BCL2_invisible": [4.64, 4.92],
+                "TNFa_invisible": [10.80, 14.85],
+            },
+            "_backbone_note": (
+                "notices on 3 of 5. BCL-2 and TNF-alpha are UNRESOLVED, not "
+                "negative: their wild-type seed baselines are as large as the "
+                "effect (TNF's baseline sd is 10.09 A), so the test has no "
+                "power there."
+            ),
         },
         "what_it_shows": (
-            "On THIS target, the confidence numbers did not notice that the "
-            "pocket was gone — the sealed mutant scored higher than wild type "
-            "and its backbone landed closer to wild type than two wild-type "
-            "seeds landed to each other."
+            "Cofolding confidence DOES register pocket destruction — the pLDDT "
+            "family on 5 of 5 — but the ligand-facing metrics are the "
+            "treacherous ones: iptm/ligand_iptm move the right way on only 3 of "
+            "5, and on TNF-alpha ligand_iptm ROSE when the pocket was sealed "
+            "shut. And the magnitudes are mostly unusable: JAK1 fell 0.967 to "
+            "0.948, which still reads as an excellent model, so only KRAS moved "
+            "enough for an operator to notice unaided."
         ),
         "what_it_does_not_show": (
-            "That cofolding confidence is anti-diagnostic for druggability in "
-            "general. That is a claim about the method drawn from one target, "
-            "and this module does not make it."
+            "That confidence is a druggability readout. Statistical "
+            "detectability is not operational detectability, and nothing tells "
+            "you the drop is there without the wild-type control beside it. "
+            "NEVER read a high confidence value as evidence that a predicted "
+            "pocket is real."
         ),
     },
     "tofacitinib_affinity_error": {
         "what_was_measured": (
-            "How far the Boltz-2 affinity value head landed from a measured "
-            "potency, for one compound."
+            "How far the Boltz-2 affinity value head lands from measured "
+            "potency, and whether it can order actives or only separate them "
+            "from non-binders."
         ),
-        "how": "JAK1 kinase domain vs tofacitinib, plus two unrelated negatives.",
-        "sample_size": {"targets": 1, "target": "JAK1", "compounds": 1, "compound": "tofacitinib", "decoys": 2},
-        "replicated_on_other_compounds": False,
-        "benchmarked": False,
+        "how": (
+            "17 protein-ligand pairs with ChEMBL consensus potencies (assay "
+            "confidence 9, relation '='), across JAK1 (12) and BCL-2 (5), "
+            "spanning pChEMBL 5.30-10.36, plus 6 decoys on JAK1."
+        ),
+        "sample_size": {
+            "targets": 2,
+            "target_list": ["JAK1", "BCL2"],
+            "pairs": 17,
+            "actives_for_triage": 12,
+            "decoys": 6,
+            "ground_truth": "ChEMBL consensus, not a single cherry-picked value",
+        },
+        "replicated_on_other_compounds": True,
+        "benchmarked": True,
+        "benchmark_date": "2026-08-15",
         "generalises": (
-            "UNKNOWN — ONE COMPOUND. A per-compound offset measured once is a "
-            "data point, not a bias term. It is deliberately NOT applied as a "
-            "correction anywhere in this module."
+            "MEASURED over 17 pairs / 2 targets. There is no offset to "
+            "generalise — the mean signed error is indistinguishable from zero, "
+            "so nothing is applied as a correction anywhere in this module and "
+            "nothing needs to be."
+        ),
+        "supersedes": (
+            "The previous entry here was ONE COMPOUND against ONE literature "
+            "value: tofacitinib predicted at 46.4 nM against 0.50 nM measured, "
+            "reported as a 1.97-log systematic bias, with a 2.36-log separation "
+            "from decoys that was 1 active against 2 decoys and had no n at "
+            "all. BOTH figures are withdrawn as stated."
         ),
         "result": {
-            "ligand": "tofacitinib",
-            "measured_nm": 0.50,
-            "predicted_nm": 46.4,
-            "signed_log_error": 1.97,
-            "error_direction": "predicted weaker than measured",
-            "separation_active_vs_decoys_log_units": 2.36,
-            "ordering_correct": True,
-            "binder_probability_active": 0.75,
-            "binder_probability_decoys": [0.37, 0.11],
+            "absolute_accuracy": {
+                "n_pairs": 17,
+                "mean_signed_error_log": 0.23,
+                "ci95_of_mean_offset": [-0.28, 0.74],
+                "p_vs_zero": 0.38,
+                "sign_split": "11 predicted too weak / 6 too strong",
+                "mae_log": 0.85,
+                "rmse_log": 1.06,
+                "ground_truth_own_spread_log": 0.58,
+                "_ground_truth_note": (
+                    "mean ChEMBL sd over the 11 compounds with >=3 "
+                    "measurements; ruxolitinib 0.72 over n=38, osimertinib 1.14 "
+                    "over n=264. The model runs at ~1.5x the experimental noise "
+                    "floor."
+                ),
+                "tofacitinib_rescored": {
+                    "measured_pchembl_consensus": 8.35,
+                    "n_chembl_measurements": 64,
+                    "predicted_pchembl": 7.39,
+                    "signed_log_error": 0.96,
+                    "_note": "the old 1.97 came from one 0.50 nM paper value",
+                },
+            },
+            "within_target_ranking_NOT_SUPPORTED": {
+                "JAK1": {"n": 12, "spearman": 0.483, "ci95": [-0.05, 0.77], "p": 0.11},
+                "BCL2": {"n": 5, "spearman": 0.600, "p": 0.28},
+                "pooled_DO_NOT_USE": {
+                    "n": 17,
+                    "spearman": 0.596,
+                    "p": 0.012,
+                    "_why_not": (
+                        "pooling two targets with different potency offsets "
+                        "manufactures rank correlation out of the offset"
+                    ),
+                },
+            },
+            "actives_vs_decoys_CONFIRMED": {
+                "n_actives": 12,
+                "n_decoys": 6,
+                "predicted_pchembl_actives": [7.07, 0.94],
+                "predicted_pchembl_decoys": [4.99, 0.64],
+                "binder_probability_actives": [0.724, 0.200],
+                "binder_probability_decoys": [0.116, 0.091],
+                "separation_log_units": 2.08,
+                "roc_auc_on_affinity": 0.972,
+                "roc_auc_on_binder_probability": 1.000,
+                "cohens_d": 2.44,
+                "_caveat": (
+                    "these decoys (caffeine, metformin) are trivially easy — an "
+                    "AUC of 1.0 measures binder/non-binder triage, not potency "
+                    "ranking"
+                ),
+            },
         },
         "what_it_shows": (
-            "On this one compound the ordering was right and the separation "
-            "from decoys was large, while the absolute value was far from the "
-            "measured potency."
+            "The head TRIAGES. It separates binders from non-binders with a "
+            "real n, and it carries no systematic offset to correct for."
         ),
         "what_it_does_not_show": (
-            "A calibration. One compound cannot establish a bias, a direction "
-            "that holds, or a magnitude that transfers to another chemotype or "
-            "another target."
+            "That it can order actives against each other — within-target "
+            "Spearman is +0.48 with a 95% CI including zero, and 'use it to "
+            "rank candidates within a target' is WITHDRAWN as a recommendation. "
+            "Nor that it measures potency: an 0.85-log MAE is a factor of 7, so "
+            "never compare its absolute value against a nanomolar threshold."
         ),
     },
     "il17a_esmfold_dimer": {
-        "what_was_measured": "ESMFold's inter-chain geometry on one homodimer.",
-        "how": "IL-17A mature chain (24-155) folded as a 2-chain input, compared to deposited 8DYG.",
-        "sample_size": {"complexes": 1, "complex": "IL-17A homodimer"},
-        "replicated_on_other_complexes": False,
-        "benchmarked": False,
-        "generalises": "UNKNOWN — one complex.",
+        "what_was_measured": (
+            "ESMFold's inter-chain geometry across complexes, and whether its "
+            "own confidence predicts when it has failed."
+        ),
+        "how": (
+            "14 protein-protein complexes with deposited references, each under "
+            "two poly-glycine linker constructions (G25 and G50) = 28 runs, "
+            "spanning obligate homo-oligomers, transient hetero-complexes, "
+            "antibody-antigen and our own pipeline targets. Input sequences "
+            "taken from the reference structure's observed CA residues, giving "
+            "1:1 correspondence."
+        ),
+        "sample_size": {"complexes": 14, "constructions": 2, "runs": 28},
+        "replicated_on_other_complexes": True,
+        "benchmarked": True,
+        "benchmark_date": "2026-08-15",
+        "generalises": (
+            "MEASURED over 14 complexes. What generalises is the GATE, not a "
+            "verdict on the tool: pTM tracks contact recovery at rho +0.79 and "
+            "pTM >= 0.80 was 5 of 5 with zero false alarms in 28 runs."
+        ),
+        "supersedes": (
+            "The previous entry here was ONE complex and read as a property of "
+            "the tool. It is reproduced EXACTLY and re-attributed: the '1 "
+            "contact against 97' is an INPUT-CONSTRUCTION artifact. See "
+            "input_construction_confound below."
+        ),
         "result": {
-            "inter_chain_contacts_predicted": 1,
-            "inter_chain_contacts_reference": 97,
-            "contact_definition": "CA-CA pairs within 8.0 A between the two chains",
+            "contact_definition": "CA-CA pairs within 8.0 A between chains",
             "contact_definition_note": (
-                "Re-verified here: 8DYG gives 97 CA-CA PAIRS but only 29 "
-                "residues-in-contact. The 97 is a PAIR count. A residue count "
-                "is a different, smaller number and is not comparable to it."
+                "8DYG gives 97 CA-CA PAIRS but only 29 residues-in-contact. "
+                "The 97 is a PAIR count and a residue count is not comparable "
+                "to it. The harness reproduces the reference numbers exactly "
+                "(8DYG: 97 contacts, minCA 4.04 A, COM 12.81 A)."
             ),
-            "min_inter_chain_ca_predicted_a": 7.30,
-            "min_inter_chain_ca_reference_a": 4.04,
-            "com_separation_predicted_a": 24.73,
-            "com_separation_reference_a": 12.81,
-            "dimer_tm_score": 0.328,
-            "monomer_tm_score": 0.446,
-            "ptm_dimer": 0.399,
-            "ptm_monomer": 0.905,
-            "avg_pae_dimer": 18.26,
-            "avg_pae_monomer": 3.66,
+            "bimodal": {
+                "median_contact_recovery": 0.42,
+                "above_50pct_recovery": "6 of 14",
+                "exactly_zero_recovery": "6 of 14",
+                "successes": {
+                    "HIVPR_dimer": 0.90,
+                    "SOD1_dimer": 0.90,
+                    "KRAS_RAF1RBD": 0.84,
+                    "TNFa_trimer": 0.78,
+                    "Barnase_barstar": 0.72,
+                    "Lysozyme_Fab": 0.54,
+                },
+            },
+            "self_report_tracks_error": {
+                "ptm_vs_contact_recovery_spearman": 0.788,
+                "ptm_vs_contact_recovery_ci95": [0.57, 0.91],
+                "ptm_vs_complex_tm_spearman": 0.943,
+                "plddt_vs_contact_recovery_spearman": 0.627,
+                "n": 28,
+            },
+            "ptm_as_a_gate": {
+                "no_cut": {"runs": 28, "median_recovery": 0.414, "zero_recovery": 10},
+                "ptm_ge_0.60": {"runs": 18, "median_recovery": 0.708, "zero_recovery": 2},
+                "ptm_ge_0.80": {"runs": 5, "median_recovery": 0.873, "zero_recovery": 0},
+                "false_alarms_in_28_runs": 0,
+                "_false_alarm_definition": "a run below pTM 0.60 that recovered >=50% of contacts — there were none",
+                "one_false_confidence": (
+                    "Trypsin/BPTI, pTM 0.752, recovery 0 — both chains fold "
+                    "well (chainTM 0.97) but BPTI docks on the wrong face. This "
+                    "is why the usable gate is 0.80 and not 0.70."
+                ),
+            },
+            "input_construction_confound": {
+                "_the_point": (
+                    "Same tool, same complex, same reference, same contact set. "
+                    "Only the input sequence differs."
+                ),
+                "IL17A_full_uniprot_mature_chain": {
+                    "contacts": 1,
+                    "contact_recovery": 0.000,
+                    "min_inter_chain_ca_a": 7.30,
+                    "com_separation_a": 21.84,
+                    "ptm": 0.399,
+                    "_note": "reproduces the withdrawn claim exactly",
+                },
+                "IL17A_crystallographically_ordered_core": {
+                    "contacts": 55,
+                    "contact_recovery": 0.423,
+                    "min_inter_chain_ca_a": 4.25,
+                    "com_separation_a": 13.51,
+                    "complex_tm": 0.861,
+                    "ptm": 0.684,
+                },
+                "not_general": (
+                    "TNF-alpha is unaffected by the same swap (0.780 ordered "
+                    "core vs 0.807 full mature chain). It bites on chains with "
+                    "long disordered termini."
+                ),
+                "linker_length_is_minor": "paired G50-G25 mean difference -0.032, sd 0.109, n=14",
+            },
         },
         "what_it_shows": (
-            "On this one dimer the predicted chains barely touched, AND the "
-            "model's own pTM and PAE moved sharply between the monomer and the "
-            "dimer — i.e. the per-run self-report tracked the per-run outcome."
+            "ESMFold is BIMODAL at interfaces, not uniformly bad, and its own "
+            "pTM tells you which mode you got. Trim the input to the ordered "
+            "region, gate at pTM >= 0.80, and treat pTM < 0.6 as 'no answer' "
+            "rather than as a negative result."
         ),
         "what_it_does_not_show": (
-            "That ESMFold is unreliable at interfaces as a general property. "
-            "One complex. ``esmfold_predict`` therefore returns the self-report "
+            "That a low-contact result is a finding about the complex. On a "
+            "protein with disordered termini it is a prompt to re-run on the "
+            "ordered core. ``esmfold_predict`` still returns the self-report "
             "and the contact count and does not gate, flag or downweight on "
-            "this basis."
+            "this basis — the caller applies the gate."
         ),
     },
     "seed_dispersion_and_site_convergence": {
@@ -812,10 +1028,13 @@ def cofold_complex(
         },
         "single_target_observations": {
             "_read_this_first": (
-                "One observation, one target, not benchmarked, NOT applied to "
-                "anything above. Weigh it yourself."
+                "Benchmarked 2026-08-15 over 5 targets / 30 folds, and still "
+                "NOT applied to anything above. The pLDDT family notices a "
+                "sealed pocket on 5 of 5, but usually by 0.02-0.05, which no "
+                "reader will see without the wild-type control beside it — and "
+                "ligand_iptm ROSE on TNF-alpha. Weigh it yourself."
             ),
-            "kras_sealed_pocket": OBSERVATIONS["kras_sealed_pocket_confidence"],
+            "sealed_pocket_benchmark": OBSERVATIONS["kras_sealed_pocket_confidence"],
         },
         "seed_dispersion": _seed_dispersion(result.structures),
         "converged_site": _converged_site(result.structures),
@@ -882,13 +1101,22 @@ def cofold_affinity(
     timeout: int = 3600,
     verbose: bool = False,
 ) -> dict[str, Any]:
-    """Rank ligands against a protein with the Boltz-2 affinity head.
+    """Triage binders from non-binders against a protein with the Boltz-2
+    affinity head.
 
-    The primary output is ``ranking``. Absolute values are returned under
-    ``absolute`` marked ``is_a_kd: False`` and ``benchmarked: False`` — the
-    reason being simply that this head has not been benchmarked against
-    measured affinities here, so nothing it emits is quotable as a potency. No
-    correction, offset or calibration is applied to any returned value.
+    The primary output is ``ranking``, and after the 2026-08-15 benchmark it
+    should be read as a **binder/non-binder split, not a series ordering**:
+    within-target Spearman is +0.48 with a 95% CI of (-0.05, +0.77), p=0.11
+    (n=12 on JAK1), while actives-vs-decoys separation is ROC AUC 0.972 on
+    affinity and 1.000 on binder probability.
+
+    Absolute values are returned under ``absolute`` marked ``is_a_kd: False``
+    and ``benchmarked_against_measured_affinities: False`` — meaning THIS RUN
+    was not calibrated against measurements, not that the head is unstudied.
+    Benchmarked over 17 pairs it carries no systematic offset (mean signed error
+    +0.23 log, p=0.38) but an MAE of 0.85 log, a factor of 7, so nothing it
+    emits is quotable as a potency. No correction, offset or calibration is
+    applied to any returned value.
 
     Supply ``positive_control_smiles`` + ``positive_control_measured_nm`` to run
     the rule-12 control in the same call. That control is a FRESH per-run
@@ -953,10 +1181,14 @@ def cofold_affinity(
                     "correction_applied": None,
                     "warning": (
                         "Do NOT report this as a Kd, IC50 or potency and do NOT "
-                        "compare it against a nanomolar threshold. This head has "
-                        "not been benchmarked against measured affinities here, "
-                        "so the relationship between this number and a real "
-                        "potency is unknown. Use the ranking, and use the "
+                        "compare it against a nanomolar threshold. Benchmarked "
+                        "2026-08-15 over 17 pairs the head carries NO "
+                        "systematic offset (mean signed error +0.23 log, 95% CI "
+                        "-0.28 to +0.74, p=0.38) but an MAE of 0.85 log — a "
+                        "factor of 7 — so there is nothing to correct and "
+                        "nothing quotable. Use the ranking as a binder/"
+                        "non-binder split (NOT as an ordering of actives: "
+                        "within-target Spearman +0.48, p=0.11), and use the "
                         "positive control you ran on THIS target."
                     ),
                 },
@@ -1036,16 +1268,25 @@ def cofold_affinity(
         )
         if len(ranked) < 2
         else (
-            "Ranks are within-target only. Do not compare ranks or scores "
-            "across different protein targets."
+            "Ranks are within-target only — do not compare ranks or scores "
+            "across different protein targets; pooling targets with different "
+            "potency offsets manufactures rank correlation out of the offset. "
+            "And read this ordering as a BINDER/NON-BINDER split, not as an "
+            "ordering of actives: benchmarked 2026-08-15, within-target "
+            "Spearman is +0.48, 95% CI (-0.05, +0.77), p=0.11 (n=12, JAK1), "
+            "while actives-vs-decoys is ROC AUC 0.972 / 1.000."
         ),
         "control": control,
         "per_ligand": rows,
         "single_compound_observations": {
             "_read_this_first": (
-                "ONE compound, not benchmarked, NOT applied to anything above."
+                "Benchmarked 2026-08-15 over 17 pairs / 2 targets, and still "
+                "NOT applied to anything above. Read it for what it withdraws: "
+                "there is no 1.97-log bias to correct for, and ordering actives "
+                "against each other is NOT supported (Spearman +0.48, "
+                "p=0.11). The ranks above are a binder/non-binder split."
             ),
-            "tofacitinib_on_jak1": OBSERVATIONS["tofacitinib_affinity_error"],
+            "affinity_benchmark": OBSERVATIONS["tofacitinib_affinity_error"],
         },
         "provenance": _prov("boltz2-affinity", config, device=device, wall_s=wall),
     }
@@ -1140,9 +1381,14 @@ def esmfold_predict(
         else None,
         "single_complex_observations": {
             "_read_this_first": (
-                "ONE complex, not benchmarked, NOT applied to anything above."
+                "Benchmarked 2026-08-15 over 14 complexes / 28 runs, and still "
+                "NOT applied to anything above — the gate is the caller's to "
+                "apply. Two things to take from it: pTM >= 0.80 was 5 of 5 with "
+                "zero false alarms, and a near-zero contact count on a chain "
+                "with disordered termini is a prompt to re-run on the "
+                "crystallographically ordered core, not a finding."
             ),
-            "il17a_homodimer": OBSERVATIONS["il17a_esmfold_dimer"],
+            "esmfold_interface_benchmark": OBSERVATIONS["il17a_esmfold_dimer"],
         },
         "provenance": _prov(
             "esmfold-prediction",

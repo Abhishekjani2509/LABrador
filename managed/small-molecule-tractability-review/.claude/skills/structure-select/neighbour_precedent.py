@@ -21,15 +21,20 @@ measurements. In short: `hit.evalue` is really the probability and
 `hit.bit_score` is really the E-value (remote mode mislabels columns), a
 TM-score is only obtainable via `mode='tmalign'` where it lands in `bit_score`,
 `target_id` is a filename-plus-title blob, not an ID, and **`foldseek-search`
-searches only ONE chain of a multi-chain input** — which is why an assembly with
-more than one chain is routed to `foldseek-multimer-search` instead.
+does not assemble a multi-chain input into a complex** — which is why an
+assembly with more than one chain is routed to `foldseek-multimer-search`.
 
-The multimer path exists because almost every target this pipeline cares about
-is an oligomer whose site is at an interface (TNF-alpha's trimer axis, IL-17A's
-dimer groove). It is *measurably* a different search — verified on IL-17A 8DYG
-assembly1, where single-chain reached one protomer and multimer reached both —
-but on that target it did **not** change the precedent conclusion. See
-`SEARCH_PATH_CAVEAT`.
+CORRECTION, and it matters because the earlier version of this note was wrong.
+`foldseek-search` was believed to search only ONE chain of a multi-chain file,
+on the evidence that IL-17A 8DYG assembly1 (188 residues) returned no
+`query_end` above 95. That inference does not hold. The raw m8 shows **both**
+query chains present (`job_A` 144 rows, `job_B` 139) — query residues are simply
+numbered per protomer, in both searches. What `foldseek-search` actually does is
+align every chain INDEPENDENTLY and concatenate the results with no complex
+assignment, no complex TM-score, and (because the wrapper drops m8 column 1) no
+way to tell the chains apart. So it yields a union of per-protomer
+neighbourhoods, which is still not evidence about an interface — the practical
+conclusion survives, the stated mechanism did not. See `SEARCH_PATH_CAVEAT`.
 
 The load-bearing caveat is `_ENTRY_LEVEL_CAVEAT` below and it is *implemented*,
 not just documented: an entry's ligands are attributed to the entry, so in a
@@ -62,15 +67,21 @@ _ENTRY_LEVEL_CAVEAT = (
 )
 
 SEARCH_PATH_CAVEAT = (
-    "foldseek-search reads only ONE chain of a multi-chain file (measured: "
-    "IL-17A 8DYG assembly1, 188 residues in, max query_end 95 across all 283 "
-    "hits). foldseek-multimer-search reads all of them (same input: 863 rows, "
-    "433 from chain A and 430 from chain B; 135 of the 137 surviving entries "
-    "matched BOTH query chains). For an oligomeric site the multimer path is "
-    "the only one asking the right question. It did NOT change the answer on "
-    "IL-17A -- both paths return the cystine-knot superfamily and zero "
-    "defensible small-molecule holo -- but that is a result about IL-17A, not "
-    "a licence to run the single-chain path on an oligomer."
+    "foldseek-search aligns each chain of a multi-chain file INDEPENDENTLY and "
+    "returns the union, with no complex assignment and no complex TM-score. "
+    "foldseek-multimer-search additionally pairs query chains to target chains "
+    "into complex matches and scores the complex. Measured on IL-17A 8DYG "
+    "assembly1: single-chain 283 rows / 125 entries, multimer 863 rows / 174 "
+    "entries with 135 of 137 surviving entries matching BOTH query chains and "
+    "ranked by complex TM-score. On TNF-alpha (3 chains) multimer returned "
+    "6,891 rows and 1,206 complex assignments of size 3 -- genuine trimer "
+    "matches. NOTE: max(query_end) is NOT a test of which path ran; query "
+    "residues are numbered per protomer in both (IL-17A: 95 either way). Check "
+    "meta['query_chains'] instead. On BOTH calibration targets the multimer "
+    "path did NOT change the precedent conclusion -- IL-17A returns the "
+    "cystine-knot superfamily and TNF-alpha the TNF superfamily, with zero "
+    "defensible small-molecule holo either way. It is used because on the next "
+    "oligomer that agreement cannot be checked, not because it changed these."
 )
 
 #: The multimer m8 has **26 columns**, not the 12 the shared parser reads, and
@@ -712,21 +723,32 @@ def _entry_facts(
 
 def _druglike_comp_ids_for_accessions(
     accessions: list[str], *, env: dict[str, str], paperclip: str, page: int = 190
-) -> list[str]:
-    """Every comp_id across these accessions' entries; returns the drug-like.
+) -> tuple[list[str], list[str]]:
+    """(drug-like comp_ids, accessions whose ligand sweep FAILED).
 
     Paged with LIMIT/OFFSET because Paperclip caps at 200 rows and a
     `STRING_AGG` of a few hundred comp_ids would hit the ~880-character cell
     truncation instead — the aggregate trick does not defeat the cap.
+
+    The second return value is load-bearing. A statement timeout here is a
+    *lookup failure*, and an accession whose ligands were never read is not an
+    accession with no drug-like ligands. Reporting the two the same way is the
+    original false-negative bug wearing new clothes, so they are kept apart and
+    the failures surface as `lookup_failed` on the accession block.
     """
     # ONE ACCESSION AT A TIME. Unioning 17 accessions into a single DISTINCT
     # over every entry's ligands times out (measured: the IL-17A single-chain
     # neighbourhood, which includes VEGF-A with 75+ entries). Per accession it
     # is a handful of fast statements, and the union is done here.
     seen: set[str] = set()
+    failed: list[str] = []
     for acc in accessions:
         offset = 0
         while True:
+            # `IN (SELECT ...)` on entry_ligands is the fast plan; a direct
+            # JOIN of structures_by_accession to entry_ligands is NOT, and
+            # times out on the same accession (P15692: 9 ms vs >120 s). Keep
+            # the subquery.
             sql = f"""
             WITH s AS (SELECT DISTINCT st.entry_id
                        FROM pdb_v.structures_by_accession st
@@ -735,13 +757,26 @@ def _druglike_comp_ids_for_accessions(
             WHERE l.entry_id IN (SELECT entry_id FROM s) AND {_CANDIDATE}
             ORDER BY 1 LIMIT {page} OFFSET {offset}
             """
-            rows = _run_sql(sql, env=env, paperclip=paperclip, timeout=300.0)
+            rows = None
+            for attempt in range(2):
+                try:
+                    rows = _run_sql(
+                        sql, env=env, paperclip=paperclip, timeout=300.0
+                    )
+                    break
+                except (RuntimeError, subprocess.TimeoutExpired):
+                    if attempt:  # both attempts spent
+                        rows = None
+            if rows is None:
+                failed.append(acc)
+                break
             seen.update(r["comp_id"] for r in rows if r.get("comp_id"))
             if len(rows) < page:
                 break
             offset += page
     verdicts = _classify(sorted(seen))
-    return sorted(c for c in seen if (v := verdicts.get(c.upper())) and v.is_druglike)
+    dl = sorted(c for c in seen if (v := verdicts.get(c.upper())) and v.is_druglike)
+    return dl, sorted(set(failed))
 
 
 def _accession_precedent(
@@ -763,9 +798,22 @@ def _accession_precedent(
     resulting drug-like comp_ids as an explicit `IN` list. Same chemistry, one
     server-side aggregation, no row-cap exposure.
     """
-    druglike_ids = _druglike_comp_ids_for_accessions(
+    druglike_ids, failed_accs = _druglike_comp_ids_for_accessions(
         accessions, env=env, paperclip=paperclip
     )
+
+    def _mark(block: dict[str, Any], acc: str) -> dict[str, Any]:
+        if acc in failed_accs:
+            block["lookup_failed"] = True
+            block["holo_determined"] = False
+            block["basis"] = (
+                "the ligand sweep for this accession FAILED (statement "
+                "timeout). Its holo count is UNDETERMINED and a zero here "
+                "must not be read as 'no drug-like ligands'."
+            )
+        else:
+            block.setdefault("holo_determined", True)
+        return block
 
     # FAST PATH, and it is the common one: nothing in the neighbourhood
     # classified drug-like, so every holo count is zero by construction and the
@@ -782,18 +830,21 @@ def _accession_precedent(
         GROUP BY 1 ORDER BY 1
         """
         summary = {
-            r["acc"]: {
-                "n_structures": int(r["n_struct"] or 0),
-                "n_holo_entry_level": 0,
-                "n_holo_single_protein_entries": 0,
-                "attribution_ambiguous_holo": 0,
-                "ligands_single_protein_entries": [],
-                "ligands_complex_entries_UNATTRIBUTED": [],
-                "basis": (
-                    "no component across any structure of this accession "
-                    "classified as drug-like by ligand_filter"
-                ),
-            }
+            r["acc"]: _mark(
+                {
+                    "n_structures": int(r["n_struct"] or 0),
+                    "n_holo_entry_level": 0,
+                    "n_holo_single_protein_entries": 0,
+                    "attribution_ambiguous_holo": 0,
+                    "ligands_single_protein_entries": [],
+                    "ligands_complex_entries_UNATTRIBUTED": [],
+                    "basis": (
+                        "no component across any structure of this accession "
+                        "classified as drug-like by ligand_filter"
+                    ),
+                },
+                r["acc"],
+            )
             for r in _run_sql(sql, env=env, paperclip=paperclip, timeout=300.0)
         }
         return summary, {}
@@ -854,14 +905,17 @@ def _accession_precedent(
     for r in _run_sql(summary_sql, env=env, paperclip=paperclip, timeout=slow):
         n_entry = int(r["n_holo_entry"] or 0)
         n_single = int(r["n_holo_single"] or 0)
-        summary[r["acc"]] = {
-            "n_structures": int(r["n_struct"] or 0),
-            "n_holo_entry_level": n_entry,
-            "n_holo_single_protein_entries": n_single,
-            "attribution_ambiguous_holo": n_entry - n_single,
-            "ligands_single_protein_entries": _split(r["lig_single"]),
-            "ligands_complex_entries_UNATTRIBUTED": _split(r["lig_complex"]),
-        }
+        summary[r["acc"]] = _mark(
+            {
+                "n_structures": int(r["n_struct"] or 0),
+                "n_holo_entry_level": n_entry,
+                "n_holo_single_protein_entries": n_single,
+                "attribution_ambiguous_holo": n_entry - n_single,
+                "ligands_single_protein_entries": _split(r["lig_single"]),
+                "ligands_complex_entries_UNATTRIBUTED": _split(r["lig_complex"]),
+            },
+            r["acc"],
+        )
 
     titles: dict[str, list[dict[str, Any]]] = {}
     # `ranked` filters on n_dl > 0, which is unsatisfiable when nothing in the
@@ -1117,8 +1171,10 @@ def neighbour_precedent(
                 None
                 if search_path == "multimer" or n_chains <= 1
                 else f"WARNING: the query file has {n_chains} chains but the "
-                "SINGLE-CHAIN search ran, so only one protomer was searched. "
-                "This block is NOT evidence about an interface site."
+                "SINGLE-CHAIN search ran. Each chain was aligned "
+                "independently and the results concatenated, so this is a "
+                "union of per-protomer neighbourhoods with no complex "
+                "assignment. It is NOT evidence about an interface site."
             ),
         },
         "not_found": [],

@@ -35,6 +35,48 @@ set -a; . <repo>/.env; set +a
 The upstream graph is a JSON file with `things`, `links`, `findings`, `papers`
 and `gaps`. Its `rounds` array records the asks already issued against it.
 
+## What the real graph actually looks like
+
+The producer is `managed/research-evidence-mapper/` on the LABrador repo's
+`labrador/main` branch. Read it without merging:
+
+```bash
+git ls-tree -r labrador/main managed/research-evidence-mapper/
+git show labrador/main:managed/research-evidence-mapper/SCHEMA.md
+git show labrador/main:managed/research-evidence-mapper/runs/g_1a4f.json
+```
+
+One real run exists: `g_1a4f`, round 2, `status: ok`, 5 things / 6 links /
+12 findings / 4 papers / 3 gaps. Diffed against what `graph_read.py` expects:
+
+**Fields we read that behave as documented** — `schema_version` `1.1`,
+`graph_id`, `question`, `round`, `status`, `coverage.{depth,truncated,
+stop_reason,no_quote_discarded,limits,found,read,used}`, `things.{id,name,kind,
+aliases,mentions}`, `links.{id,from,how,to,yes,no,no_effect,state,why,basis,
+confidence,changed_in_round}`, `papers.{id,title,year,journal,doi,first_author,
+study_type,is_preprint,retracted}`, `gaps.{id,missing,implied_by,note,
+confidence,searched_in_round}`, `rounds[]`. No breaking rename anywhere.
+
+**Additive fields, none of which we read** — `papers[].pmid`;
+`coverage.{queries_run, figures_read, figures_skipped_reason}`;
+`findings[].claim`, a model-written paraphrase sitting beside the verbatim
+`quote`. Harmless, but `claim` is *not* quote-guaranteed and must never be used
+where a quote is required.
+
+**Fields SCHEMA.md defines that the real run omits** — `findings[].flags` and
+`findings[].round` are simply absent. `flags` matters: `is_secondary()` reads
+`flags: ["background"]` as one of its three signals, so on this graph that
+signal is permanently silent and only `is_own_result` and `study_type` are
+doing the work.
+
+**Guarantees that are documented and not enforced** — see failure mode 13.
+`rounds[1].target` is `"g3"`, and `gaps` holds `g1`, `g2`, `g4`. Finding `f6`
+is referenced by no link.
+
+**The difference that actually matters is not in the field list.** It is that
+the real graph contains no `protein` or `gene` node at all — see failure mode
+12b. The format is fine. The granularity is not.
+
 ## Procedure
 
 ### 0. Check `status` before anything else
@@ -52,10 +94,31 @@ Never report zero nominations without quoting `status` alongside it.
 python3 graph_read.py <graph.json>
 ```
 
-Stdlib only, no dependencies. It returns `nominations`, `rejected` and
-`needs_adjudication`. Read all three. `rejected` is where a wrongly-dropped
-target would be hiding, and `needs_adjudication` is a decision waiting for you —
-neither is a log to skim.
+Stdlib only, no dependencies. It returns seven blocks and **all seven are
+load-bearing**:
+
+| block | why you read it |
+| --- | --- |
+| `integrity` | dangling ids, duplicate ids, findings no link references. Any of these means a row was silently lost or overwritten. See failure mode 13. |
+| `coverage` | whether an absence in this graph may be read as an absence at all. `warnings` empty is the only clean state. |
+| `selection` | how many candidates, and the explicit statement that the graph offers no basis to choose between them. |
+| `nominations` | the candidates, each with `evidence_class`, `support`, `quote_reading` and `direction_warning`. |
+| `contested_nominations` | things that are **both** nominated and rejected. Almost always the gap door — failure mode 12. |
+| `rejected` | where a wrongly-dropped target would be hiding. |
+| `needs_adjudication` | a decision waiting for you: an unknown verb, or a verb whose own quotes contradict it. |
+
+Neither `rejected` nor `needs_adjudication` is a log to skim.
+
+**Zero nominations is never a result on its own.** It is what a granularity
+mismatch, a dangling id, an unknown verb and a genuinely empty literature all
+look like. Read `selection.note`, `status`, `coverage` and `integrity` before
+saying the graph contains no targets. Failure mode 12b is what this looks like
+on real data.
+
+The helper now **refuses** rather than degrades on: an absent or null top-level
+list, a non-object `coverage`, a `NaN`, and a `--thing` id that was never
+nominated. Each of those used to produce a clean exit 0 with an empty or wrong
+answer, which reads as "no targets in this literature."
 
 Nomination rule, both halves required:
 
@@ -76,12 +139,28 @@ The helper classifies an edge by the **subject's kind**, not by the verb alone.
 `activates` from a small molecule is an agonist; `activates` from a receptor is
 pathway biology.
 
-**`how` has no enum.** Every other categorical field in SCHEMA.md carries an
-explicit `a|b|c` comment. `how` does not — it is open vocabulary written by the
-upstream extraction model. So `DIRECT_ACTION` and `DOWNSTREAM_EFFECT` are a best
-guess against an unbounded space, and `needs_adjudication` is load-bearing rather
-than a corner case. Read it on every run. An unrecognised verb there is a target
-the intake could not classify, not a rare edge.
+**`how` has no enum in SCHEMA.md** — every other categorical field there carries
+an explicit `a|b|c` comment and `how` does not. But the upstream `claim-extraction`
+SKILL.md **does** pin it, to a closed list of eleven:
+
+> `binds` · `inhibits` · `activates` · `increases` · `decreases` · `causes` ·
+> `treats` · `associated_with` · `expressed_in` · `measured_by` ·
+> `no_relationship_stated`
+
+That list barely overlaps ours. Three of the eleven are in `DIRECT_ACTION`
+(`binds`, `inhibits`, `activates`), exactly one is in `DOWNSTREAM_EFFECT`
+(`increases`), and the remaining seven — including `decreases`, the single most
+likely verb for a cytokine readout — match neither set.
+
+And the extractor does not obey its own list. The one real graph we have
+(`g_1a4f`) emits `blocks`, `suppresses` and `drives`, none of which appear in the
+eleven. So the vocabulary is unaligned in both directions: our sets do not match
+their spec, and their output does not match their spec either.
+
+Two consequences. `needs_adjudication` is the **normal** path, not a corner case —
+against the documented vocabulary it fires on 7 of 11 verbs. And a verb landing
+in one of our sets proves nothing about whether it was the right set, which is
+why the verb no longer decides alone (failure mode 12c).
 
 ### 2. Read the mechanism out of the quotes — judgment, yours
 
@@ -622,6 +701,215 @@ lookups and recorded their nulls before you may write the ask. If that feels
 like it defeats the purpose, that is the correct feeling. The mechanism is meant
 to fire rarely — a handful of times a year, on claims that genuinely have no
 answer inside our instruments — not to be a routing layer for hard questions.
+
+### 12. The gap door — a readout nominated as a target, with its rejection deleted
+
+The nomination rule has two halves and the second one has no evidence behind it.
+
+**Upstream `gaps` are not a curated list of undrugged candidates.** They are
+structural open triangles, computed from graph shape alone:
+`assemble.py find_gaps()` emits a gap for every pair of things that share a
+neighbour and have no edge to each other. Nothing about a gap says the pair is
+biologically interesting, and nothing says either half is a target.
+
+So run **their** generator over **our** RA fixture, unchanged, and it emits:
+
+```
+g5  missing: [t1, t5]   = [IRAK4, IL-6]   confidence 0.16
+```
+
+— because both connect to zimlovisertib. IL-6 is then nominated as a target,
+through the gap half, on no evidence at all. And the old code then ran
+`rejected.pop(tid)`, which **deleted** IL-6's `"reached only by downstream-effect
+edge L3 (reduces) -- readout, not target"` reason. Nomination present, rejection
+gone, exit 0.
+
+That is failure mode 2 arriving through the door built to catch undrugged
+candidates, and our shipped fixture never caught it because the gaps in it
+(`g1 [t2,t4]`, `g2 [t1,t4]`) were **hand-authored by us** and happen to contain no
+readout. We wrote both sides.
+
+A gap nomination now carries `evidence_class: "structural_gap_only"`, a rejection
+is never deleted, and a thing that is both appears in `contested_nominations`.
+**A gap-only nomination is a question, not a candidate.** Treat it as
+`test_gap` material, never as an input to the dossier on its own.
+`upstream_graph_gapdoor.json` is the fixture.
+
+### 12b. Zero nominations from a perfectly healthy graph
+
+Run this intake against `g_1a4f` — the only real graph the knowledge-graph team
+has produced — and it returns **zero nominations**, `status: "ok"`, exit 0.
+
+Not because the literature is empty. Because that graph models things at a
+coarser grain than we do. Its five `things` are:
+
+| id | name | kind |
+| --- | --- | --- |
+| t1 | IRAK4 inhibition | `small_molecule` |
+| t2 | myeloid inflammatory signalling | `process` |
+| t3 | synovial fibroblast driven inflammation | `process` |
+| t4 | MyD88 dimerization inhibition | `small_molecule` |
+| t5 | TLR/MyD88/NF-kB signalling axis | `process` |
+
+**There is not one `protein` or `gene` node in it.** The extractor nominalises:
+it makes nodes out of *interventions* ("IRAK4 inhibition", typed
+`small_molecule`, with the actual compounds PF-06650833 and KIC-0101 demoted to
+`aliases`) and out of *phenotypes*, never out of the protein. IRAK4, MyD88 and
+IRAK1 exist in that file only as substrings inside other nodes' names.
+
+Our nomination rule requires `kind in {protein, gene}`. Against this graph it can
+never fire, on any round, for any target.
+
+**This is the single most likely thing to go wrong when a real graph arrives, and
+before the fix we would not have noticed** — zero nominations with `status: ok`
+reads exactly like "no druggable targets in this literature." It now reports
+`selection.n_candidates: 0` with a note naming granularity mismatch as one of the
+things that lands there. When you see it: read `rejected`, check the `kind`
+distribution yourself, and if there are no `protein`/`gene` nodes at all, that is
+an `expand_node` ask on the intervention node — not a finding about the target.
+
+### 12c. The verb decided, and the quote was never read
+
+`classify()` was a pure function of (subject `kind`, verb). The quote never
+reached it. So the graded IL-6 negative passed for one reason only: `reduces`
+happens to sit in `DOWNSTREAM_EFFECT`.
+
+Measured across 18 shape-matched pairs — same grammar, same subject, only the
+verb and the readout/target distance varying — the boundary was a straight line
+with no gradient:
+
+| what happened | how often | class |
+| --- | --- | --- |
+| a `DIRECT_ACTION` verb on a readout → **nominated as a target** | 6 of 6 | silent wrong |
+| a `DOWNSTREAM_EFFECT` verb on a real target → **rejected as a readout** | 2 of 2 | silent wrong |
+| a verb in neither set → `needs_adjudication` | 2 of 2 | loud, correct |
+
+`blocks IL-6 secretion`, `inhibits IL-6 production`, `modulates IL-6 output`,
+`engages IL-6 (inferred because serum levels fell)` all nominated a secreted
+cytokine as a druggable target. `suppresses IRAK4 catalytic activity, Ki 1.1 nM`
+and `attenuates IRAK4 enzymatic activity in a purified system` both rejected a
+kinase as a readout.
+
+The distance between readout and target made no difference at all, because the
+distance lives in the quote and the quote was not consulted. **The only thing
+that mattered was which set the verb fell into** — and per the vocabulary note in
+step 1, that is close to a coin flip on real upstream output. The graded negative
+is one verb away from failing, and the verb it needs (`inhibits` for "inhibited
+IL-6 production") is the one upstream's own extraction skill tells the model to
+emit.
+
+`signals()` — the whole quote-reading apparatus — was only ever computed for
+*unclassified* verbs. On a recognised verb it never ran.
+
+Now it always runs. Where the verb and its own quotes disagree the edge goes to
+`needs_adjudication` with `why_contested`, and it is neither nominated nor
+rejected. Where they agree the reading travels with the nomination as
+`quote_reading`.
+
+**Read `quote_reading: "silent"` carefully.** It is the residual boundary: the
+quote carries no vocabulary either way, so nothing but the verb supports that
+nomination. `targets IL-6 driven inflammation in synovium` reads silent and still
+nominates, because there is genuinely nothing in the sentence to catch it. That
+one is yours. `upstream_graph_verbquote.json` is the fixture.
+
+### 13. Every id resolves — except it doesn't
+
+SCHEMA.md's guarantees section says "Every id resolves. `from`, `to`, `paper`,
+and the ids inside `yes`, `no`, `no_effect`, `implied_by` all point to a row in
+the same file."
+
+It is not enforced. The one real graph we have breaks it on arrival:
+`rounds[1].target` is `"g3"` against a `gaps` list of `g1`, `g2`, `g4`. It also
+carries `f6`, a finding no link references, invisible to this intake entirely.
+
+Before the fix, each of these was silent:
+
+- a link whose `to` did not resolve **vanished** — no nomination, no rejection,
+  no adjudication, nothing anywhere in the output;
+- a link citing a nonexistent finding skipped it without comment;
+- a finding citing a missing paper came back with `paper_ref: null` **and
+  `retracted: null`**, so a retracted source reads as clean;
+- a duplicate id **overwrote last-wins**, which is the worst of them: declare
+  `t1` twice and the second row silently relabels the whole neighbourhood, so
+  `zimlovisertib inhibits IRAK4` renders as `zimlovisertib inhibits IL-6` and the
+  agent resolves an accession for the wrong protein off the right evidence. That
+  is failure mode 3 produced mechanically.
+
+All of it now lands in `integrity`. None of it stops the run — a graph with one
+dangling id is still mostly usable — but **a nomination that touches one of these
+rows is not trustworthy**, and the block tells you which rows those are.
+`upstream_graph_integrity.json` is the fixture.
+
+### 14. `coverage` fields that were never read
+
+Three of them, each one a way to read an absence as a result:
+
+- **`no_quote_discarded`** — the upstream pipeline's *only* documented removal.
+  A claim whose quote will not string-match the fetched text is dropped, never
+  repaired. It was surfaced nowhere. A graph that discarded 41 claims looked
+  identical to one that discarded none, and anything this intake reports as
+  "not stated" may be among them.
+- **`depth: "quick"`** — SCHEMA.md note 2: quick reads page 1, and page 1 lies.
+  At `quick`, absence means unknown *whatever* `stop_reason` says.
+- **an absent `coverage` block** — `graph.get("coverage", {})` returned `{}`, so
+  `stop_reason` was `None`, so no warning fired, so a graph with no coverage
+  block at all read exactly like a `complete` one.
+
+The trap is the combination: `stop_reason: "complete"` with `truncated: false`
+made the old `coverage_warning` null, so a page-1 skim that threw away 41 claims
+presented as an exhausted search. Read `coverage.warnings`; empty is the only
+clean state, and `literature_exhausted` requires all three of untruncated,
+`complete`, and not-quick. `upstream_graph_coverage.json` is the fixture.
+
+### 15. Three candidates and no way to choose
+
+The dossier Contract takes exactly **one** `uniprot_accession`. The graph can
+nominate any number and offers nothing to rank them by — and this skill does not
+rank, deliberately.
+
+That was previously a plain list sorted by `thing` id, with no field saying a
+choice was required. `thing` id order is upstream insertion order and carries no
+meaning whatsoever, so an agent taking the first took an arbitrary one, silently,
+with no record that three others existed.
+
+`selection` now reports `n_candidates`, `basis_to_choose: null`, and splits
+`with_direct_action_evidence` from `gap_only_no_evidence` — because a gap-only
+nomination must never sit in a list beside targets with measured IC50s as though
+they were the same kind of thing.
+
+**What to do:** run the dossier once per candidate if the question allows it;
+otherwise state the ambiguity, populate `ambiguity`, leave `uniprot_accession`
+null, and issue one ask. Same rule as accession ambiguity in step 4 — an
+unresolved target is a correct output. Never take the first.
+`upstream_graph_multitarget.json` is the fixture.
+
+### 16. A negative result nominated as a target
+
+SCHEMA.md is explicit: a negation lives in `says`, never in the verb — there is
+no `does_not_bind`. So a link reading `zimlovisertib inhibits IRAK4` whose
+findings **all** say `no` is the literature reporting that it does *not* inhibit
+IRAK4, and it produced a nomination indistinguishable from a positive one. The
+reason string said `"object of direct-action edge from small_molecule t2
+(inhibits)"` and nothing about direction.
+
+Nominations now carry `support: {yes, no, no_effect}` and a `direction_warning`
+when `yes` is empty. Keep the two empty-`yes` cases apart, per failure mode 10:
+all-`no` is evidence against the relation itself; all-`no_effect` on a
+direct-action edge is a measured null and **is** real tractability evidence.
+`upstream_graph_negative.json` is the fixture.
+
+### 17. The fixture guard only fires on a flag the producer never sets
+
+`--allow-fixture` refuses a graph carrying `_fixture: true`. That guard works,
+and it has now been exercised: a truthy non-boolean (`"true"`) is correctly
+refused, and `_fixture: false` or an absent key correctly passes.
+
+But note what it means. `g_1a4f`, the real graph, carries **no `_fixture` key at
+all** — a real graph is distinguished from a synthetic one only by the *absence*
+of a flag that we invented and upstream has never heard of. The guard protects
+against our own fixtures leaking into a real run. It provides no assurance
+whatsoever in the other direction, and nothing in the pipeline verifies that an
+unflagged graph came from a real corpus.
 
 ## What this skill does not do
 

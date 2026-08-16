@@ -315,7 +315,7 @@
     },
     {
       "field": "tractability.pocket_volume_a3",
-      "reason": "REFUSED for the same reason and on the same twelve measurements: pooled it would read 126.9 to 809.5 A^3, spread 84.3%. Volume is the more reliable number than druggability, but reliability of the ESTIMATOR does not rescue a spread whose members are not the same pocket. Three controls say they are not: max_radius_difference_a 14.43 A at D=1.6 and 16.49 A at D=2.4 (JAK1's is 2.29 A; the IL-17A pool that was ruled invalid was 16.61 A); per-structure centroid drift between clustering values of 18.43 A on 2AZ5 and 12.27 A on 1TNF; and mdpocket's ligand-free site definition 29.57 A from the ligand. The mdpocket site_from_ligand volumes ARE attributable, since that grid is the ligand site by construction — 533.7 A^3 on 2AZ5 and 0.00 to 83.2 A^3 on the five apo — but with a CV of 161.7% and one structure at zero they describe an occlusion gradient rather than a pocket size, and are reported in the falsification block where that is the point."
+      "reason": "REFUSED for the same reason and on the same twelve measurements: pooled it would read 126.9 to 809.5 A^3, spread 84.3%. Volume is the more reliable number than druggability, but reliability of the ESTIMATOR does not rescue a spread whose members are not the same pocket. Three controls say they are not: max_radius_difference_a 14.43 A at D=1.6 and 16.49 A at D=2.4 (JAK1's is 2.29 A; the IL-17A pool that was ruled invalid was 16.61 A); per-structure centroid drift between clustering values of 18.43 A on 2AZ5 and 12.27 A on 1TNF; and mdpocket's ligand-free site definition 29.57 A from the ligand. The mdpocket site_from_ligand volumes ARE attributable, since that grid is the ligand site by construction — 533.7 A^3 on 2AZ5 and 0.00 to 83.2 A^3 on the five apo — but with a CV of 161.7% and one structure at zero they describe an occlusion gradient rather than a pocket size, and are reported in the falsification block where that is the point. RULE 4a: tractability.pocket_volume_a3.primary_d1_6_a3 is refused on exactly the same grounds and by the same twelve measurements — the D=1.6 site volume is no more attributable to one site than the pooled spread is. Refusing the primary number is not a low value for it."
     },
     {
       "field": "tractability.ensemble_consensus_fraction.fraction_with_strong_pocket and meets_consensus_criterion",
@@ -352,6 +352,10 @@
     {
       "field": "affinity",
       "reason": "no affinity predictor was run, so no positive control exists. Rule 12: a prediction without its control is not a measurement."
+    },
+    {
+      "field": "tractability.site_pocket_rank",
+      "reason": "Not recorded. The run predates rule 4d and relayed neither fpocket's rank for the site pocket nor a PRANK rescore. Both are site-finding information only — PRANK promotes the true site in 79% of 70 ligand-anchored measurements but is INVERTED as a quality classifier at AUC 0.25 — so their absence removes no evidence about tractability and adds none. NOT a finding that the site ranked poorly."
     }
   ]
 }

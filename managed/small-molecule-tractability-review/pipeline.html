@@ -248,7 +248,7 @@
 
     /* ---------- right panel ---------- */
     /* min-height:0 on both the grid item and the flex child, or .p-body grows to
-               its content instead of scrolling and the tail of a long panel is unreachable */
+                       its content instead of scrolling and the tail of a long panel is unreachable */
     #panel {
       display: flex;
       flex-direction: column;
@@ -379,7 +379,7 @@
       transform: rotate(45deg);
     }
     /* scoped to .p-body only to out-specify .lg-item .lt b above; the two never
-           match the same element, but the cascade order would otherwise descend */
+                   match the same element, but the cascade order would otherwise descend */
     .p-body .p-list li b {
       font-weight: 700;
       color: var(--ink);
@@ -434,24 +434,31 @@
     <script>
     "use strict";
     /* ============================================================================
-           DATA  —  edit this array to update the schematic. Everything below renders
-           from it: the diagram, the sidebar index, the header counts, the panel.
+                   DATA  —  edit this array to update the schematic. Everything below renders
+                   from it: the diagram, the sidebar index, the header counts, the panel.
 
-           stage     : key into STAGES
-           status    : 'verified' | 'built' | 'deploying' | 'partial' | 'notbuilt'
-                       | 'withdrawn' | 'blocked'   (controls block fill + sidebar tag)
-           label     : the exact status string, shown verbatim. Never inferred.
-           h         : block height in world units = how much verification work sits
-                       behind the component. 6 (nothing measured) .. 68 (counterexample
-                       found, fixed, and re-tested).
-           caveat    : true -> draws the open-diamond marker on the top face
-           corrected : true -> this component gave a wrong answer, and was corrected.
-                       Draws the solid-square marker, and an asterisk in the index.
-                       The distinction from "built right first time" is the single
-                       most informative thing on the schematic — do not drop it.
-           ========================================================================= */
+                   stage     : key into STAGES
+                   status    : 'verified' | 'built' | 'deploying' | 'partial' | 'notbuilt'
+                               | 'withdrawn' | 'blocked'   (controls block fill + sidebar tag)
+                   label     : the exact status string, shown verbatim. Never inferred.
+                   h         : block height in world units = how much verification work sits
+                               behind the component. 6 (nothing measured) .. 68 (counterexample
+                               found, fixed, and re-tested).
+                   caveat    : true -> draws the open-diamond marker on the top face
+                   corrected : true -> this component gave a wrong answer, and was corrected.
+                               Draws the solid-square marker, and an asterisk in the index.
+                               The distinction from "built right first time" is the single
+                               most informative thing on the schematic — do not drop it.
+                   ========================================================================= */
 
     const STAGES = [
+      {
+        key: "graph",
+        n: "00",
+        name: ["GRAPH", "INTAKE"],
+        note: "A whole stage upstream of 01, and it was missing from earlier versions of this schematic. graph_read.py, pure stdlib, five fixtures. It is also the only place in the pipeline that talks BACK upstream — four ask verbs, five conjunctive gates, a handful of firings a year.",
+        title: "GRAPH INTAKE",
+      },
       { key: "input", n: "01", name: ["INPUT"], note: "", title: "INPUT" },
       {
         key: "prec",
@@ -471,14 +478,14 @@
         key: "pocket",
         n: "04",
         name: ["POCKET", "ANALYSIS"],
-        note: "Modal app druggability-pocket-scan · CPU · deployed. cryptic_analysis.py, interface_analysis.py and disorder.py are now wired into the app rather than run by hand, and mdpocket has replaced the residue-number site matcher outright.",
+        note: "Modal app druggability-pocket-scan · CPU · deployed. cryptic_analysis.py, interface_analysis.py and disorder.py are now wired into the app rather than run by hand, and mdpocket has replaced the residue-number site matcher outright. VOLUME LEADS THIS AXIS; druggability is a range beside it and never a verdict — see E6.",
         title: "POCKET ANALYSIS",
       },
       {
         key: "escal",
         n: "05",
         name: ["ESCALATION"],
-        note: "All GPU, all deployed to Modal (workspace rafwiewiora) and smoke-tested — the payment-method block is gone and the whole column is live. Everything here runs DOWNSTREAM of pocket detection. Nothing here finds a pocket, and E4 is the measurement that says so.",
+        note: "GPU, deployed to Modal (workspace rafwiewiora) and smoke-tested, and now with code in this checkout: .claude/skills/cofold-check/predict.py wraps all four tools. Everything here runs DOWNSTREAM of pocket detection. But the column ends one rung short — BioEmu frames cannot enter pocket detection without side-chain repacking, and nothing repacks them, so the escalation ladder is blocked at U2.",
         title: "ESCALATION",
       },
       {
@@ -500,16 +507,40 @@
     ];
 
     const DATA = [
+      /* ---- GRAPH INTAKE -------------------------------------------------------- */
+      {
+        code: "0A",
+        h: 44,
+        label: "BUILT — GRADED AGAINST FIXTURES",
+        name: "upstream evidence graph → input contract",
+        st: "Built as its own stage, because it is one: it sits upstream of 01 and earlier versions of this schematic did not draw it at all. graph_read.py is 623 lines of pure stdlib and runs in the sandbox with nothing installed. Five fixtures back it, including an unknown-verb case, an edge-case set and an expected-output grading key. IRAK4 is the case it exists for: four links say two different things — kinase activity in three of them, signalosome scaffolding in the fourth — and no single link says so. That only appears when the whole neighbourhood is read at once, which is the entire argument for reading a graph instead of a row.",
+        stage: "graph",
+        status: "built",
+        what: "Reads the upstream literature evidence graph — things, links, findings, papers, gaps, rounds, coverage — and extracts the input contract from it. Step 0 is reading the graph's own status field (ok / empty / partial / failed) before anything else, because a partial graph and an empty one are different inputs and only one of them is a gap. Nomination is conjunctive: the node must be a protein or a gene, AND be either the object of a direct-action edge from a small molecule or named in a gaps[].missing pair. It does not assess tractability, does not decide an unstated mechanism, and never treats a computed result as literature evidence.",
+      },
+
+      {
+        caveat: true,
+        code: "0B",
+        h: 38,
+        label: "BUILT — GATED, NARROW BY DESIGN",
+        name: "ask-back to the graph",
+        st: "Real, and deliberately narrow. Five conjunctive gates, all five, no exceptions — four is not enough. (1) It changes a dossier value. (2) Its support is secondary-only: link basis background_only or hedged_only, never primary or mixed. (3) We tried, we failed, and the failures are written down — ChEMBL, registry, structure and an exact-identifier grep all run, all abstained, each null in not_found BEFORE the ask is drafted. That gate does all the work. (4) There is a row to point at and nobody has asked yet. (5) There is literature left to find. Its author then tested the trigger against the four cases that motivated it and found every one answerable inside our own pipeline — obefazimod from chembl.drug_mechanism in 6 ms, both trial cases from ctgov.studies in 418 ms, and the IRAK4 efficacy claim not a tractability question at all under rule 7. Only one of the four fires the rule, and then only as a non-blocking post-resolution ask. The justification set was mostly our own unfinished lookups, and this is expected to fire a handful of times a year. Open caveat: graph_read.py --check-ask enforces gates 2, 4 and 5; gates 1 and 3 are still on the operator.",
+        stage: "graph",
+        status: "built",
+        what: "The one arrow on this diagram that points upstream. Four ask verbs and there is no fifth — expand_node, resolve_link, test_gap, new_question — one ask per request, one round per request, each pointing at an existing row by id and carrying at least two source identifiers. It sends QUESTIONS back to the knowledge graph. It never sends computed results back as literature evidence, and an outstanding ask never blocks a verdict.",
+      },
+
       /* ---- INPUT --------------------------------------------------------------- */
       {
         code: "A",
-        h: 28,
+        h: 40,
         label: "BUILT",
-        name: "target accession",
-        st: "Input contract is fixed and exercised by the fixture sets.",
+        name: "target accession + mechanism contract",
+        st: "IRAK4 retired the old wording. The same accession returns small_molecule_tractable for the kinase site and insufficient_evidence for the Myddosome scaffolding mode, and the two runs share ZERO residues. An earlier version of this block read “the only required input is a UniProt accession” — true about what is required, false about what determines the answer, and the diagram carried it as if it were the whole contract. Chain selection is now directly expressible too: pocket_scan takes chains and site_residues, so rule 2b runs through the deployed app instead of degrading to whole-assembly scoring the way every earlier run did.",
         stage: "input",
         status: "built",
-        what: "The only required input is a UniProt accession. Two optional fields ride along: an as_of_date, which re-runs the whole pipeline as it would have looked on a past date, and a mechanism_hypothesis — orthosteric, allosteric, or oligomer_destabilisation — which decides what structural question gets asked downstream.",
+        what: "A UniProt accession is the only REQUIRED field, and it is not the whole contract. Four optional fields ride along and two of them change the answer. as_of_date re-runs the whole pipeline as it would have looked on a past date. disease_context selects clinical precedent and never adjusts a number. interaction_to_disrupt names what the molecule is meant to stop. mechanism_hypothesis — orthosteric, allosteric, oligomer_destabilisation or unknown — decides which chains constitute the site. The last two are not preferences: they select the chains that get scored, and therefore they select the verdict.",
       },
 
       /* ---- PRECEDENT AXIS ------------------------------------------------------ */
@@ -562,11 +593,22 @@
         code: "F",
         h: 32,
         label: "PARTIAL",
-        name: "patents, trials, terminated programs",
-        st: "Verified working, not yet wired into a run. Named compounds must be found with grep, never semantic search: LY3509754 returned 0 relevant hits semantically; grep returned 13 papers.",
+        name: "patents and trials (full-text retrieval)",
+        st: "Verified working, not yet wired into a run. Named compounds must be found with grep, never semantic search: LY3509754 returned 0 relevant hits semantically; grep returned 13 papers. Patents are unavailable at the source — Paperclip answers “Patents sources are not available.” — so patents.count is null by contract rather than by omission, and rule 13 requires the reason in not_found. This block used to claim terminated programs as well; F2 now carries that, and F is narrower and more honest for it.",
         stage: "prec",
         status: "partial",
-        what: "Full-text retrieval across patents, trial records and literature via Paperclip grep, to surface programs that were started and then stopped — the part of the precedent record that databases do not carry.",
+        what: "Full-text retrieval across patents, trial records and literature via Paperclip grep — the part of the precedent record that structured databases do not carry.",
+      },
+
+      {
+        code: "F2",
+        h: 54,
+        label: "BUILT — SIXTEEN FAILURE MODES NAMED",
+        name: "terminated programs",
+        st: "The largest single file in this station, 1,090 lines, and almost all of it is failure modes — SIXTEEN, F1 through F16. The ones that bite: a terminated trial with a NULL why_stopped is the most misleading state in the table, not the least informative; why_stopped is about 95% noise and must never carry a target verdict alone; newer papers routinely carry older facts, so a review can invert a program's status; withdrawn is not failed; the trial that was never registered does not appear at all; the primary trial report is usually outside the corpus; strings truncate silently at 250 characters; a semantic search for a drug code returns confident, wholly irrelevant hits; and counting trials when you mean programs inflates everything. Block F used to cover this whole area in one line about grep. It could not, and the diagram was stale against the file.",
+        stage: "prec",
+        status: "built",
+        what: "Retrieves WHY clinical programs stopped — ctgov.studies.why_stopped joined to the literature by exact-string grep on drug codes, never semantic search — and reports contradictory sources side by side with their dates instead of reconciling them. It does not score druggability and it does not decide a target is dead. Rule 7: clinical failure is not evidence against tractability. RORgt is the standing case — 152 holo structures, 12,900 compounds, 0.1 nM potency, zero approvals, VTP-43742 stopped on transaminase elevations and TAK-828F on preclinical teratogenicity. Small-molecule tractable AND clinically failed, both recorded, neither discounting the other.",
       },
 
       /* ---- STRUCTURE SELECTION ------------------------------------------------- */
@@ -668,10 +710,21 @@
         h: 66,
         label: "BUILT AND VERIFIED",
         name: "fpocket detection, D swept",
-        st: "Verified by counterexample. -D 1.6 reports druggability 0.002 at the site of a co-crystallised 570 Da ligand — a false negative on a holo structure, where the right answer is already known.",
+        st: "Verified by counterexample. -D 1.6 reports druggability 0.002 at the site of a co-crystallised 570 Da ligand — a false negative on a holo structure, where the right answer is already known. The sweep is now measured rather than argued: across 15 targets, 67 structures and 134 measurements, the median within-structure swing in druggability across D is 0.229 with a maximum of 0.955, against a between-group difference of 0.154. THE CLUSTERING CHOICE DOES ABOUT 1.5x MORE WORK THAN THE BIOLOGY. Pinning a single D is not a tuning preference; it is the dominant term in the number.",
         stage: "pocket",
         status: "verified",
-        what: "Runs fpocket for detection with the clustering distance swept over {1.6, 2.4} rather than pinned to a single value, and reports the spread.",
+        what: "Runs fpocket for detection with the clustering distance swept over {1.6, 2.4} rather than pinned to a single value, and reports the spread. Detection is what this block is for. What the detected pocket is then scored ON is a separate question, and N2 answers it.",
+      },
+
+      {
+        code: "N2",
+        h: 66,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "volume is the primary number, not druggability",
+        st: "Volume at D=1.6 separates all 15 evaluation targets PERFECTLY — target-level AUC 1.000, and stable under all 15 leave-one-out refits. Every hard target measures 207 A³ or less; every druggable one measures 242 A³ or more. MARK THE BOUNDARY AS A PROPOSAL, NOT A CALIBRATED THRESHOLD: it is fitted post hoc on n=15, exactly the way the 4 A off-site distance is marked a proposal because it rests on a single case. A perfect separation is roughly what a two-parameter cut on fifteen points should be expected to achieve. That earns volume the lead position on the computed axis. It does not earn a go/no-go line, and nothing downstream may treat 207-242 A³ as one.",
+        stage: "pocket",
+        status: "verified",
+        what: "Reorders the computed axis: top-pocket volume, reported with its across-structure spread, is the primary geometric number, and druggability is reported beside it as a range that is never allowed to drive a verdict. Not a new tool — the same fpocket run produces both — but a decision about which of the two the dossier leads with, and E6 is the measurement that forced it.",
       },
 
       {
@@ -688,13 +741,14 @@
       {
         caveat: true,
         code: "P",
-        h: 48,
-        label: "BUILT, DEPLOY VERIFICATION PENDING",
+        corrected: true,
+        h: 62,
+        label: "BUILT AND VERIFIED — RUN",
         name: "P2Rank / PRANK rescoring",
-        st: "Works locally: on 6OIM the switch-II pocket moves from fpocket rank 9 to PRANK rank 2. Not yet verified in the deployed image.",
+        st: "Settled, and the claim this panel used to carry is falsified. n = 70 ligand-anchored measurements across 8 targets: PRANK PROMOTES the true site in 79% of them and demotes it in 1%. Median rank 5 → 1. Top-3 recall 37% → 91%. IL-17A goes 6→2, 5→2 and 11→1; NLRP3's fpocket median rank of 18 becomes PRANK rank 2 in 11 of 14 instances and is never worse than 4. THE SINGLE DEMOTION IS KRAS — 6OIM at D=1.6, fpocket rank 1 down to PRANK rank 3 — and it stays on the record on purpose, because a method that helps 79% of the time and hurt once is a more informative thing to know than one that always helps. An earlier version of this panel said rescoring “has not yet helped, and once it hurt”: void. Two live gotchas behind the open caveat: probability is only calibrated in predict mode — in rescore mode the true SPD304 site came back at 0.011 against a decoy at 0.783, where predict gives 0.735 — and -chains A is silently ignored by predict, which handed back all 3,483 atoms of the trimer.",
         stage: "pocket",
-        status: "built",
-        what: "fpocket detects, PRANK ranks — ligandability ordering from a learned model instead of from fpocket’s own score.",
+        status: "verified",
+        what: "fpocket detects, PRANK ranks. P2RANK FINDS SITES AND MUST NOT SCORE THEM: inverted as a pocket-quality classifier, PRANK rank gives AUC 0.25 — worse than chance, and systematically so, which means it carries information pointing the wrong way. It answers WHICH pocket to look at and never whether that pocket is druggable. On the LIGYSIS benchmark of 13 predictors, fpocket+PRANK reaches 60% top-(N+2) recall against DeepPocket's 58% and P2Rank standalone's 52%.",
       },
 
       {
@@ -715,7 +769,7 @@
         h: 64,
         label: "BUILT AND VERIFIED",
         name: "cryptic mechanism classification",
-        st: "Built and verified: 47 of 47 ground-truth checks pass. Corrected after a wrong answer. The first rule classified on clash composition, and KRAS has ZERO backbone clashes at 2.0 A despite about 8.8 A of switch-II loop motion at Glu63 — a hand-calibration figure, measured with auto-trim and residue-name matching disabled and the mobile regions named by hand; the deployed zero-knowledge default measures 8.65 A, and ~1.55 A for TNF-alpha against the hand figure of 1.62 A. Mechanism and is_cryptic are identical under both protocols, so nothing downstream of the label changes, but the two sets of displacement figures are not interchangeable and the order-of-magnitude separation (8.8 against 1.6) is the finding rather than the decimals. A loop that swings that far carries its side chains into the site with it, so the atoms sitting IN the site are side-chain even though the cause is backbone. A clash-based classifier misses KRAS entirely and hands the canonical nanomolar target a micromolar prognosis. Classification now keys on C-alpha displacement; clash composition is still reported, but never drives the call.",
+        st: "Corrected TWICE, and the second one is the worse of the pair. (2) The module had NO SUPERPOSITION-QUALITY GATE and returned confident wrong answers on three targets. NLRP3 came back cryptic_status ok, is_cryptic true, 21.6 A displacement, loop_or_backbone_motion and a nanomolar prior — sitting on top of its own reported core C-alpha RMSD of 16.6 A over 487 atoms, while mdpocket REFUSED the identical pair in the same run at 16.22 A; the same holo against apo 7ZGU superposes at 1.25 A and gives the opposite answer. TL1A failed on numbering offsets. S1PR1 was the worst: the receptor was mapped onto chain F of 8G94 — CD69, a 25-RESIDUE PEPTIDE — fitted on FIVE equivalent C-alpha with fifteen residue-name mismatches, returning max displacement 0.00 A as a measurement, mechanism subunit_occlusion, status ok. Rule 5 maps subunit_occlusion to a micromolar-at-best ceiling, and it did so on a target with 600 sub-nanomolar compounds and five approved drugs: FOUR LOG UNITS WRONG, in the damaging direction, from a block that carried every diagnostic of its own failure and gated on none of them. Hand re-measurement over 257 core C-alpha at 1.03 A gives 1.33 A, zero clashes, mechanism none. The fix is three gates and not one — max core C-alpha RMSD 5.0 A (deliberately the same constant mdpocket already used), a minimum of 20 equivalent C-alpha, and at most 10% residue-name mismatch — because the S1PR1 fit had a LOW RMSD precisely because it was fitted on five atoms. 47 of 47 ground-truth checks passed throughout, and not one of them was a superposition-quality check. (1) The first correction: the original rule classified on clash composition, and KRAS has ZERO backbone clashes at 2.0 A despite about 8.8 A of switch-II loop motion at Glu63 — a hand-calibration figure, measured with auto-trim and residue-name matching disabled and the mobile regions named by hand; the deployed zero-knowledge default measures 8.65 A, and ~1.55 A for TNF-alpha against the hand figure of 1.62 A. Mechanism and is_cryptic are identical under both protocols, so nothing downstream of the label changes, but the two sets of displacement figures are not interchangeable and the order-of-magnitude separation (8.8 against 1.6) is the finding rather than the decimals. A loop that swings that far carries its side chains into the site with it, so the atoms sitting IN the site are side-chain even though the cause is backbone. A clash-based classifier misses KRAS entirely and hands the canonical nanomolar target a micromolar prognosis. Classification now keys on C-alpha displacement; clash composition is still reported, but never drives the call.",
         stage: "pocket",
         status: "verified",
         what: "cryptic_analysis.py, wired into the Modal app. Superposes holo on apo, measures C-alpha displacement at the site, attributes every clash to backbone / side chain / displaced subunit, and computes the ligand’s free volume. Returns loop_or_backbone_motion vs sidechain_occlusion vs subunit_occlusion, and returns is_cryptic against the field’s own stringent definition — absent in all or nearly all unbound structures — rather than a loose one. The two mechanisms carry OPPOSITE PROGNOSES, and that is the whole reason the module exists: backbone or loop motion is good and reaches nanomolar, while side-chain rotation or subunit occlusion is poor and stalls at micromolar. It is a prior on achievable potency, not a taxonomy label.",
@@ -723,10 +777,11 @@
 
       {
         code: "S",
-        h: 52,
+        corrected: true,
+        h: 66,
         label: "BUILT AND VERIFIED",
         name: "pocket vs interface classification",
-        st: "Built and verified: 9 of 9 checks pass. TNF-alpha’s SPD304 site returns destabiliser_candidate at 0.00 overlap with the TNFR2 epitope — the pocket that actually works touches no part of the interface it is meant to disrupt. A pocket asserted as orthosteric that does not touch the interface is now a detectable error rather than a plausible sentence.",
+        st: "Corrected after a wrong answer: the module PICKED THE TARGET CHAIN BY LENGTH. That is wrong the moment a partner is bigger than the target, and on a GPCR / G-protein complex the partner always is. Measured on S1PR1 — G-beta-1 runs 331-338 residues against the receptor's 278-290 in all four entries, so the longest-chain heuristic picked G-beta every time. On 7TD4 the stage split target [“B”] against partner [“A”,“G”,“R”] — B is G-beta-1 and R is S1PR1 — then computed the G-beta / G-alpha-G-gamma interface and reported it as the target's epitope, with interface_status ok, 93 interface residues and no warning of any kind. WHICH CHAIN IS THE TARGET IS A LOOKUP, NOT A GUESS: it now reads _struct_ref and _struct_ref_seq for the chain-to-accession mapping. The original 9 of 9 checks still pass, and none of them was a complex where the partner outweighs the target. What the block gets right when it is pointed at the right chain: TNF-alpha's SPD304 site returns destabiliser_candidate at 0.00 overlap with the TNFR2 epitope — the pocket that actually works touches no part of the interface it is meant to disrupt.",
         stage: "pocket",
         status: "verified",
         what: "interface_analysis.py, wired into the Modal app. Computes protein-protein interfaces from the deposited structure and overlaps them with each detected pocket, classifying by overlap fraction: orthosteric_candidate at 0.25 or above, allosteric_candidate at 0.10 or below, destabiliser_candidate where the pocket is buried inside the oligomer — with the fraction itself attached, so the call is auditable rather than asserted. This is the check that ties a pocket back to the input mechanism_hypothesis instead of assuming it.",
@@ -737,7 +792,7 @@
         h: 42,
         label: "BUILT AND WIRED IN",
         name: "disorder_fraction",
-        st: "Built and wired into the Modal app as its own reported stage. MYC returns 0.828 against folded controls at 0.000 for CDK2 and 0.015 for CA2 — that separation is the entire reason the number is worth reporting. Failure returns null and never 0.0, because a folded protein and a failed prediction must not be allowed to look identical; that is the one way this module could lie.",
+        st: "Built and wired into the Modal app as its own reported stage. MYC returns 0.828 against folded controls at 0.000 for CDK2 and 0.015 for CA2 — that separation is the entire reason the number is worth reporting. Failure returns null and never 0.0, because a folded protein and a failed prediction must not be allowed to look identical; that is the one way this module could lie. MYC is also where E6 does its clearest damage to the druggability score — the same target this block calls 83% disordered is the one fpocket ranks above KRAS, BCL-2, JAK1, EGFR and NLRP3 at D=2.4.",
         stage: "pocket",
         status: "built",
         what: "disorder.py, per-residue intrinsic disorder from sequence via metapredict — used to explain why some targets have no pocket to find, rather than reporting a low score with no reason attached. MIT-licensed and CPU-only, so it never needed the GPU column. It is kept as a module of its own, outside the Modal pocket-scan file, so that a metapredict build failure cannot take the whole app down.",
@@ -750,7 +805,7 @@
         h: 48,
         label: "DEPLOYED AND SMOKE-TESTED",
         name: "Boltz-2 cofolding — pose and complex (DOWNSTREAM ONLY)",
-        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested, weights cached on a shared volume. Corrected after a wrong answer, and this is the correction that mattered most: cofolding models recall where the PDB put ligands rather than reading the structure they are given. When binding sites were destroyed three ways — every side chain deleted to glycine, the site packed shut with phenylalanines, the chemistry inverted — the models returned the same ligand pose in 42-52% of high-confidence cases at ligand pLDDT 70-85, and funnel metadynamics says those perturbed systems have P(bound) = 0.00. E4 then reproduced this on our own target and made it worse: the confidence is not merely uninformative, it is ANTI-DIAGNOSTIC. So it was moved out of the pocket-finding path entirely.",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested, weights cached on a shared volume. Corrected after a wrong answer, and this is the correction that mattered most: cofolding models recall where the PDB put ligands rather than reading the structure they are given. When binding sites were destroyed three ways — every side chain deleted to glycine, the site packed shut with phenylalanines, the chemistry inverted — the models returned the same ligand pose in 42-52% of high-confidence cases at ligand pLDDT 70-85, and funnel metadynamics says those perturbed systems have P(bound) = 0.00. E4 then tested this on our own target — and the benchmark that followed OVERTURNED the conclusion we drew from it. Across 5 targets, 3 seeds per state and 30 folds under one uniform rule, the pLDDT family drops beyond twice the seed spread on 5 OF 5 when the pocket is sealed. Cofolding confidence is NOT anti-diagnostic. What is treacherous is narrower and more specific: the LIGAND-FACING metrics. ligand_iptm moved in the right direction on only 3 of 5, and ROSE on TNF-alpha — 0.864 to 0.906 — with the site sealed shut. And most of the correct drops are too small to act on: JAK1 fell 0.967 to 0.948, which is still an excellent model. Only KRAS moved visibly. The published 42-52% destroyed-site figure is the four-model result, is not ours, and stands on its own — the routing decision stands with it. What does not stand is our own gloss on it. See E4 and E7.",
         stage: "escal",
         status: "built",
         what: "Structure prediction that runs strictly DOWNSTREAM of geometric pocket finding, never in place of it. Three legitimate jobs: pose for a site that has already been found; protein-protein complex prediction where no crystal exists; and chemotype-preference readout for a site whose geometry is already known. It cannot find a pocket and is no longer wired as if it could. The pose head, taken on its own, is good — on JAK1, confidence 0.974 with the canonical hinge contacts, Glu957 at 2.88 A and Leu959 at 3.07 A.",
@@ -759,13 +814,14 @@
       {
         caveat: true,
         code: "T2",
+        corrected: true,
         h: 56,
         label: "DEPLOYED AND SMOKE-TESTED",
         name: "Boltz-2 affinity — a ranker, not a potency predictor",
-        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested against the JAK1 control. Two numbers define how it may be used. Tofacitinib measures 0.50 nM and was predicted at 46.4 nM — 1.97 log units too weak. But the separation between actives and unrelated decoys was 2.36 log units, in the correct order, binder probability 0.75 against 0.37 and 0.11. The ordering is real; the magnitude is not. Use it to order candidates, never against a nanomolar go/no-go threshold, and never to quote a Kd.",
+        st: "Deployed, smoke-tested against the JAK1 control, and then BENCHMARKED — and the benchmark deleted this block's headline number. Over 17 measured pairs across two targets the mean signed error is +0.23 log, 95% CI (-0.28, +0.74), p=0.38: NO DETECTABLE BIAS. Eleven predictions too weak, six too strong, which is not a direction. The 1.97 log figure was ONE COMPOUND; re-measured against 64 ChEMBL measurements, tofacitinib sits at +0.96 log, and 1.97 is not inside the confidence interval at all. For scale, the ground truth's own spread is a mean of 0.58 log across the compounds with three or more measurements. The 2.36 log active-versus-decoy separation this block used to quote was ONE ACTIVE AGAINST TWO DECOYS and never carried an n; re-derived on 12 actives against 10 decoys it survives at 2.36 log, ROC AUC 0.983 on predicted affinity and 1.000 on binder probability, Cohen's d 2.85. So the capability is real and it is a DIFFERENT capability than we claimed: binder-versus-non-binder triage. Within-target ranking is NOT supported — Spearman rho +0.48 on JAK1 (p=0.11) and +0.60 on BCL2 (p=0.28), neither significant. The old usage rule, “order candidates within a target”, was the wrong rule read off the wrong number.",
         stage: "escal",
         status: "verified",
-        what: "Predicted binding affinity for a named ligand at a site that has already been found. It is deployed as a RANKER: it orders candidates within one target, and its absolute value is not a Kd and must never be quoted as one. It carries its own positive control — run the predictor on the target’s best-known measured binder first and report both, and if it cannot recover that binder the predictions for that target are uninformative.",
+        what: "Predicted binding affinity for a named ligand at a site that has already been found. It is deployed for TRIAGE, not ranking: it separates binders from non-binders cleanly (ROC AUC 0.983 on predicted affinity, 1.000 on binder probability, n = 12 x 10) and it does not order compounds reliably within a single target. Its absolute value is not a Kd and must never be quoted as one, and it must never be tested against a nanomolar go/no-go threshold. It carries its own positive control — run the predictor on the target’s best-known measured binder first and report both, and if it cannot recover that binder the predictions for that target are uninformative.",
       },
 
       {
@@ -773,22 +829,58 @@
         h: 36,
         label: "DEPLOYED AND SMOKE-TESTED",
         name: "BioEmu conformational ensembles",
-        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested. Frames come back pre-superposed — sixteen centres of mass within 0.045 A, optimal rotation identity to 5e-8 — so no alignment step is needed downstream. But the output is backbone plus C-beta only, 835 atoms for 169 residues, and fpocket and mdpocket both define pockets from side-chain atoms, so frames MUST be repacked before detection or every volume inflates. It also degrades on exactly our input: 86% of validated cryptic pockets recovered when seeded from holo, only 56% from apo — and apo is the normal case. Filter frames on radius of gyration, SASA and secondary-structure sanity before scoring anything on them.",
+        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested. Frames come back pre-superposed — sixteen centres of mass within 0.045 A, optimal rotation identity to 5e-8 — so no alignment step is needed downstream. But the output is backbone plus C-beta only, 835 atoms for 169 residues, and fpocket and mdpocket both define pockets from side-chain atoms, so frames MUST be repacked before detection or every volume inflates — AND NOTHING IN THIS CHECKOUT REPACKS THEM. cofold-check's own SKILL.md calls this the weakest link in the pipeline as it stands: its frames cannot be scored without a repacking step that module does not provide. The escalation ladder stops here; see U2. It also degrades on exactly our input: 86% of validated cryptic pockets recovered when seeded from holo, only 56% from apo — and apo is the normal case. Residues come back zero-indexed with all B-factors zero, so there is no per-frame confidence either. Filter frames on radius of gyration, SASA and secondary-structure sanity before scoring anything on them.",
         stage: "escal",
         status: "built",
-        what: "Generates conformational ensembles from sequence, to look for cryptic pockets where no apo/holo pair exists. Monomer-only; a poly-glycine linker is the planned workaround for multimers.",
+        what: "Generates conformational ensembles from sequence, to look for cryptic pockets where no apo/holo pair exists. Monomer-only; a poly-glycine linker is the planned workaround for multimers. Reachable through .claude/skills/cofold-check/predict.py as bioemu_ensemble, which emits must_repack_before_pocket_detection: true with its reason — the module reports the blockage honestly and cannot clear it.",
+      },
+
+      {
+        code: "U2",
+        h: 12,
+        label: "BLOCKED — THE LADDER STOPS HERE",
+        name: "side-chain repacking",
+        st: "BLOCKED, and this block exists to say exactly where. Until repacking lands, the sampled_ensemble structure tier is UNREACHABLE — rule 13 already nulls it alongside cofolded and predicted, and every run so far has recorded it in not_found rather than used it. Which means the one escalation the pipeline most needs for its normal case — apo-only, no holo reference, “would a cryptic pocket open?” — has no path through the machine today. A repacking step is being built. It is not here, and no repacker module exists anywhere in this checkout, so the honest state of the column is one rung short rather than complete.",
+        stage: "escal",
+        status: "blocked",
+        what: "The missing rung. The intended escalation path is: apo-only or no structure at all → fold → BioEmu ensemble → pocket detection → does a cryptic pocket open. BioEmu returns BACKBONE PLUS C-BETA ONLY — 835 atoms for 169 residues — and both fpocket and mdpocket define a pocket from side-chain atoms. So BioEmu frames cannot enter pocket detection at all, and the ladder breaks between U and the pocket column rather than at either end of it.",
       },
 
       {
         caveat: true,
         code: "V",
+        corrected: true,
         h: 46,
         label: "DEPLOYED AND SMOKE-TESTED",
         name: "ESMFold / ESM2",
-        st: "Deployed to Modal (workspace rafwiewiora) and smoke-tested, and the smoke test is itself the finding: it does not do interfaces. On the IL-17A homodimer it produced 1 inter-chain contact against 97 in the deposited structure, centre-of-mass separation 24.7 A against 12.8 A, global dimer TM-score 0.328 — two separated monomers touching at a point, not an intertwined dimer. But it FLAGS ITS OWN FAILURE: pTM falls to 0.399 and average PAE rises to 18.26 on the dimer, against 0.905 and 3.66 on the monomer. That self-reporting is the useful part, and it is more than the cofolding stack manages. Use it as a filter, never as a PPI predictor.",
+        st: "Benchmarked, and the benchmark says OUR SMOKE TEST WAS A BAD INPUT, NOT A BAD TOOL. The original result reproduces exactly — 1 inter-chain contact against 97, pTM 0.399, dimer TM-score 0.328 — when the model is handed the full UniProt mature chain. Hand it the crystallographically ordered core of the SAME dimer, against the same reference and the same contact set, changing nothing but the input sequence, and it returns 55 contacts and 42% recovery. Across 14 complexes and 28 runs the behaviour is bimodal: six above 50% recovery, five at exactly zero. AND pTM PREDICTS WHICH — Spearman rho +0.79 against contact recovery over all 28 runs, and at pTM >= 0.80 five of five succeed with ZERO false alarms in the whole set. So it is usable as a gated PPI predictor with a stated cut, which is a stronger claim than the “filter, never a predictor” rule this block used to carry. One failure it does not flag, and it is worth naming: Trypsin/BPTI at pTM 0.75 with zero contact recovery.",
         stage: "escal",
-        status: "built",
-        what: "Structure prediction for targets with no usable experimental structure, plus a disorder proxy and pocket-residue constraint. Tier 3 only — predicting a structure that already exists in the PDB is a defect, not a shortcut.",
+        status: "verified",
+        what: "Structure prediction for targets with no usable experimental structure, plus a disorder proxy and pocket-residue constraint. Tier 3 only — predicting a structure that already exists in the PDB is a defect, not a shortcut. For complexes it is gated on pTM rather than refused: feed it the ordered core, not the full mature chain, and read pTM before reading the interface.",
+      },
+
+      {
+        caveat: true,
+        code: "V2",
+        h: 10,
+        label: "NOT BUILT — NEVER RUN",
+        name: "PocketMiner (cryptic-opening GNN)",
+        st: "NOT BUILT AND NOT VERIFIED, and it is on the diagram as a candidate rather than a plan. Two constraints are already known from the literature and would bind on day one. It is a CRYPTIC-SITE TRIGGER, NOT A RANKER: HOTPocket measured 5-9% DCA precision on ordinary pockets, over-predicting to roughly 119 pockets per structure, so it must never be dropped into a general pocket ranking. And it cannot see our hardest mechanism — subunit displacement is absent from its four backbone-centric classes, it refuses multi-chain input outright, and it failed on 38 of about 220 multi-chain structures in CryptoBench's own test set. TNF-alpha is precisely that case.",
+        stage: "escal",
+        status: "notbuilt",
+        what: "A graph neural network that scores per-residue cryptic-pocket OPENING PROBABILITY from a single structure, in under a second, with no ensemble and no simulation (Meller et al., Nat Commun 2023; reported ROC-AUC 0.87). It is the one published method that answers the question U2 is blocked on, and we have never run it. Today it is a comparator in our prior art and nothing more.",
+      },
+
+      {
+        caveat: true,
+        code: "V3",
+        h: 14,
+        label: "UNDER CONSTRUCTION — NOT VERIFIED",
+        name: "PPI-hypothesis loop",
+        st: "UNDER CONSTRUCTION AND UNVERIFIED. No code for it exists in this checkout. It is drawn because a capability being built is a different state from one nobody considered — the same reason O stays on the diagram struck through — but nothing about it has been measured and no claim about it should be read off this block. E7 has now read out and it makes the design harder, not easier: ESMFold at interfaces works only when the input is the ordered core and only above pTM 0.80, where five of five succeeded — so the loop needs that gate wired in before it emits anything, or it will MANUFACTURE questions rather than find them. Nothing about the loop itself has been measured.",
+        stage: "escal",
+        status: "partial",
+        what: "A loop rather than a stage: cofold candidate partners against the target, and send interfaces that come back both confident AND novel upstream to the knowledge graph as QUESTIONS, never as evidence. It would be the second upstream arrow on this diagram, and it would pass through 0B's five gates like anything else.",
       },
 
       /* ---- SYNTHESIS ----------------------------------------------------------- */
@@ -818,11 +910,22 @@
         code: "Y2",
         h: 44,
         label: "BUILT — VALIDATOR GATING",
-        name: "typed JSON dossier assembler + validator",
-        st: "Built and gating. Two complete dossiers now pass with zero violations, and they are the head-to-head pair in E5. This is the component that turns a set of working parts into a dossier — and it is also the component that found the twelve integration bugs, because until the parts run together each one had only ever been checked alone.",
+        name: "typed JSON dossier assembler",
+        st: "Built and gating on Y3. Two complete dossiers now pass with zero violations, and they are the head-to-head pair in E5. This is the component that turns a set of working parts into a dossier — and it is also the component that found the THIRTEEN integration bugs, because until the parts run together each one had only ever been checked alone. It does not write the verdict; Y3 does, and that separation is deliberate.",
         stage: "synth",
         status: "built",
-        what: "Walks the evidence produced by every upstream component into the typed contract and then validates it: required keys present, null where retrieval failed rather than a default, the two axes never merged, provenance attached to every numeric claim, insufficient_evidence emitted rather than a number invented to fill the space. The validator is a hard gate with named rule codes — AS_OF_LEAKAGE, FRACTION_WITHOUT_N — and the assembler does not return until it passes.",
+        what: "Walks the evidence produced by every upstream component into the typed contract: required keys present, null where retrieval failed rather than a default, the two axes never merged, provenance attached to every numeric claim, insufficient_evidence emitted rather than a number invented to fill the space. It does not return until the validator passes.",
+      },
+
+      {
+        code: "Y3",
+        h: 60,
+        label: "BUILT AND VERIFIED — THE DEPLOYED GRADER",
+        name: "verdict + dossier validator",
+        st: "Built, and it is the deployed grader rather than a checklist someone reads. validate_dossier.py is 1,507 lines of pure stdlib behind FIFTEEN named rule codes — WELL_FORMED, NUMBER_WITHOUT_PROVENANCE, AXES_AVERAGED, MODALITY_LEAK, INSUFFICIENT_EVIDENCE_AVOIDED, DRUGGABILITY_POINT_ESTIMATE, FRACTION_WITHOUT_N, SAME_SITE_BASIS_MISSING, SAME_SITE_BASIS_INVALID, SITE_INCONSISTENT, CRYPTIC_MISCLAIM, NULL_IS_NOT_ZERO, AS_OF_LEAKAGE, AXIS_CONFLICT_UNDECLARED, ASSAY_PROVENANCE_MISSING — with 86 passing tests behind those. Exit 0 means no violations; every violation it prints is a rubric criterion the dossier has not met yet. Two worked examples pass clean, and the instructive one is the example where the REFUSAL SURVIVED: on TNF-alpha the tool ran and the dossier still reported no pooled geometry, because ten of twelve druggability values carried site_signature_unreliable_homooligomer and could not be attributed to a site at all. DRUGGABILITY_POINT_ESTIMATE is the rule that caught this schematic's own E5 panel.",
+        stage: "synth",
+        status: "verified",
+        what: "The only place in the pipeline where the VERDICT is written — small_molecule_tractable, not_tractable, or insufficient_evidence — together with verdict_basis naming which axis carried it. One label over two axes that are allowed to disagree is an aggregation unless the axis it came from is named, so a verdict with no basis and a populated axis_conflict is an average with extra steps. Earlier versions of this schematic folded this into Y2 and had nowhere to say that.",
       },
 
       {
@@ -872,24 +975,48 @@
 
       {
         code: "E4",
+        corrected: true,
         h: 68,
-        label: "BUILT AND VERIFIED — RUN",
+        label: "RUN — AND ITS CONCLUSION OVERTURNED BY E7",
         name: "cofolding falsification — sealed-pocket control",
-        st: "Run. It scored BETTER. The mutant beat wild type on every pLDDT-family metric — complex pLDDT 0.940 rising to 0.957 — and its backbone came back at 0.73 A C-alpha RMSD to wild type, LOWER than the 1.02 A wild-type-versus-wild-type baseline. The switch loops move more between two wild-type seeds than they do between wild type and a nine-fold mutant. So: COFOLDING CONFIDENCE IS ANTI-DIAGNOSTIC FOR DRUGGABILITY, and there is no output signal that reports a site is gone. Reseeding is not sampling either — median pairwise seed dispersion 0.21 A, and 21 of 24 runs converged on the SI/II-P site: a real site, but a different one from the question that was asked.",
+        st: "Run, then benchmarked, and THE CONCLUSION THIS BLOCK USED TO STATE IS OVERTURNED. The original observation is real: on KRAS the sealed mutant scored higher on the pLDDT family. But it was ONE target, and the backbone comparison behind it rested on TWO wild-type seeds. Repeated properly — 5 targets, 3 seeds per state, 30 folds, one uniform rule — the pLDDT family drops beyond twice the seed spread on 5 OF 5 when the pocket is sealed. COFOLDING CONFIDENCE IS NOT ANTI-DIAGNOSTIC. The KRAS backbone numbers invert too: the measured wild-type-versus-wild-type baseline is 0.23 A (n=3), not 1.02 A — four times tighter — against 1.37 A wild-type-versus-sealed (n=9). What survives is narrower and more useful than the claim it replaces: THE LIGAND-FACING METRICS ARE THE TREACHEROUS ONES. ligand_iptm moved correctly on only 3 of 5 and ROSE on TNF-alpha, 0.864 to 0.906, with the site sealed; ptm, avg_pae and complex_pde each noticed on only 2 of 5. Most correct drops are too small to act on — JAK1 0.967 to 0.948 is still an excellent model — and only KRAS moved visibly. Backbone RMSD is blind to the mutation altogether on BCL-2 and TNF-alpha. So: read complex_plddt and the confidence score, do NOT read ligand_iptm as a site-integrity signal, and do not read any of it as a druggability signal. Reseeding is still not sampling: median pairwise seed dispersion 0.21 A, 21 of 24 runs converging on the SI/II-P site — a real site, but not the one asked about.",
         stage: "eval",
         status: "verified",
-        what: "A destroyed-site control run against our own predictor rather than against a target. The KRAS switch-II pocket is sealed with nine phenylalanine substitutions, making it physically undruggable, and the model is then asked to fold it. If cofolding confidence carried any information at all about druggability, the mutant would have to score worse than wild type.",
+        what: "A destroyed-site control run against our own predictor rather than against a target: a binding site is sealed with nine phenylalanine substitutions, making it physically undruggable, and the model is then asked to fold it. If confidence carried information about the site, the mutant would have to score worse. Originally one target (KRAS switch-II); now five — KRAS, JAK1, TNF-alpha, IL-17A and BCL-2 — at three seeds per state, which is what turned a striking single result into a measured and much more specific one.",
       },
 
       {
         code: "E5",
-        h: 56,
-        label: "BUILT AND VERIFIED — RUN",
+        corrected: true,
+        h: 66,
+        label: "BUILT AND VERIFIED — RUN, ITS OWN HEADLINE NUMBERS RETRACTED",
         name: "two-axis separation, head to head",
-        st: "Run, and the separation is earned rather than asserted. TNF beats JAK1 on every pocket metric — druggability 0.992 against 0.735, ensemble consensus 4 of 4 against 2 of 4 MEASUREMENTS rather than structures, so neither run claims the published criterion — while having zero approved small molecules against JAK1’s several. Retrieved precedent and computed tractability are reported side by side and never averaged, and this is the run where averaging them would have produced exactly the wrong answer on both targets at once.",
+        st: "Run — and the run corrected the panel that described it. An earlier version of this block quoted druggability 0.992 for TNF against 0.735 for JAK1, and ensemble consensus 4 of 4 against 2 of 4, as headline results. THEY ARE NOT RESULTS, AND QUOTING THEM BROKE THE PIPELINE'S OWN RULE. Both are maxima with no minimum, and a maximum without a minimum is a point estimate — the validator's own DRUGGABILITY_POINT_ESTIMATE violation. In the worked dossiers they appear ONLY inside not_found, with provenance and a stated reason. 0.735 does not appear anywhere in JAK1's later measured range, which is exactly the point: it was one end of an unknown interval on an unnamed ensemble. And 4 of 4 was never a consensus fraction — it is the count of measurements selected by ligand_site_jaccard, and JAK1's dossier reports NO consensus fraction at all because the tool does not emit one. TNF's own re-run refused outright: twelve druggability values spanning 0.001 to 0.651, a 651.0-fold range, ten of them carrying site_signature_unreliable_homooligomer — the withdrawn 651-fold figure regenerating from the identical defect. WHAT SURVIVES IS THE FINDING: the two axes still disagree, on volume and on precedent, and averaging them would still have inverted both answers.",
         stage: "eval",
         status: "verified",
         what: "A head-to-head run of two targets chosen so that the two axes MUST disagree, to test that the never-average contract holds under pressure rather than only when the axes happen to agree.",
+      },
+
+      {
+        code: "E6",
+        h: 68,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "does the computed number separate? (15 targets)",
+        st: "Run, and it DEMOTED the number this axis used to lead with. fpocket druggability does not separate druggable targets from hard ones: target-level AUC 0.720 at D=1.6 with a 95% CI of 0.44-0.94 — an interval that includes chance — and AUC 0.520 at D=2.4, which IS chance. On the 37 holo structures where a drug is physically bound and the pocket is anchored to that ligand, the median score is 0.320 and 41% fall BELOW 0.1: EGFR with osimertinib in it scores 0.013; JAK1's median is 0.009 across nine approved drugs; RORgt 6C1P scores 0.009 at rank 55 of 60. The clearest single illustration is MYC — ZERO holo structures, the canonical undruggable target — with a D=2.4 median of 0.75, ABOVE KRAS, BCL-2, JAK1, EGFR and NLRP3. Substituting persistence is the obvious wrong fix and it does not work: persistence is exactly chance, AUC 0.500, and the published consensus criterion built on it RANKS MYC TOP. Clustering choice does about 1.5x more work than the biology (within-structure swing median 0.229, max 0.955, against a between-group difference of 0.154). What separates is volume — see N2. Druggability stays on the page as a weak prior with its provenance attached, a 3-descriptor logistic regression fitted on 21 positives against 292 others, and never as a probability.",
+        stage: "eval",
+        status: "verified",
+        what: "A target-level evaluation of the computed axis ITSELF: 15 targets, 67 structures, 134 measurements, scored against an independent druggable-versus-hard split. It asks whether the number the pipeline reports separates the two groups — not whether the number is high on a target we already like. This is the measurement that reordered the axis, and it is the reason volume leads and druggability does not.",
+      },
+
+      {
+        code: "E7",
+        h: 68,
+        label: "BUILT AND VERIFIED — RUN",
+        name: "GPU tool-claim benchmark",
+        st: "Run, and it moved all three claims — every one of them in the same direction. (1) SEALED POCKET, OVERTURNED: 5 targets, 3 seeds per state, 30 folds. The pLDDT family notices on 5 of 5, so confidence is not anti-diagnostic; what is treacherous is ligand_iptm, correct on only 3 of 5 and RISING on TNF-alpha with the site sealed. (2) AFFINITY BIAS, GONE: 17 pairs, mean signed error +0.23 log, 95% CI (-0.28, +0.74), p=0.38, eleven too weak and six too strong. The 1.97 log figure was one compound and does not fall inside the interval. Binder-versus-non-binder triage is the real capability — ROC AUC 0.983 on predicted affinity and 1.000 on binder probability, 12 actives against 10 decoys — while within-target ranking is not supported, rho +0.48 at p=0.11. (3) ESMFold INTERFACES, NARROWED TO AN INPUT PROBLEM: the 1-contact result reproduces exactly on the full UniProt mature chain and becomes 55 contacts at 42% recovery on the ordered core of the same dimer. Over 14 complexes pTM predicts which case you are in (rho +0.79), and at pTM >= 0.80 five of five succeed with zero false alarms in 28 runs. THE PATTERN IS THE POINT: every one of the three failed in the direction that flattered the story, and every one was caught by attaching an n.",
+        stage: "eval",
+        status: "verified",
+        what: "The benchmark behind the three GPU-tool claims that each used to rest on a single case: ESMFold at interfaces (was one complex, now 14 complexes and 28 runs), Boltz-2 affinity error (was one compound, now 17 measured pairs across two targets plus 10 decoys), and cofolding confidence against a sealed pocket (was one target and two seeds, now 5 targets at 3 seeds per state, 30 folds). It exists because of a direct correction: do not draw conclusions about a tool’s usefulness from one example.",
       },
     ];
 
@@ -936,18 +1063,22 @@
         "This is one station in a larger evidence gauntlet. Other stations handle genetics, expression, perturbation, PK/PD, safety and clinical precedent. This one takes a protein target and reports whether it can be drugged <b>with a small molecule</b> — and nothing else.",
         "Two axes are reported separately and never averaged. <b>Retrieved precedent</b> is what has actually been made against the target: measured bioactivity, approved drugs split by modality, patents, terminated programs. <b>Computed tractability</b> is what the structure says about whether a small molecule could bind. They are allowed to disagree, and when they disagree the disagreement is the finding. There is no overall number.",
         "The hard problems here turned out to be measurement problems, not prediction problems. Almost every tall block on this schematic is tall because a plausible-looking number was wrong for a boring reason — a salt form read as a biologic, an asymmetric unit read as a dimer, a cofactor read as a ligand, one lab’s assay read as a field of evidence — and the fix was to measure the measurement, not to model harder.",
-        "Running the pipeline end to end has now found <b>twelve bugs</b>. In every single case the isolated result was more flattering than the integrated one — twelve consecutive times, never once the reverse. No component has ever looked worse alone than it did wired up. Components that gave a wrong answer and were corrected carry a <b>solid square</b> on the block and an <b>asterisk</b> in the index; everything unmarked was built right the first time. One correction — <b>O</b> — was severe enough that the finding is withdrawn rather than fixed, and it is left on the diagram struck through, because a retraction is a different state from never having built the thing.",
-        "The most important measured result on this schematic is a negative one, and it is <b>E4</b>. We sealed the KRAS switch-II pocket with nine phenylalanine substitutions — physically undruggable — and asked the model to fold it. It scored <b>higher</b> than wild type on every pLDDT-family metric, and its backbone came back closer to wild type (0.73 A) than two wild-type runs came to each other (1.02 A). <b>Cofolding confidence is anti-diagnostic for druggability.</b> There is no output signal that tells you a site is gone — which is why nothing in the escalation column is permitted to find a pocket.",
+        "Running the pipeline end to end has now found <b>thirteen bugs</b>. In every single case the isolated result was more flattering than the integrated one — thirteen consecutive times, never once the reverse. No component has ever looked worse alone than it did wired up. The two newest are the sharpest. The cryptic module had <b>no superposition-quality gate</b> and returned confident wrong answers on three targets — once mapping a receptor onto a 25-residue peptide fitted on five atoms, and handing back a potency ceiling four log units too pessimistic on a target with five approved drugs. And the interface module <b>picks the target chain by length</b>, so on S1PR1 it analysed the G-protein and reported that interface as the receptor's, with no warning at all. Components that gave a wrong answer and were corrected carry a <b>solid square</b> on the block and an <b>asterisk</b> in the index; everything unmarked was built right the first time. The marks do not count one-to-one against thirteen — some blocks carry more than one. One correction — <b>O</b> — was severe enough that the finding is withdrawn rather than fixed, and it is left on the diagram struck through, because a retraction is a different state from never having built the thing.",
+        "One level up from the bugs, the same pattern shows in the conclusions: <b>our conclusions were undersampled, and undersampling is not neutral — it flatters.</b> Three of this project’s four headline computational claims have now been overturned or narrowed by proper measurement — the 651&times; druggability spread, the fpocket druggability score, and the three GPU tool claims. Every one failed in the direction that flattered the story, and every one was caught by the same move: giving it an n.",
+        "<b>The computed axis no longer leads with druggability.</b> An evaluation across 15 targets, 67 structures and 134 measurements found that fpocket druggability does not separate druggable targets from hard ones: AUC 0.720 at D=1.6, 95% CI 0.44-0.94, an interval that includes chance — and 0.520 at D=2.4, which is chance. On 37 holo structures with a drug physically bound, the median score is 0.320 and 41% fall below 0.1; EGFR with osimertinib in it scores 0.013. <b>MYC — zero holo structures, canonical undruggable — has a D=2.4 median of 0.75, above KRAS, BCL-2, JAK1, EGFR and NLRP3.</b> Substituting persistence does not rescue it: persistence is exactly chance (AUC 0.500) and the published consensus criterion built on it ranks MYC top. The clustering choice does about 1.5&times; more work than the biology. What <i>does</i> separate is <b>volume at D=1.6</b> — AUC 1.000 across all 15 targets, stable under every leave-one-out refit, hard at or below 207 A³ and druggable at or above 242 A³ — and that boundary is a <b>proposal fitted post hoc on n=15</b>, marked the way the 4 A off-site distance is marked, not a calibrated threshold. See <b>E6</b> and <b>N2</b>.",
+        "<b>Three tool claims each rested on a single case. All three have now been benchmarked, and all three moved.</b> <b>E4</b> — cofolding confidence is <i>not</i> anti-diagnostic: across 5 targets, 3 seeds per state and 30 folds, the pLDDT family notices the sealed pocket on 5 of 5. What is treacherous is narrower and was invisible at n=1 — <i>ligand_iptm</i> moved correctly on only 3 of 5 and <i>rose</i> on TNF-alpha (0.864 &rarr; 0.906) with the site sealed shut, and most correct drops are too small to act on (JAK1 0.967 &rarr; 0.948 is still an excellent model). <b>T2</b> — the 1.97-log affinity error was one compound; over 17 pairs the mean signed error is +0.23 log, 95% CI (&minus;0.28, +0.74), p=0.38, eleven too weak and six too strong. The real capability is binder-versus-non-binder triage (ROC AUC 0.983 / 1.000), and within-target ranking is <i>not</i> supported (rho +0.48, p=0.11) — the opposite of the rule we had. <b>V</b> — ESMFold's interface failure was <i>our input</i>: 1 contact reproduces exactly on the full UniProt mature chain, and the ordered core of the same dimer gives 55 contacts and 42% recovery. Across 14 complexes pTM predicts which case you are in (rho +0.79), and at pTM &ge; 0.80 five of five succeed with zero false alarms in 28 runs. See <b>E7</b>.",
+        "<b>The escalation ladder is blocked, and the diagram now shows where.</b> The intended path for the normal case — apo-only, or no structure at all — is fold, then a BioEmu ensemble, then pocket detection, then “does a cryptic pocket open”. BioEmu returns backbone plus C-beta only, and fpocket defines a pocket from side-chain atoms, so its frames cannot enter detection at all. A repacking step would close it; none exists in this checkout. Until it lands the <b>sampled_ensemble</b> tier is unreachable and the escalation the pipeline most needs has no path through the machine. See <b>U2</b>. Two capabilities are under construction and drawn as unverified rather than promised: a <b>PPI-hypothesis loop</b> that would cofold candidate partners and send confident novel interfaces upstream as questions, and <b>PocketMiner</b>, which we have never run.",
+        "<b>Stage 00 exists, and so does one upstream arrow.</b> Graph intake was missing from earlier versions of this schematic despite sitting a whole stage above 01, and the one-way spine denied that it emits anything back. The ask-back is real and deliberately narrow: four ask verbs, five conjunctive gates, expected to fire a handful of times a year. Its author tested the trigger against the four cases that motivated it and found every one answerable inside our own pipeline — 6 ms for one, 418 ms for another — which is to say the justification set was mostly our own unfinished lookups. That is why the return arrow is drawn thin.",
         "<b>O is a retraction, kept on the diagram with its reason attached.</b> An earlier version of this pipeline reported a 651&times; druggability spread as a headline result. mdpocket showed the matcher behind it was tracking a pocket 7.7 A off-site with 12.2 A of internal inconsistency, that a 19-residue reference on a homotrimer collapses to 11 distinct numbers, and that within a single structure the two pockets it called the same site sat about 12.3 A apart. The claim is withdrawn, along with the 206.7-309.2 A³ volume range that came from the same matching step. A schematic that shows its own retraction is more trustworthy than one that quietly drops it.",
       ],
       head: "WHAT THIS IS",
     };
 
     /* ============================================================================
-           GEOMETRY  —  isometric projection
-           screenX = (x - y) * cos(30)
-           screenY = (x + y) * sin(30) - height
-           ========================================================================= */
+                   GEOMETRY  —  isometric projection
+                   screenX = (x - y) * cos(30)
+                   screenY = (x + y) * sin(30) - height
+                   ========================================================================= */
     const C30 = Math.cos(Math.PI / 6); // 0.8660254
     const S30 = Math.sin(Math.PI / 6); // 0.5
 
@@ -973,8 +1104,8 @@
     })();
 
     /* Solve for world coords so that: stage index steps purely horizontally on
-           screen, row index steps purely vertically. Both directions are still real
-           moves in the world plane, so the projection above is what draws them. */
+                   screen, row index steps purely vertically. Both directions are still real
+                   moves in the world plane, so the projection above is what draws them. */
     function worldFor(sKey, row) {
       const u = stageX[sKey] / (2 * C30); // (x - y)/2 component
       const w = row * VY; // (x + y)/2 component  (VY / (2*S30) / 2 * 2)
@@ -1001,7 +1132,8 @@
     }
 
     const SVGNS = "http://www.w3.org/2000/svg";
-    function el(tag, attrs) {
+    /* attrs is optional — el("defs") and el("g") are both called bare */
+    function el(tag, attrs = {}) {
       const n = document.createElementNS(SVGNS, tag);
       for (const [k, v] of Object.entries(attrs)) {
         if (v !== null && v !== undefined) {
@@ -1021,8 +1153,8 @@
     };
 
     /* ============================================================================
-           DIAGRAM RENDER
-           ========================================================================= */
+                   DIAGRAM RENDER
+                   ========================================================================= */
     const svg = document.getElementById("diagram");
     svg.setAttribute("viewBox", `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
 
@@ -1221,8 +1353,8 @@
     }
 
     /* status decoration shared by the blocks and the legend swatches.
-           BLOCKED  — heavy front edges + solid joint at the front corner.
-           WITHDRAWN — struck front faces. A retracted finding, not an unbuilt one. */
+                   BLOCKED  — heavy front edges + solid joint at the front corner.
+                   WITHDRAWN — struck front faces. A retracted finding, not an unbuilt one. */
     function decorate(g, status, T, B, scale) {
       const k = scale || 1;
       if (status === "blocked") {
@@ -1293,13 +1425,52 @@
         );
         gLink.appendChild(diamond((x1 + x2) / 2, 0, 4.2, false));
         /* arrowhead: evidence flows downstream. The ONE exception is the
-               graph ask-back, drawn separately below as a narrow return path. */
+                       graph ask-back, drawn separately below as a narrow return path. */
         gLink.appendChild(arrow(x2, 0, 5));
       }
     }
 
+    /* --- the one upstream arrow: the graph ask-back ---------------------------
+           Drawn thin, dashed and below the spine on purpose. Four ask verbs, five
+           conjunctive gates, a handful of firings a year — it must not read as a
+           feedback loop the pipeline leans on. Everything else is one-way. */
+    (function askBack() {
+      const from = stageX.input;
+      const to = stageX.graph;
+      if (from === undefined || to === undefined) {
+        return;
+      }
+      const yb = 34;
+      const xa = from - L * C30;
+      const xb = to + L * C30 + 7;
+      gLink.appendChild(
+        el("path", {
+          d: `M ${xa} 0 L ${xa} ${yb} L ${xb} ${yb}`,
+          fill: "none",
+          stroke: "#1a1a1a",
+          "stroke-dasharray": "3 3",
+          "stroke-opacity": 0.7,
+          "stroke-width": 0.9,
+        })
+      );
+      const head = arrow(xb, yb, 4);
+      head.setAttribute("transform", `rotate(180 ${xb} ${yb})`);
+      head.setAttribute("fill-opacity", 0.7);
+      gLink.appendChild(head);
+      const t = el("text", {
+        "fill-opacity": 0.6,
+        "font-size": 8,
+        "letter-spacing": 0.7,
+        "text-anchor": "middle",
+        x: (xa + xb) / 2,
+        y: yb + 12,
+      });
+      t.textContent = "ASK-BACK · 5 GATES";
+      gLink.appendChild(t);
+    })();
+
     /* --- standing notes under a stage header. ESCALATION being downstream is a
-           correction, not a layout note; EVALUATION measures the pipeline, not a target. */
+                   correction, not a layout note; EVALUATION measures the pipeline, not a target. */
     (function stageNotes() {
       const NOTES = {
         escal: [
@@ -1400,7 +1571,7 @@
       decorate(g, d.status, T, B, 1);
 
       /* top-face markers, below the letter and clear of the glyph.
-             open diamond = open caveat.  solid square = corrected after a wrong answer. */
+                     open diamond = open caveat.  solid square = corrected after a wrong answer. */
       const marks = [];
       if (d.caveat) {
         marks.push("caveat");
@@ -1483,8 +1654,8 @@
     }
 
     /* ============================================================================
-           SIDEBAR
-           ========================================================================= */
+                   SIDEBAR
+                   ========================================================================= */
     const rowEls = {};
     (function sidebar() {
       const sb = document.getElementById("sidebar");
@@ -1525,8 +1696,8 @@
     })();
 
     /* ============================================================================
-           HEADER COUNTS
-           ========================================================================= */
+                   HEADER COUNTS
+                   ========================================================================= */
     (function counts() {
       const c = {};
       for (const d of DATA) {
@@ -1549,8 +1720,8 @@
     })();
 
     /* ============================================================================
-           LEGEND  (small isometric swatches, generated the same way as the blocks)
-           ========================================================================= */
+                   LEGEND  (small isometric swatches, generated the same way as the blocks)
+                   ========================================================================= */
     (function legend() {
       const present = {};
       for (const d of DATA) {
@@ -1663,8 +1834,9 @@
         '<div class="lt" style="max-width:236px"><b>READING THE SCHEMATIC</b>' +
         "Block height is verification work, not importance. Tall blocks are tall because " +
         "something was measured, broke, and was re-measured. Open diamond on a top face " +
-        "= built with an open caveat. Small diamonds on the connectors are stage joints; " +
-        "arrowheads mark one-way flow.</div>";
+        "= built with an open caveat. Small diamonds on the connectors are stage joints. " +
+        "The solid spine is one-way; the one thin dashed arrow under it, 01 back to 00, " +
+        "is the graph ask-back — five gates, a handful of firings a year.</div>";
       box.appendChild(extra);
 
       const corr = document.createElement("div");
@@ -1680,18 +1852,38 @@
         "diagram exists to record.</div>";
       box.appendChild(corr);
 
-      /* the two headline results. They are findings about the pipeline itself, so they
-             live in the legend rather than hiding inside a single component panel. */
+      /* the headline results. They are findings about the pipeline itself, so they
+                     live in the legend rather than hiding inside a single component panel. */
+      const head0 = document.createElement("div");
+      head0.className = "lg-item";
+      head0.innerHTML =
+        '<div class="lt" style="max-width:290px"><b>DRUGGABILITY DOES NOT SEPARATE. VOLUME DOES.</b>' +
+        "15 targets, 67 structures, 134 measurements. fpocket druggability: AUC 0.720 at D=1.6 " +
+        "(95% CI 0.44-0.94 — includes chance), and 0.520 at D=2.4, which IS chance. On 37 " +
+        "ligand-anchored holo structures the median is 0.320 and 41% fall below 0.1 — " +
+        "EGFR+osimertinib 0.013, JAK1 median 0.009 across nine approved drugs, RORgt 6C1P 0.009 " +
+        "at rank 55 of 60. <i>MYC — zero holo structures, canonically undruggable — medians 0.75 " +
+        "at D=2.4, above KRAS, BCL-2, JAK1, EGFR and NLRP3.</i> Persistence is exactly chance " +
+        "(0.500) and the consensus criterion built on it ranks MYC top, so it is not the fix. " +
+        "Volume at D=1.6 gives AUC 1.000, stable under all 15 leave-one-out refits, hard " +
+        "&le;207 A³ / druggable &ge;242 A³ — <i>a proposal fitted post hoc on n=15, not a " +
+        "calibrated threshold</i>. See E6, N2.</div>";
+      box.appendChild(head0);
+
       const head1 = document.createElement("div");
       head1.className = "lg-item";
       head1.innerHTML =
-        '<div class="lt" style="max-width:290px"><b>COFOLDING CONFIDENCE IS ANTI-DIAGNOSTIC</b>' +
-        "Sealing the KRAS switch-II pocket with nine phenylalanines made it physically " +
-        "undruggable — and <i>raised</i> every pLDDT-family score (complex pLDDT 0.940 &rarr; " +
-        "0.957), with backbone RMSD to wild type (0.73 A) coming in BELOW the " +
-        "wild-type-versus-wild-type baseline (1.02 A). Median seed dispersion 0.21 A; 21 of 24 " +
-        "runs converged on SI/II-P — a real site, but not the one asked about. Confidence does " +
-        "not know the site is gone. See E4.</div>";
+        '<div class="lt" style="max-width:290px"><b>UNDERSAMPLING IS NOT NEUTRAL &nbsp;&mdash;&nbsp; IT FLATTERS</b>' +
+        "Three of four headline computational claims here have been overturned or narrowed by " +
+        "giving them an n. The 651&times; spread. The fpocket druggability score. And the three " +
+        "GPU tool claims that each rested on one case: sealing a pocket does NOT raise " +
+        "confidence — the pLDDT family notices on 5 of 5 targets over 30 folds, and the " +
+        "treacherous metric is <i>ligand_iptm</i>, right on only 3 of 5 and RISING on TNF-alpha " +
+        "(0.864 &rarr; 0.906); the 1.97-log affinity error was one compound and over 17 pairs " +
+        "the mean signed error is +0.23 log, CI (&minus;0.28, +0.74), p=0.38; and ESMFold's " +
+        "interface failure was our input, 1 contact on the full mature chain against 55 on the " +
+        "ordered core of the same dimer, with pTM predicting which (rho +0.79). Every one failed " +
+        "in the flattering direction. See E4, T2, V, E7.</div>";
       box.appendChild(head1);
 
       const head2 = document.createElement("div");
@@ -1709,8 +1901,8 @@
     })();
 
     /* ============================================================================
-           INTERACTION
-           ========================================================================= */
+                   INTERACTION
+                   ========================================================================= */
     let selected = null,
       hovered = null,
       tab = "what";
@@ -1828,19 +2020,26 @@
           '<hr class="p-rule thin">' +
           '<div class="p-kicker">WHAT THE PIPELINE HAS MEASURED ABOUT ITSELF</div>' +
           '<ul class="p-list">' +
-          "<li><b>E4 &mdash; cofolding confidence is anti-diagnostic.</b> A pocket sealed shut with nine " +
-          "phenylalanines scored <i>higher</i>, not lower: complex pLDDT 0.940 &rarr; 0.957, backbone " +
-          "0.73 A from wild type against a 1.02 A wild-type baseline.</li>" +
-          "<li><b>T2 &mdash; the affinity head ranks, it does not measure.</b> 1.97 log units too weak on " +
-          "tofacitinib, but 2.36 log units of separation between actives and decoys. Order candidates " +
-          "with it; never quote a Kd from it.</li>" +
-          "<li><b>V &mdash; ESMFold fails on interfaces and flags its own failure.</b> 1 contact where the " +
-          "deposited structure has 97, TM-score 0.328 &mdash; and pTM 0.399 says so. The self-report is " +
-          "the usable part.</li>" +
+          "<li><b>E6 &mdash; druggability does not separate; volume does.</b> AUC 0.720 (CI 0.44-0.94) " +
+          "and 0.520 against volume's 1.000. MYC, with zero holo structures, medians 0.75. Persistence " +
+          "is chance and ranks MYC top. The 207/242 A³ boundary is a post-hoc proposal on n=15.</li>" +
+          "<li><b>P &mdash; P2Rank finds sites and must not score them.</b> 79% promoted, 1% demoted, " +
+          "median rank 5 &rarr; 1, top-3 recall 37% &rarr; 91% (n=70) &mdash; but inverted as a quality " +
+          "classifier it gives AUC 0.25. The one demotion, KRAS, stays on the record.</li>" +
+          "<li><b>E7 &mdash; three single-case tool claims, benchmarked; all three moved.</b> Confidence " +
+          "is not anti-diagnostic (pLDDT family notices on 5 of 5, 30 folds) &mdash; but <i>ligand_iptm</i> " +
+          "is right on only 3 of 5 and <i>rises</i> on TNF-alpha with the site sealed. The 1.97-log " +
+          "affinity error is gone: +0.23 log over 17 pairs, CI (&minus;0.28, +0.74). ESMFold's interface " +
+          "failure was our input: 1 contact on the mature chain, 55 on the ordered core.</li>" +
+          "<li><b>T2 &mdash; triage, not ranking.</b> Binder-vs-non-binder separates at ROC AUC 0.983 / " +
+          "1.000; within-target ranking does not hold up (rho +0.48, p=0.11). The old rule was backwards.</li>" +
           "<li><b>E2 &mdash; the retrospective discriminates.</b> JAK1/2/3 and TYK2 go 0 &rarr; 2/2/1/1 " +
           "between a 2010 and a 2013 cutoff; TNF, IL6R, CD20 and IL1B stay at 0 throughout.</li>" +
-          "<li><b>E5 &mdash; the two axes stay apart.</b> TNF beats JAK1 on every pocket metric while " +
-          "having zero approved small molecules. Averaging would invert both answers.</li>" +
+          "<li><b>E5 &mdash; the two axes stay apart, and its own headline numbers were void.</b> 0.992 " +
+          "against 0.735 and 4-of-4 against 2-of-4 were maxima with no minima &mdash; point estimates, " +
+          "which the validator itself rejects. They live in <i>not_found</i>. The disagreement survives.</li>" +
+          "<li><b>U2 &mdash; the escalation ladder is blocked.</b> BioEmu returns backbone plus C-beta " +
+          "only, fpocket needs side chains, nothing repacks. <i>sampled_ensemble</i> is unreachable.</li>" +
           "<li><b>O &mdash; withdrawn.</b> The 651&times; spread was never a spread of one site.</li>" +
           "</ul>" +
           '<div class="p-hint">HOVER A BLOCK OR AN INDEX ROW TO READ IT.<br>CLICK TO PIN.</div>';
