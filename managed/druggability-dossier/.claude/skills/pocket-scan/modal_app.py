@@ -3083,17 +3083,12 @@ def _classify_site_pocket(
             "before_offset": raw_agree,
             "min_compared_to_apply": NUMBERING_MIN_COMPARED_FOR_OFFSET,
             "note": numbering_note,
-            "_why": (
-                "A constant numbering offset between two depositions of one "
-                "protein is the normal case, not an anomaly — TL1A carries "
-                "three at once (0, +67, +71) and IL-17A carries +23. Recovering "
-                "it is a vote over residue names and costs one pass. Applied "
-                "only when it converts an ILLEGAL comparison into a legal one "
-                "over at least "
-                f"{NUMBERING_MIN_COMPARED_FOR_OFFSET} positions and strictly "
-                "increases the number of name-agreeing positions, so an entry "
-                "already on the partner's numbering is never shifted."
-            ),
+            # `_why` deliberately NOT here. This dict is emitted once per
+            # classified pocket per clustering value per structure, and a ~450
+            # character explanation repeated that many times is how a payload
+            # reaches a size cap and then truncates its own trailing
+            # explanation. It is stated once, at
+            # `pocket_vs_interface._numbering_offset_rule`.
         }
         if numbering_note:
             d["notes"] = list(d.get("notes") or []) + [numbering_note]
@@ -6055,7 +6050,30 @@ def pocket_scan(
                         ),
                     }
             interface_out["per_structure"] = per_struct
-            interface_out["per_structure_by_fpocket_rank"] = per_struct_by_rank
+            # NOT `per_struct_by_rank` — that is the SAME object already
+            # serialised inside every structure, and emitting it twice was the
+            # single largest line item in the payload: 156,009 characters of a
+            # 529,048-character IL-13 run, against a consumer cap of 180,000.
+            # A duplicate is not a second measurement.
+            interface_out["per_structure_by_fpocket_rank"] = (
+                "MOVED, NOT REMOVED: read "
+                "structures.<PDB>.pocket_vs_interface.<D>.by_fpocket_rank, "
+                "which is the identical content. It was duplicated here and "
+                "cost ~156 kB on a two-structure run."
+            )
+            interface_out["_numbering_offset_rule"] = (
+                "A constant numbering offset between two depositions of one "
+                "protein is the normal case, not an anomaly — TL1A carries "
+                "three at once (0, +67, +71) and IL-17A carries +23. Recovering "
+                "it is a vote over residue names and costs one pass. It is "
+                "APPLIED only when it converts an illegal comparison into a "
+                "legal one over at least "
+                f"{NUMBERING_MIN_COMPARED_FOR_OFFSET} shared positions AND "
+                "strictly increases the number of name-agreeing positions, so "
+                "an entry already on the partner's numbering is never shifted. "
+                "Per-pocket values are in "
+                "pocket_vs_interface.<D>.numbering_offset_to_partner."
+            )
             # AGGREGATE, NEVER FIRST-WINS. Two symmetry copies of one ligand in
             # one structure can land either side of the overlap boundary:
             # measured on 8DYG ligand U5Q, copy A classified
