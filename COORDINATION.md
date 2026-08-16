@@ -740,3 +740,5 @@ key, no network, 7/7 PASS) and runs in CI on every push to main.
 - **2026-08-16 03:45 UTC** — merged `rafwiewiora/druggability-dossier` (b2ee617, tier-2: structure-select test suite relocated from dead path, zero true collisions) — typecheck+check green.
 - **2026-08-16 03:49 UTC** — merged `rafwiewiora/druggability-dossier` (9a2cafc, tier-2: rename-location on tests README) — typecheck+check green.
 - **2026-08-16 03:53 UTC** — merged `rafwiewiora/druggability-dossier` (b739e9a, tier-2: rename-location on version_diff.py) — typecheck+check green.
+
+- **2026-08-16 04:00 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: fix the round-local id collision that was destroying stored evidence — typecheck+check green.
