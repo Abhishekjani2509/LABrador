@@ -314,28 +314,169 @@ function paperclipBin(): string {
 }
 
 /**
- * Signatures of an auth failure rather than an empty answer. This is the
- * distinction the whole agent exists to protect: "no rows" and "your key was
- * rejected" render almost identically once they reach the model, and one of
- * them is a finding about the target while the other is a finding about the
- * laptop. A present-but-dead key passes `requireEnv` and would otherwise sail
- * straight through as evidence of absence.
+ * Everything Paperclip can say that is a failure rather than an answer.
+ *
+ * This is the distinction the whole agent exists to protect: "no rows" and
+ * "the query died" render almost identically once they reach the model, and one
+ * of them is a finding about the target while the other is a finding about the
+ * laptop. For this pipeline a failure that reads as an empty result is the
+ * worst possible outcome — it is the difference between "no family precedent
+ * exists" and "three queries died".
+ *
+ * The list started as auth-only and that was far too narrow. A full dry run on
+ * IL-6 lost 11 of 30 `paperclip_sql` calls across FOUR signatures, three of
+ * them undocumented, and the auth guard would not have caught a single one:
+ *
+ *   [error] Request timed out                    (server-side, ~120 s)
+ *   [error] Something went wrong. Please try again.   (~76 s)
+ *   vsh: cd: /papers/: Permission denied         (a SQL query, exit 0, 15 ms)
+ *   sql: unknown column / relation does not exist    (recoverable)
+ *
+ * TWO MEASURED FACTS ABOUT HOW THEY ARRIVE, both of which the old guard got
+ * wrong. First, they arrive on STDOUT WITH EXIT 0 — measured here on
+ * `paperclip sql -s proteins`, which printed `vsh: cd: /papers/: Permission
+ * denied` and exited 0 three times in a row. The old guard only inspected runs
+ * with a non-zero exit, so it was structurally incapable of seeing them, and
+ * `report()` handed the text back as a successful result. Second, the
+ * `vsh: cd:` case is not random: `~/.paperclip/config.json` carries sticky
+ * client state (`{"cli_cwd": "/papers/"}`) left behind by an earlier navigation
+ * command, and every later command — `sql` included — is short-circuited by it.
+ *
+ * So the guard now reads every run, and on a clean exit it anchors on the FIRST
+ * non-empty line. A grep hit over the literature begins with a document path,
+ * never with `[error]` or `vsh:`, so retrieved evidence that quotes an error
+ * string in its text still comes back as evidence.
  */
-const AUTH_FAILURE = new RegExp(
-  [
-    "\\b401\\b",
-    "\\b403\\b",
-    "unauthori[sz]ed",
-    "forbidden",
-    "invalid api key",
-    "invalid token",
-    "authentication failed",
-    "not authenticated",
-    "expired (api )?(key|token)",
-    "missing api key",
-  ].join("|"),
-  "i"
-);
+type FailureSignature = { label: string; pattern: RegExp; remedy: string };
+
+const PAPERCLIP_FAILURES: FailureSignature[] = [
+  {
+    label: "AUTHENTICATION FAILURE",
+    pattern:
+      /\b401\b|\b403\b|unauthori[sz]ed|forbidden|invalid api key|invalid token|authentication failed|not authenticated|expired (?:api )?(?:key|token)|missing api key/i,
+    remedy:
+      "PAPERCLIP_API_KEY was present but Paperclip rejected it. Rotate or " +
+      "re-issue the key, put it in the repo-root .env, and re-run.",
+  },
+  {
+    label: "SERVER-SIDE TIMEOUT",
+    pattern: /\[error\]\s*request timed out|statement timeout/i,
+    remedy:
+      "The query reached Paperclip and was killed there. Do NOT assume the " +
+      "query was too broad: the three shapes a dry run saw time out here " +
+      "(`SELECT 1 AS ok`, a GROUP BY over an assay table, a 17-id IN list " +
+      "over pdb_v.entry_ligands) all answer in 7-31 ms once the CLI's sticky " +
+      "cli_cwd is out of the way, so try the same query again before " +
+      "narrowing it. If it repeats, narrow to one key per query and loop, or " +
+      "record the gap in `not_found` — never as 'no rows'.",
+  },
+  {
+    label: "TRANSIENT SERVER ERROR",
+    pattern: /\[error\]\s*something went wrong/i,
+    remedy:
+      "Paperclip failed internally, typically after ~75 s. Retry once; if it " +
+      "repeats, record the gap in `not_found` naming this error.",
+  },
+  {
+    label: "STICKY CLIENT STATE (vsh)",
+    pattern: /^vsh:|vsh: cd: .*permission denied/im,
+    remedy:
+      "The Paperclip CLI cds into a sticky working directory before running " +
+      "any command, and the one it was given is not readable, so the command " +
+      "never ran at all — note the ~15 ms round trip. This handler already " +
+      "runs Paperclip against a config directory of its own to prevent " +
+      "exactly this, so seeing it means PAPERCLIP_CONFIG_DIR is set in the " +
+      "environment and points somewhere poisoned: unset it, or reset " +
+      "`cli_cwd` to `/` in that directory's config.json. It is an operator " +
+      "fix, not a query fix. Nothing about the query is wrong and NOTHING " +
+      "about the target has been learned.",
+  },
+  {
+    label: "QUERY ERROR",
+    pattern:
+      /sql:\s*unknown column|relation .* does not exist|column .* does not exist|syntax error at or near|no such table/i,
+    remedy:
+      "The schema does not have what the query asked for. This one is " +
+      "recoverable: fix the column or table name and re-run. It is still not " +
+      "an empty result.",
+  },
+  {
+    label: "UNCLASSIFIED PAPERCLIP ERROR",
+    pattern: /^\[error\]/im,
+    remedy:
+      "Paperclip printed an error this handler does not have a signature " +
+      "for. Treat it as a failed lookup, not as an absence of data, and quote " +
+      "the raw text in `not_found`.",
+  },
+];
+
+function firstLine(text: string): string {
+  return (
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.length > 0) ?? ""
+  );
+}
+
+/** How the CLI opens a line it wrote itself, as opposed to corpus text. */
+const CLI_ERROR_PREFIX = /^(?:\[error\]|vsh:|sql:|err:|error:)/i;
+
+/**
+ * Run Paperclip against a config directory this pipeline owns.
+ *
+ * `~/.paperclip/config.json` is sticky client state — `{"cli_cwd": "/papers/"}`
+ * — and `cli/app.py` passes it as the `cwd` of EVERY command, `sql` included.
+ * When that directory is not readable the command never runs: the server
+ * answers `vsh: cd: /papers/: Permission denied`, the CLI exits 0, and the
+ * whole query is a ~15 ms no-op that renders like an empty table. One earlier
+ * navigation command, by this agent or by anything else on the machine, poisons
+ * every later query.
+ *
+ * Measured today, both directions, same key, minutes apart:
+ *
+ *   shared ~/.paperclip (cli_cwd=/papers/)  every sql call → vsh: cd: …, exit 0
+ *   PAPERCLIP_CONFIG_DIR=<empty dir>        SELECT 1 AS ok → 7 ms
+ *                                           uniprot_v.proteins by accession → 6 ms
+ *                                           GROUP BY assay_type → 31 ms
+ *                                           17-id IN-list over entry_ligands → rows
+ *
+ * — i.e. THREE of the four query shapes the dry run reported as 120-second
+ * timeouts answer in milliseconds once the sticky cwd is out of the way. So the
+ * handler keeps its own directory and rewrites `cli_cwd` to `/` before every
+ * call. `PAPERCLIP_API_KEY` is required anyway and authenticates a fresh
+ * directory on its own (verified), so no credential file is copied anywhere.
+ */
+const PAPERCLIP_CONFIG_DIR = join(tmpdir(), "druggability-dossier-paperclip");
+const OWNER_ONLY = 0o700;
+
+function paperclipEnv(): NodeJS.ProcessEnv {
+  const dir = process.env.PAPERCLIP_CONFIG_DIR ?? PAPERCLIP_CONFIG_DIR;
+  mkdirSync(dir, { mode: OWNER_ONLY, recursive: true });
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ cli_cwd: "/" }));
+  return { ...process.env, PAPERCLIP_CONFIG_DIR: dir };
+}
+
+function paperclipFailure(result: RunResult): FailureSignature | undefined {
+  const all = `${result.stderr}\n${result.stdout}`;
+  if (result.code !== 0) {
+    return PAPERCLIP_FAILURES.find((sig) => sig.pattern.test(all));
+  }
+  // Exit 0 needs the stricter test, and this is the half the old auth guard
+  // was right about: a successful grep over the literature can quote an error
+  // string as document text, and turning retrieved evidence into a hard
+  // failure would be its own version of the bug this guard exists to prevent.
+  // Verified against a grep hit whose first line contains both `[error]
+  // Request timed out` and `vsh: cd: /papers/: Permission denied` inside a
+  // quoted passage: it must come back as evidence, and it does. So the test is
+  // the FIRST non-empty line, and only when that line OPENS the way the CLI
+  // opens its own errors — a grep hit opens with a document path.
+  const head = firstLine(result.stderr) || firstLine(result.stdout);
+  if (!CLI_ERROR_PREFIX.test(head)) {
+    return;
+  }
+  return PAPERCLIP_FAILURES.find((sig) => sig.pattern.test(head));
+}
 
 async function paperclip(
   argv: string[],
@@ -346,24 +487,41 @@ async function paperclip(
     "The Paperclip CLI authenticates non-interactively with it, and without " +
       "it every query would return an auth error that reads like an empty result."
   );
-  const result = await run(paperclipBin(), argv, { timeoutSeconds });
-  // Only inspect *failed* runs. A successful grep over the literature can
-  // legitimately return lines containing "unauthorized" or "403" as document
-  // text, and turning retrieved evidence into a hard failure would be its own
-  // version of the bug this guard exists to prevent.
-  if (
-    result.code !== 0 &&
-    AUTH_FAILURE.test(`${result.stderr}\n${result.stdout}`)
-  ) {
+  const result = await run(paperclipBin(), argv, {
+    env: paperclipEnv(),
+    timeoutSeconds,
+  });
+  const failure = paperclipFailure(result);
+  if (failure) {
     throw new Error(
-      "PAPERCLIP_API_KEY was present but Paperclip rejected it " +
-        `(exit ${result.code}). This is an authentication failure, NOT an ` +
-        "empty result — do not record it as 'no precedent found'. Rotate or " +
-        "re-issue the key, put it in the repo-root .env, and re-run.\n\n" +
-        `--- paperclip said ---\n${clip(result.stderr || result.stdout)}`
+      `PAPERCLIP ${failure.label} (exit ${result.code}) — THIS IS NOT AN ` +
+        "EMPTY RESULT. Nothing was retrieved and nothing about the target " +
+        "has been learned, so it must not be recorded as 'no precedent " +
+        "found', 'no rows', 0, or an empty list; if the gap survives, it goes " +
+        `in \`not_found\` quoting this error. ${failure.remedy}\n\n` +
+        `--- paperclip ${argv[0]} said ---\n` +
+        `${clip(result.stderr || result.stdout || "(no output at all)")}`
     );
   }
   return result;
+}
+
+/**
+ * `report()` renders an empty run as "(no output)", which on this tool reads
+ * exactly like a query that returned no rows. Say what it actually is instead.
+ */
+function reportPaperclip(label: string, result: RunResult): string {
+  if (result.code === 0 && !(result.stdout.trim() || result.stderr.trim())) {
+    return (
+      `${label} exited 0 and printed nothing at all — no table, no header, no ` +
+      "error. THIS IS AMBIGUOUS AND MUST NOT BE RECORDED AS ZERO ROWS. Re-run " +
+      "a query you know returns rows (a single-accession lookup against " +
+      "`uniprot_v.proteins` answers in ~7 ms) before writing any count, and " +
+      "if that one is also silent the corpus is not answering and the gap " +
+      "belongs in `not_found`."
+    );
+  }
+  return report(label, result);
 }
 
 const paperclipSql: CustomToolSpec = {
@@ -371,12 +529,14 @@ const paperclipSql: CustomToolSpec = {
     "Run one read-only SELECT against a Paperclip database and return the rendered table. " +
     "Use it for every structured precedent lookup — `-s proteins` reaches chembl_v/pdb_v/uniprot_v (drugs by accession, bioactivities, structures, Pfam), `-s trials` reaches the AACT-style ctgov schema, and omitting the source hits the paper corpus (documents, content_blocks, figures). " +
     "Three caveats are measured, not guessed: results are hard-capped at 200 rows, a server-side statement timeout kills long queries, and wide cells are truncated with a literal `...` at roughly 880 characters — which silently destroys json_agg output, so aggregate into separate columns instead of one JSON blob. " +
-    "Usually inline literals beat subqueries, but not always: a Pfam cross-reference join timed out at 85.1 s with inline literals while the identical predicate expressed as a subquery ran in 2.2 s, so when a query times out, try the other form before concluding the data is not there.",
+    "THERE IS NO CURSED TABLE AND BREADTH IS NOT THE DIAGNOSED CAUSE — both characterisations are withdrawn. A dry run lost 11 of 30 calls to what looked like timeouts on `SELECT 1 AS ok`, on a `GROUP BY assay_type` and on a 17-id `IN` list over `pdb_v.entry_ligands`. Re-measured with the CLI's sticky client state neutralised, those same three shapes answer in 7 ms, 31 ms and immediately. The cause was `cli_cwd` in the Paperclip config, which the CLI cds into before EVERY command and which makes every query a ~15 ms no-op printing `vsh: cd: /papers/: Permission denied` at exit 0. The handler now runs against its own config directory, so that class is closed; if you still see it, the operator has PAPERCLIP_CONFIG_DIR pointed somewhere poisoned. " +
+    "Rewriting an `IN` list as a subquery is one measurement (a Pfam cross-reference join: 85.1 s inline, 2.2 s as a subquery), not a rule. Try both forms before concluding the data is absent, and prefer looping one key per query to widening a predicate. " +
+    "FOUR FAILURE SIGNATURES, AND EVERY ONE OF THEM CAN ARRIVE ON STDOUT WITH EXIT 0: `[error] Request timed out`, `[error] Something went wrong. Please try again.`, `vsh: cd: …: Permission denied`, and `ERR: sql: unknown column` / `relation … does not exist`. The handler throws on all four with the raw text attached. A thrown error here is a failed lookup and never an empty result — it must never become a zero, an empty list, or 'no precedent found'; if the gap survives, it goes in `not_found` quoting the error.",
   async handler(input) {
     const query = requiredStr(input, "query");
     const source = str(input, "source");
     const argv = source ? ["sql", "-s", source, query] : ["sql", query];
-    return report("paperclip sql", await paperclip(argv));
+    return reportPaperclip("paperclip sql", await paperclip(argv));
   },
   input_schema: {
     properties: {
@@ -445,7 +605,7 @@ const paperclipGrep: CustomToolSpec = {
       argv.push("--block-type", blockType);
     }
     argv.push(pattern, path);
-    return report("paperclip grep", await paperclip(argv));
+    return reportPaperclip("paperclip grep", await paperclip(argv));
   },
   input_schema: {
     properties: {
@@ -515,7 +675,7 @@ const paperclipRead: CustomToolSpec = {
       argv.push("-n");
     }
     argv.push(path);
-    return report("paperclip cat", await paperclip(argv));
+    return reportPaperclip("paperclip cat", await paperclip(argv));
   },
   input_schema: {
     properties: {
@@ -550,7 +710,7 @@ const paperclipSearch: CustomToolSpec = {
       argv.push("-n", String(limit));
     }
     argv.push(query);
-    return report("paperclip search", await paperclip(argv));
+    return reportPaperclip("paperclip search", await paperclip(argv));
   },
   input_schema: {
     properties: {
@@ -721,8 +881,11 @@ function dropKey(obj: JsonObject, key: string, what: string): number {
   if (value === undefined || typeof value === "string") {
     return 0;
   }
-  const n = Array.isArray(value) ? value.length : Object.keys(value ?? {}).length;
-  obj[key] = `[${n} ${what} dropped by the local tool handler to fit the output cap — NOT absent, NOT zero]`;
+  const n = Array.isArray(value)
+    ? value.length
+    : Object.keys(value ?? {}).length;
+  obj[key] =
+    `[${n} ${what} dropped by the local tool handler to fit the output cap — NOT absent, NOT zero]`;
   return 1;
 }
 
@@ -808,7 +971,10 @@ function dropBulkLists(root: JsonObject): number {
   return n;
 }
 
-type Rung = { apply: (root: JsonObject, names: Set<string>) => number; what: string };
+type Rung = {
+  apply: (root: JsonObject, names: Set<string>) => number;
+  what: string;
+};
 
 const REDUCTION_LADDER: Rung[] = [
   {
@@ -824,7 +990,10 @@ const REDUCTION_LADDER: Rung[] = [
     apply: dropPerRankClassification,
     what: "`structures.<ID>.pocket_vs_interface.<D>.by_fpocket_rank` — THIS ONE COSTS RULE 2b's per-pocket classification; the selected site pocket's classification is still there",
   },
-  { apply: dropBulkLists, what: "`lining_residue_names` and `missing_residues`" },
+  {
+    apply: dropBulkLists,
+    what: "`lining_residue_names` and `missing_residues`",
+  },
 ];
 
 function handlerNote(args: {
@@ -1171,6 +1340,8 @@ else:
     print(json.dumps({"renamed": dict(zip(before, after))}))
 `;
 
+const FILE_EXTENSION = /\.[^.]+$/;
+
 type ChainRename = { path: string; renamed: Record<string, string> | null };
 
 /**
@@ -1180,7 +1351,10 @@ type ChainRename = { path: string; renamed: Record<string, string> | null };
 async function pdbSafeChainNames(path: string): Promise<ChainRename> {
   mkdirSync(STRUCTURE_CACHE, { recursive: true });
   const base = path.split("/").pop() ?? "structure.cif";
-  const dst = join(STRUCTURE_CACHE, `${base.replace(/\.[^.]+$/, "")}-pdbchains.cif`);
+  const dst = join(
+    STRUCTURE_CACHE,
+    `${base.replace(FILE_EXTENSION, "")}-pdbchains.cif`
+  );
   const result = await run(
     micromamba(),
     [
@@ -1450,7 +1624,8 @@ const neighbourPrecedent: CustomToolSpec = {
     "ZERO HOLO NEIGHBOURS IS A FINDING; A FAILED LOOKUP WEARING THAT COSTUME IS THE WORST CONFUSION AVAILABLE ON THIS AXIS. Holo is decided by `ligand_filter` from each component's SMILES graph, so read `neighbour_entry_summary.n_undetermined` and `undetermined_pdb_ids` — and per neighbour, `holo_determined` and `undetermined_ligands` — before writing `no drug-like ligand among the fold neighbours`. A component whose lookup failed carries `lookup_failed` and lands in `undetermined`, which is a THIRD tier and not apo. `n_holo = 0` is only a finding when `n_undetermined = 0` beside it. " +
     "Records without SMILES classify as `unknown`, and `unknown` is not `druglike`, so a record source with no SMILES silently renders every neighbour apo. The sources that carry it are RCSB REST `data.rcsb.org/rest/v1/core/chemcomp/<ID>`, Paperclip `pdb_v.chemcomps` (this script's own source) and the CCD ligand file; an entry's own mmCIF `_chem_comp` block does not. " +
     "Three Foldseek column caveats are already handled inside the script and you should not re-correct them: remote mode mislabels columns so `evalue` is really the probability and `bit_score` is really the E-value, a TM-score only exists via tmalign mode, and `target_id` is a filename-plus-title blob rather than an ID. The load-bearing caveat is in the output: ligands are attributed at entry level, so every holo count comes back twice — an entry-level upper bound and a single-protein-entry lower bound — and you must report the gap rather than picking one. " +
-    "If it returns a `ModuleNotFoundError` for `proto_tools`, that is unavailability of the whole axis: null `structural_neighbour_precedent`, record it in `not_found`, and never write it up as `no structural neighbours found`.",
+    "PASS THE 4-CHARACTER PDB ID AND NOTHING ELSE. The handler fetches biological assembly 1 and, when that assembly names its chains in a way the PDB format cannot hold (1ALU deposits `A` and `A-2`; 7NXZ deposits `AAA`), renames them with gemmi before the script's CIF-to-PDB conversion sees them. Both entries used to die on arrival with `chain name too long for the PDB format`. Same assembly, same coordinates, same chain count, different labels — and a run that was renamed says so in a `_handler_note` at the top of its result. " +
+    "TWO DIFFERENT FAILURES, ONLY ONE OF THEM IS RULE 13. A `ModuleNotFoundError` for `proto_tools` is unavailability of the whole axis: null `structural_neighbour_precedent`, record it in `not_found`, and never write it up as `no structural neighbours found`. A chain-name or file-format error is NOT that case — the tool is available and one input could not be read — so it throws with that distinction spelled out, and the answer is another entry for the same target (recorded in `not_found` as a substitution), not a nulled axis.",
   async handler(input) {
     const requested = requiredStr(input, "structure");
     // Assembly CIFs carry chain names the PDB format cannot hold, and
@@ -1495,9 +1670,43 @@ const neighbourPrecedent: CustomToolSpec = {
         join(SKILLS_DIR, "structure-select", "neighbour_precedent.py"),
         argv
       ),
-      { timeoutSeconds: NEIGHBOUR_TIMEOUT_S }
+      // The script shells out to `paperclip` itself for every neighbour's holo
+      // counts, and those calls are outside this file's guard, so hand it the
+      // same isolated config directory: a sticky `cli_cwd` would otherwise
+      // kill the axis from inside a process this handler cannot inspect.
+      { env: paperclipEnv(), timeoutSeconds: NEIGHBOUR_TIMEOUT_S }
     );
-    return report("neighbour_precedent.py", result);
+    if (CHAIN_NAME_TOO_LONG.test(`${result.stderr}\n${result.stdout}`)) {
+      throw new Error(
+        `${requested} still carries a chain name the PDB format cannot hold ` +
+          "after this handler normalised the assembly's chain names, so the " +
+          "Foldseek query never ran. THIS IS A FILE-FORMAT FAILURE, NOT THE " +
+          "rule-13 CASE: rule 13 nulls this axis on a `proto_tools` " +
+          "ModuleNotFoundError, which means the tool is unavailable. This is " +
+          "an available tool that could not read one input. Do not null " +
+          "`structural_neighbour_precedent` and do not write 'no structural " +
+          "neighbours found'. Try another entry for the same target and " +
+          "record the substitution in `not_found`, or hand the operator a " +
+          "path to a file whose chains are single-character.\n\n" +
+          `--- stderr ---\n${clip(result.stderr)}`
+      );
+    }
+    const rendered = report("neighbour_precedent.py", result);
+    if (result.code !== 0 || !structure.renamed) {
+      return rendered;
+    }
+    return noteOnJson(
+      rendered,
+      `${requested}'s biological assembly names its chains ` +
+        `${Object.keys(structure.renamed).join(", ")}, which the PDB format ` +
+        "this script converts to cannot hold, so the local handler renamed " +
+        `them to ${Object.values(structure.renamed).join(", ")} with ` +
+        "gemmi.shorten_chain_names(). SAME ASSEMBLY, SAME COORDINATES, SAME " +
+        "CHAIN COUNT — only the labels changed, and no reported number is " +
+        "keyed on them. Report `query_structure` as the entry you asked for; " +
+        "if you quote a chain id from this result, say it is the handler's " +
+        "relabelling of the deposited id."
+    );
   },
   input_schema: {
     properties: {
@@ -1532,7 +1741,7 @@ const neighbourPrecedent: CustomToolSpec = {
       },
       structure: {
         description:
-          "The query: a 4-character PDB ID (biological assembly 1 is fetched on the machine running the script) or a path that machine can read. A sandbox path is not readable here.",
+          "The query: a 4-character PDB ID (biological assembly 1 is fetched on the machine running the script, and its chain names are normalised to single characters if the assembly uses `A-2` or `AAA` style ids) or a path that machine can read. A sandbox path is not readable here.",
         type: "string",
       },
     },
@@ -1562,6 +1771,60 @@ const neighbourPrecedent: CustomToolSpec = {
  * machine with no Modal — never for a real dossier, because the run will then
  * lose the computed-tractability axis at the point of use instead of here.
  */
+/**
+ * Ask the corpus one question it must be able to answer.
+ *
+ * Resolving the binary and finding the key in `.env` proves nothing about
+ * whether Paperclip will answer — measured today, a machine that passed both
+ * checks returned `vsh: cd: /papers/: Permission denied` at exit 0 for every
+ * query in the run. That reads like an empty corpus, and an empty corpus is a
+ * dossier with no retrieved-precedent axis. One 7 ms query at second zero
+ * separates the two.
+ */
+async function checkPaperclipAnswers(problems: string[]): Promise<void> {
+  let bin: string;
+  try {
+    bin = paperclipBin();
+  } catch {
+    return; // already reported by the binary check
+  }
+  if (!process.env.PAPERCLIP_API_KEY) {
+    return; // already reported by the credential check
+  }
+  const ask = () =>
+    run(
+      bin,
+      [
+        "sql",
+        "-s",
+        "proteins",
+        "SELECT accession FROM uniprot_v.proteins LIMIT 1",
+      ],
+      { env: paperclipEnv(), timeoutSeconds: 180 }
+    );
+  // Twice, and the second one is not superstition: the first query against a
+  // freshly created config directory also fetches feature flags, and that
+  // first call has been measured timing out on a corpus that answers the very
+  // next call in 7 ms. Failing preflight on it would refuse a healthy run.
+  let probe = await ask();
+  if (paperclipFailure(probe) || !probe.stdout.includes("accession")) {
+    probe = await ask();
+  }
+  const failure = paperclipFailure(probe);
+  if (failure || !probe.stdout.includes("accession")) {
+    problems.push(
+      "  - paperclip liveness: a one-row probe against uniprot_v.proteins did " +
+        `not come back with rows (${failure?.label ?? "unrecognised output"}), ` +
+        "so the retrieved-precedent axis is not reachable and an empty answer " +
+        "would read exactly like a target with no precedent. If this was a " +
+        "transient timeout, re-run; the same probe answers in ~7 ms when the " +
+        `corpus is healthy. (${clip(probe.stdout || probe.stderr)
+          .slice(0, 200)
+          .trim()})`
+    );
+  }
+}
+
 export async function preflight(): Promise<void> {
   if (process.env.DOSSIER_SKIP_PREFLIGHT === "1") {
     return;
@@ -1589,6 +1852,7 @@ export async function preflight(): Promise<void> {
   );
   check("paperclip binary", paperclipBin);
   check("micromamba binary", micromamba);
+  await checkPaperclipAnswers(problems);
   check("modal binary", modalBin);
   check("modal profile", modalProfile);
 

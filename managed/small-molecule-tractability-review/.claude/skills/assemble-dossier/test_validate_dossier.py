@@ -83,7 +83,9 @@ def with_druggability_range(base: dict) -> dict:
         "load_bearing": False,
         "_provenance": "shipped fpocket 3-descriptor logistic regression",
         "_false_negative_rate": (
-            "15 of 37 ligand-anchored holo pockets (41%) score below 0.1; "
+            "a large fraction of ligand-anchored holo pockets score below 0.1 "
+            "(EGFR 6LUD with osimertinib bound: 0.013); the 41% / 15-of-37 rate "
+            "is under audit, denominator 36 not 37 and unverified; "
             "target-level AUC 0.720, 95% CI 0.44-0.94"
         ),
     }
@@ -409,7 +411,9 @@ class TestSameSiteBasis(unittest.TestCase):
         ten were selected by `site_signature_unreliable_homooligomer`. The
         dossier leaves them out. This asserts the gate would have caught them
         had it not — and note the fold_range, 651.0, which is the withdrawn
-        650-fold spread regenerating from the same defect.
+        651-fold spread regenerating from the same defect. (651, not 650: SKILL.md
+        is explicit that the withdrawn figure is 651-fold, and rounding it here
+        was the kind of drift that makes a withdrawn number hard to trace.)
         """
         d = broken(TNF)
         d["tractability"]["method"]["ensemble_pdb_ids"] = [
@@ -1286,14 +1290,27 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
             and x.path.endswith("_false_negative_rate")
         ]
         self.assertTrue(v)
-        self.assertIn("41%", v[0].message)
+        # RE-PINNED 2026-08-15 — a THIRD instance of the same trap, found while
+        # re-pinning the other two. This asserted the bare substring "41%", and
+        # "41%" still appears in the message only inside the phrase putting its
+        # denominator under audit ("reported as 41% (15 of 37); that DENOMINATOR
+        # IS UNDER AUDIT"). One of the 37 supposed certain positives, RORgt 6C1P,
+        # contains no RORgt and was anchored on a detergent, so the clean
+        # denominator is 36 and the remaining 36 are unaudited at residue level.
+        # Pinning "41%" would therefore have pinned a rate nobody can currently
+        # source. Pin the rule's durable subject and the audit caveat instead.
+        self.assertIn("false-negative rate", v[0].message)
+        self.assertIn("AUDIT", v[0].message)
 
     def test_a_negative_verdict_on_druggability_alone_is_rejected(self):
         """The EGFR 6LUD shape: 0.013 with a drug in the pocket, no volume.
 
-        This is the exact failure the rule exists for. 15 of 37 pockets with a
-        drug-like ligand physically bound score below 0.1, so a low score is not
-        evidence of anything on its own.
+        This is the exact failure the rule exists for. A large fraction of
+        pockets with a drug-like ligand physically bound score below 0.1, so a
+        low score is not evidence of anything on its own. (The rate was reported
+        as 15 of 37; that denominator is under audit as of 2026-08-15 — one entry
+        was not a certain positive and the other 36 are unaudited at residue
+        level. The direction is not in doubt; the percentage is.)
         """
         d = _computed_negative(JAK1)
         d["tractability"]["pocket_druggability"]["min"] = 0.013
@@ -1322,9 +1339,16 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
     def test_a_negative_verdict_WITH_volume_behind_it_is_legal(self):
         """The rule must not ban negative verdicts, only unsupported ones.
 
-        TL1A's measured D=1.6 volume is 136.9 A^3 — the smallest in the set. A
-        negative verdict resting on THAT is resting on the primary number, which
-        is what the rule wants, so nothing may fire.
+        136.9 A^3 is used here only as A SMALL VOLUME to exercise the rule's
+        shape: a negative verdict resting on the primary number is what the rule
+        wants, so nothing may fire. It is deliberately no longer described as a
+        calibration fact. This docstring previously read "TL1A's measured D=1.6
+        volume is 136.9 A^3 — the smallest in the set"; that is withdrawn on two
+        counts (2026-08-15). TL1A was one of the five hard calibration anchors
+        and the audit found it had NO site anchor at all — the value came off the
+        trimer 3-fold axis — and "the smallest in the set" is an ordering over a
+        calibration whose anchors did not measure their targets. The test asserts
+        nothing about TL1A and must not be read as evidence about it.
         """
         d = _computed_negative(JAK1)
         d["tractability"]["pocket_druggability"]["max"] = 0.173
@@ -1352,7 +1376,17 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
             and x.path == "tractability.caveat"
         ]
         self.assertTrue(v)
-        self.assertIn("uncalibrated proposal", v[0].message)
+        # RE-PINNED 2026-08-15. This previously asserted "uncalibrated proposal",
+        # a substring that survived only because the agent rewriting the message
+        # kept the retracted phrase inside the new retraction text ("no longer
+        # even the uncalibrated proposal it was previously described as") so the
+        # suite would not go red for other agents mid-flight. It therefore passed
+        # for the wrong reason and pinned RETRACTED PHRASING as a contract: the
+        # next person to tidy the wording breaks this test, and the obvious "fix"
+        # is to put the retracted claim back. Pin the durable half instead — that
+        # the message says the guide is withdrawn and classifies nothing.
+        self.assertIn("RETRACTED", v[0].message)
+        self.assertIn("classifies", v[0].message)
 
     def test_the_conflict_is_satisfied_by_saying_so(self):
         """And a caveat that names it clears the rule — it wants disclosure."""
@@ -1393,8 +1427,21 @@ class TestDruggabilityNotLoadBearing(unittest.TestCase):
         self.assertEqual(m.DRUGGABILITY_FALSE_NEGATIVE_FLOOR, 0.1)
         self.assertEqual(m.PRIMARY_VOLUME_CLUSTERING_D, 1.6)
         self.assertEqual(m.MERGED_VOLUME_A3, 1000.0)
-        # Uncalibrated proposal, fitted post hoc on n=15 with a 17% margin.
-        # Measured: every hard target <= 207 A^3, every druggable one >= 242.
+        # A DISCLOSURE TRIGGER. NOT A THRESHOLD AND NOT A PROPOSAL.
+        # This comment previously read "Uncalibrated proposal, fitted post hoc on
+        # n=15 with a 17% margin. Measured: every hard target <= 207 A^3, every
+        # druggable one >= 242." That separation is RETRACTED (2026-08-15,
+        # CLAUDE.md rule 4a) and the sentence stated it as live fact, so it is
+        # replaced rather than softened: four of the five hard anchors did not
+        # measure their target at all, and the bootstrap CI of [1.000, 1.000] was
+        # degenerate by construction because resampling a perfectly separated set
+        # cannot create an inversion.
+        # The two constants below survive DELIBERATELY. Exactly one rule reads
+        # them, to decide when a low druggability beside a large volume disagree
+        # loudly enough to force a tractability.caveat — a disclosure trigger
+        # that asserts nothing about which side of the number a target falls on,
+        # which is why it outlives the retraction. Do not add a rule that gates
+        # on them, and do not revive the guide from these values.
         self.assertEqual(m.VOLUME_GUIDE_DRUGGABLE_A3, 240.0)
         self.assertEqual(m.VOLUME_GUIDE_HARD_A3, 210.0)
         self.assertLess(m.VOLUME_GUIDE_HARD_A3, m.VOLUME_GUIDE_DRUGGABLE_A3)
@@ -1502,7 +1549,15 @@ class TestVolumeIsPrimary(unittest.TestCase):
             and x.path.endswith("primary_d1_6_a3")
         ]
         self.assertTrue(v)
-        self.assertIn("AUC 1.000", v[0].message)
+        # RE-PINNED 2026-08-15 — same trap as the DRUGGABILITY_LOAD_BEARING pin
+        # above. "AUC 1.000" now appears in this message ONLY inside the phrase
+        # retracting it, so asserting the bare substring pinned the retracted
+        # claim rather than the retraction. Pin what must stay true: the message
+        # tells the reader the volume decides nothing and that the separation is
+        # withdrawn. If someone restores the claim as live, "RETRACTED" goes and
+        # this fails, which is the direction the pin is supposed to protect.
+        self.assertIn("carries no verdict", v[0].message)
+        self.assertIn("RETRACTED", v[0].message)
 
     def test_a_not_found_line_excuses_the_missing_primary(self):
         """Same discipline as every other null: say why, and it is legal.

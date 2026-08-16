@@ -586,6 +586,52 @@ mdpocket silently lost remain distinguishable, which is the whole point.
 Below **3 surviving structures once a drop has occurred** (or 2 in any case) the
 run refuses rather than reporting a CV over the survivors of a partial ensemble.
 
+#### The common core is built over the TARGET's chains, not every chain in the file
+
+`_common_core` requires a residue number to be present in **every chain of every
+structure** and to name the same residue in all of them. Run across every chain
+in the file, an entry carrying an antibody Fab, a receptor ectodomain or a fusion
+partner poisons the intersection with chains that have nothing to do with the
+target and nothing to do with each other.
+
+Measured on BAFF, which returned:
+
+> *only 0 C-alpha positions are shared by every chain of every structure AND name
+> the same residue in all of them (131 numbers were shared, 131 of them dropped
+> because the entries disagree about which residue that number is)*
+
+**131 shared, all 131 rejected — and the whole by-construction site definition
+lost on every target in that batch.** The identity gate is right; its *scope* was
+wrong. Two chains that are different proteins are *supposed* to disagree about
+residue 131, and asking them to agree is not a test any ensemble can pass.
+Restricted to the target's own chains it is the test it was meant to be, and
+`mdpocket.core_restricted_to_target_chains` records what was used per structure.
+A run with no accession keeps the old behaviour, audibly.
+
+#### A 60-mer must refuse the same way whether or not it fits in 62 chain IDs
+
+1OQE, 1OQD and 4V46 refused at fetch — *"more chains than PDB chain IDs"*. That
+is an **implementation limit at 62, not a judgement about the structure**, and
+**1JH5, also a 60-mer, sailed through**: 378 pockets, a selected pocket **60.28 Å
+from the protein centre**, and `homo_oligomer.n_polymer_chains` reporting **10**
+for a 60-chain file because the guard counts target chains. Plausible numbers, no
+error anywhere.
+
+Now: any entry with ≥ `LARGE_ASSEMBLY_CHAINS` (12, PROPOSED and NOT CALIBRATED —
+above NLRP3's octamer, far below 60) polymer chains and **no `chains`
+restriction** is refused with `tier: "none"`, naming the escape hatch. Passing
+`chains` is the caller asserting which protomers carry the site, which is rule 2b
+being executed rather than guessed. `homo_oligomer` now also carries
+`n_polymer_chains_in_file` and `n_polymer_chains_scored` beside the target count,
+so no single number can be mistaken for the file's size.
+
+**Related, and it was silent:** gemmi names assembly-expansion copies `<orig>-<n>`
+and `_struct_ref_seq` only names `<orig>`, so on 1JH5 ten chains resolved to
+Q9Y275 and **the other fifty — the same protein — carried `chain_accessions:
+null`** and were reported as `non_target_chains_scored`. Expansion copies now
+inherit their source chain's accession. This is also why 3K51's target chains
+come back as `["A","A-2","A-3"]` rather than `["A"]`.
+
 #### But which structure is the reference decides *who* gets dropped, and it used to be `ids[0]`
 
 Every structure is fitted onto the reference and dropped if it will not go — so
@@ -911,6 +957,108 @@ threshold), NLRP3 7ZGU `true` (0.63 Å site RMSD against 17.86 Å at `A:679`),
 S1PR1 receptor-to-receptor `true` (0.62 Å against 6.07 Å). The 5.0 Å notable
 threshold is PROPOSED, NOT CALIBRATED.
 
+### Report the distribution. Stop electing one pocket.
+
+**This supersedes the "one site pocket, chosen by a basis" design.** The
+`site_pocket` / `site_pocket_selected_by` fields still exist and still carry what
+they always did — nothing that reads them breaks — but they are **an annotation
+on one row of a table, not the answer**.
+
+**Scoring a whole protein and getting a score per pocket is a clean
+measurement.** What went wrong in the calibration set was not that sites could
+not be anchored; it was mundane and it was data: the reported pocket was on
+**MAX** instead of MYC, on **IL-11 receptor α** instead of IL-11, inside
+**tralokinumab** instead of on IL-13, anchored on **cholesterol hemisuccinate**
+and on **CHAPSO**. Wrong chain, wrong entry, wrong ligand. Every one of them was
+born the same way — nothing external applied, so selection fell back to
+*whatever scored highest*, and a single number cannot show you that it came from
+the wrong molecule.
+
+So `by_clustering.<D>.pocket_table` is now the primary output: one compact row
+per returned pocket carrying
+
+    rank · prank_rank · volume_a3 · druggability · score ·
+    n_lining_residues · chains · chain_accessions ·
+    on_target_fraction · on_target · anchors · anchor_detail · centroid
+
+**A table of thirty rows with nine of them on chain B cannot hide what a single
+elected number hides.** It also removes the selection bias by construction:
+taking the max-scoring pocket of N is a maximum over N draws and grows with N.
+(That bias is real but was overstated — it applies to both groups, and the audit
+found volume does not track pocket count, r = −0.098. It does not by itself
+manufacture a separation.)
+
+**The confound that does hold is a separate thing and is not fixed by this.**
+"Has a drug-like co-crystal" separates druggable from hard at **AUC 0.900 with no
+structural measurement at all.** Any metric evaluated on that split inherits it.
+That is about our labels, not our pockets — reporting a distribution does not
+remove it, it just stops it hiding behind one number.
+
+#### Anchoring is an annotation, and several can coexist
+
+Each pocket carries every external label that applies, in `anchors`:
+
+| label | what it means | where it comes from |
+| --- | --- | --- |
+| `ligand_site` | overlaps a drug-like co-crystallised ligand | Jaccard, in `anchor_detail.ligand_site_jaccard` |
+| `interface` | overlaps the partner epitope | folded in by the interface stage; needs `partner_structures` |
+| `symmetry_axis` | built from equivalent residues of ≥2 identical chains | geometry — **no ligand needed** |
+| `annotated_functional_site` | overlaps a UniProt binding/active/site feature | UniProt, aligned through `_struct_ref_seq` |
+| `buried_core` | the existing geometry flag | folded in by the interface stage, with enclosure |
+| `transferred_homolog_site` | a Foldseek neighbour's ligand site | **not available in this module** — it lives in `structure-select` / `neighbour_precedent`, and its absence is stated rather than left to look like a negative |
+
+A pocket may carry several or none. **`site_hypothesis_basis: "not_established"`
+now means "no pocket in this structure carries any external label"** — a true and
+useful statement about a protein — instead of "we fell back to whatever scored
+highest", which is how all four bad anchors were born.
+
+`symmetry_axis` is the one that earns its keep on a target with no chemistry:
+BAFF's axial site is built from Gln144/Phe194/Leu282/Leu284 contributed by three
+protomers with no ligand anywhere in the entry. It is detected as ≥2 residue
+*numbers* contributed by ≥2 sequence-identical chains
+(`SYMMETRY_AXIS_MIN_SHARED_RESIDUES`, PROPOSED and NOT CALIBRATED — one shared
+number is a chain contact, not an axis).
+
+#### Measured: on TNF-α the symmetry-axis label finds the SPD304 site with no ligand
+
+This was the open question — do the ligand-free annotations agree with the
+ligand-anchored one where both exist? **On the canonical case, yes.**
+
+`2AZ5` at D=2.4, rank 5: `["ligand_site", "symmetry_axis"]` together — Jaccard
+**0.636** against the SPD304 site, symmetry residues **57, 59, 119, 120** across
+two chains, druggability 0.587, 322.4 Å³. The two labels land on **the same
+pocket**.
+
+And in the **apo** trimer `1TNF`, D=2.4 rank 5 carries `symmetry_axis` on
+residues **57, 59, 119** — the same set, druggability 0.32 — with **no ligand
+anywhere in the entry**. Leu57, Tyr59 and Tyr119 are the SPD304 contacts. So the
+symmetry-axis annotation recovers the site on a structure that has no chemistry
+to recover it from, which is the thing this station needs to work.
+
+**`interface` correctly *disagrees* at that pocket, and the disagreement is the
+mechanism finding.** The SPD304 pocket carries no `interface` label; the
+interface-labelled pockets are elsewhere on the trimer at overlaps 0.36–0.73.
+That is the same statement as the established "0.00 overlap with the TNFR2
+epitope — destabiliser, not orthosteric", now readable per pocket instead of
+per structure. **Anchors agreeing is evidence; anchors disagreeing is a
+mechanism claim.** Do not collapse them.
+
+One caution visible in the same table: at **D=1.6** the SPD304 pocket falls to
+rank 13 with Jaccard 0.069, because the channel fragments below fpocket's `-i 15`
+floor — the documented D=1.6 false negative, unchanged. Read both D values.
+
+IL-17A is the remaining half of this test and has not been run here.
+
+#### Payload size: read `pocket_table`, not `pockets`
+
+A dry run hit `readScanPayload`'s 180,000-character cap, dropped 98 pocket
+objects, was *still* over, and truncated mid-string — producing invalid JSON, and
+deleting `_handler_note` first because it is the last key. **Per-pocket records
+here carry no prose.** Every explanation lives once per clustering value, in
+`on_target_selection` and `anchor_summary`. A consumer under a size cap should
+read `pocket_table` and drop the verbose `pockets` list, which carries the full
+residue lists and per-residue names.
+
 ### The chain resolver worked and the pocket selector ignored it
 
 **This is the defect that suspended the volume metric**, and it is the twin of
@@ -1022,11 +1170,39 @@ G-beta/G-alpha–G-gamma interface, reported it as the target's epitope with
 The same longest-chain sequence was the disorder fallback, so without an explicit
 accession disorder would have been computed on G-beta-1.
 
+**And the length heuristic was still deciding in the interface stage after that
+fix, because it decided what `target_seqs` was.** IL-13 3BPO split into
+`target ["A","C"]` against `partner ["B"]` — A is IL-13 and **C is IL-13Rα1 at
+314 aa** — and `side_a` came back containing `C:ASN240, C:PHE259, C:TYR276`,
+receptor residues reported as the target's own epitope, with
+`interface_status: "ok"` and no warning. 5E4E splits identically. It did not fire
+on BAFF only because BAFF's receptor fragments are 31–63 aa, so BAFF is the
+longest chain anyway: the heuristic was still guessing, it was just guessing
+right.
+
+The partner entry's own `_struct_ref_seq` is now read and the split made on it
+whenever it resolves; the 5-mer sequence split is the fallback, flagged
+`target_partner_split_verified: false`. Where both are available and **disagree**,
+`target_partner_split_disagreement` reports the disagreement rather than
+resolving it — a chain the sequence split claims and the accession does not is a
+partner subunit similar enough to fool a 5-mer overlap, which is exactly the
+IL-13/IL-13Rα1 failure.
+
 **Resolve chains by UniProt accession**, which every entry declares in
 `_struct_ref` / `_struct_ref_seq`. Two traps in doing so:
 
 - **the assembly mmCIF does not carry `_struct_ref`.** RCSB strips it. Fetch
   `files.rcsb.org/header/<ID>.cif` for it.
+- **a PDB entry's accession need not be the string you asked for, and refusing on
+  the string is wrong.** Two live cases, both caught before shipping. UniProt
+  **merges**: TL1A's 2O0O/2QE3/2RJK/2RJL/2RE9 all declare **Q8NFE9**, whose record
+  reads `inactiveReason: {inactiveReasonType: "MERGED", mergeDemergeTo:
+  ["O95150"]}` — a literal comparison would have refused five of six entries of
+  the target's own ensemble. And **one gene can carry several live accessions**:
+  IL-13's 3BPO declares **Q4VB50**, an unreviewed TrEMBL entry named
+  "Interleukin-13", gene `IL13`, human, which is not merged into P35225 and never
+  will be. Match on the string, **or** a UniProt merge, **or** same gene + same
+  organism — and when UniProt cannot be reached, do not refuse.
 - **that header file is not valid mmCIF as served.** It is the full entry with
   the coordinate loops deleted, and the deletion leaves bare `loop_` keywords
   with no tags — at the end of the file and in the middle of it (4OBE has three

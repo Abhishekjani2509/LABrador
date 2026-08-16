@@ -1498,6 +1498,229 @@ def _annotate_on_target(
         )
 
 
+# A pocket is called symmetry-axis-anchored when at least this many residue
+# NUMBERS are contributed to it by two or more sequence-identical chains.
+# PROPOSED, NOT CALIBRATED. BAFF's axial site carries four (Gln144, Phe194,
+# Leu282, Leu284, each from three protomers) with no ligand anywhere; one shared
+# number is a chain contact, not an axis.
+SYMMETRY_AXIS_MIN_SHARED_RESIDUES = 2
+
+_UNP_SITE_CACHE: dict[str, tuple[dict[int, list[str]], bool]] = {}
+
+
+def _uniprot_functional_sites(acc: str) -> tuple[dict[int, list[str]], bool]:
+    """{UniProt sequence position -> feature names} for binding/active/site.
+
+    THE ANNOTATION THAT DOES NOT NEED CHEMISTRY. Every other external label a
+    pocket can carry needs something bound, or a partner, or a homolog with
+    something bound. This one is a curated statement about the protein itself,
+    which is exactly what a target with no ligand and no complex still has.
+    """
+    acc = (acc or "").strip()
+    if not acc:
+        return {}, False
+    if acc in _UNP_SITE_CACHE:
+        return _UNP_SITE_CACHE[acc]
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    out: dict[int, list[str]] = {}
+    ok = False
+    try:
+        req = urllib.request.Request(  # noqa: S310
+            f"https://rest.uniprot.org/uniprotkb/{acc}.json"
+            "?fields=ft_binding,ft_act_site,ft_site",
+            headers={"User-Agent": "pocket-scan"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as fh:  # noqa: S310
+            d = _json.loads(fh.read().decode())
+        ok = True
+        for ft in d.get("features") or ():
+            kind = ft.get("type")
+            if kind not in ("Binding site", "Active site", "Site"):
+                continue
+            loc = ft.get("location") or {}
+            beg = (loc.get("start") or {}).get("value")
+            end = (loc.get("end") or {}).get("value")
+            if beg is None:
+                continue
+            label = ft.get("description") or kind
+            for pos in range(int(beg), int(end or beg) + 1):
+                if label not in out.setdefault(pos, []):
+                    out[pos].append(f"{kind}: {label}"[:60])
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError):
+        ok = False
+    _UNP_SITE_CACHE[acc] = (out, ok)
+    return out, ok
+
+
+def _chain_unp_offsets(
+    cif: Path | None, renamed: dict[str, str], chain_names: list[str],
+) -> dict[str, int]:
+    """{chain -> offset} such that `auth_residue_number = unp_position + offset`.
+
+    Read straight out of `_struct_ref_seq`'s own alignment columns, so a
+    construct numbered from its own start and a construct numbered on the
+    precursor both land on the UniProt sequence correctly. Without this every
+    UniProt feature position would be compared against a residue number that
+    means something else — the same class of error as `match_by="seqid"` across
+    two entries, and it has already bitten this file once on TL1A.
+    """
+    import gemmi
+
+    if cif is None:
+        return {}
+    try:
+        block = gemmi.cif.read(str(cif)).sole_block()
+    except Exception:  # noqa: BLE001
+        return {}
+    inv = {new: old for old, new in renamed.items()}
+    by_strand: dict[str, int] = {}
+    for row in block.find(
+        "_struct_ref_seq.",
+        ["pdbx_strand_id", "db_align_beg", "pdbx_auth_seq_align_beg"],
+    ):
+        try:
+            off = int(row.str(2)) - int(row.str(1))
+        except (ValueError, TypeError):
+            continue
+        for raw in row.str(0).replace(",", " ").split():
+            by_strand.setdefault(raw, off)
+    out: dict[str, int] = {}
+    for ch in chain_names:
+        orig = inv.get(ch, ch)
+        for key in (orig, _assembly_base_chain(orig)):
+            if key in by_strand:
+                out[ch] = by_strand[key]
+                break
+    return out
+
+
+def _annotate_pocket_labels(
+    pockets: list[dict],
+    target_chains: list[str] | None,
+    chain_acc: dict[str, list[str]],
+    identical_chains: list[str] | None,
+    unp_sites: dict[int, list[str]],
+    unp_offsets: dict[str, int],
+) -> None:
+    """Tag every pocket with EVERY external label that applies to it.
+
+    ANCHORING IS AN ANNOTATION, NOT AN ELECTION. The old design chose one pocket
+    as "the" site and, when nothing external applied, fell back to whichever
+    scored highest — and that fallback is where all four bad calibration anchors
+    were born: MYC's pocket was on MAX, IL-11's on IL-11 receptor alpha, IL-13's
+    inside tralokinumab, CD20's on a cholesterol-hemisuccinate site. A pocket
+    that carries no external label is not "the site by default"; it is a pocket
+    with no external label, and saying so is a true and useful statement about a
+    protein.
+
+    A pocket may carry several labels or none. The labels are:
+
+        ligand_site               overlaps a drug-like co-crystallised ligand
+        interface                 overlaps a partner epitope (added later, by
+                                  the interface stage, which is where the
+                                  epitope exists)
+        symmetry_axis             built from equivalent residues of two or more
+                                  identical chains, as BAFF's axial site is with
+                                  no ligand anywhere
+        annotated_functional_site overlaps a UniProt binding/active/site feature
+        buried_core               the existing geometry flag (added later, with
+                                  enclosure, by the interface stage)
+        transferred_homolog_site  NOT AVAILABLE HERE — it needs Foldseek, which
+                                  lives in `structure-select`/`neighbour_
+                                  precedent`. Its absence is reported rather
+                                  than left to look like a negative.
+    """
+    tgt = set(target_chains or ())
+    ident = set(identical_chains or ())
+    for p in pockets:
+        res = p.get("residues") or []
+        labels: list[str] = []
+        detail: dict = {}
+
+        jac = p.get("jaccard_vs_ligand_site")
+        if jac:
+            labels.append("ligand_site")
+            detail["ligand_site_jaccard"] = jac
+
+        # --- symmetry axis ---------------------------------------------
+        if len(ident) > 1:
+            by_num: dict[str, set[str]] = {}
+            for r in res:
+                ch, _, num = r.partition("/")
+                if ch in ident:
+                    by_num.setdefault(num, set()).add(ch)
+            shared = {n: cs for n, cs in by_num.items() if len(cs) > 1}
+            if len(shared) >= SYMMETRY_AXIS_MIN_SHARED_RESIDUES:
+                labels.append("symmetry_axis")
+                detail["symmetry_axis"] = {
+                    "n_shared_residue_numbers": len(shared),
+                    "n_chains": len(set().union(*shared.values())),
+                    "residues": sorted(shared, key=lambda x: int(x))[:12],
+                }
+
+        # --- UniProt functional features -------------------------------
+        if unp_sites:
+            hits: list[str] = []
+            for r in res:
+                ch, _, num = r.partition("/")
+                if ch not in tgt or ch not in unp_offsets:
+                    continue
+                try:
+                    pos = int(num) - unp_offsets[ch]
+                except ValueError:
+                    continue
+                for lab in unp_sites.get(pos, ()):
+                    tag = f"{num}:{lab}"
+                    if tag not in hits:
+                        hits.append(tag)
+            if hits:
+                labels.append("annotated_functional_site")
+                detail["annotated_functional_site"] = hits[:8]
+
+        p["anchor_labels"] = labels
+        p["anchor_detail"] = detail
+        p["lining_chains"] = sorted({r.partition("/")[0] for r in res})
+        p["lining_chain_accessions"] = {
+            c: chain_acc.get(c) for c in p["lining_chains"]
+        }
+
+
+def _pocket_table(pockets: list[dict]) -> list[dict]:
+    """The compact per-pocket record. THIS IS THE PRIMARY OUTPUT NOW.
+
+    One row per returned pocket, small enough that thirty of them fit inside a
+    payload cap: rank, size, score, where it is, what it is made of, and which
+    external labels it carries. NO PROSE PER POCKET — the explanations live once
+    per clustering value in `on_target_selection` and `anchor_summary`, because
+    a payload that truncates deletes its own trailing explanation first.
+
+    A distribution replaces a selection. Reporting one elected pocket is a
+    maximum over N draws AND it is where every bad anchor came from; a table of
+    thirty with nine of them on chain B cannot hide either.
+    """
+    return [
+        {
+            "rank": p.get("rank"),
+            "prank_rank": p.get("prank_rank"),
+            "volume_a3": p.get("volume"),
+            "druggability": p.get("druggability_score"),
+            "score": p.get("score"),
+            "n_lining_residues": len(p.get("residues") or []),
+            "chains": p.get("lining_chains"),
+            "chain_accessions": p.get("lining_chain_accessions"),
+            "on_target_fraction": p.get("on_target_residue_fraction"),
+            "on_target": p.get("on_target"),
+            "anchors": p.get("anchor_labels"),
+            "anchor_detail": p.get("anchor_detail") or None,
+            "centroid": p.get("centroid"),
+        }
+        for p in pockets
+    ]
+
+
 def _one_letter(st, chains: list[str] | None = None) -> tuple[str | None, str | None]:
     """Longest polymer chain as a one-letter sequence, and which chain it was.
 
@@ -2466,11 +2689,19 @@ def _interface_block(
                 _chain_accessions(_fetch_header(pid, work), {}, all_ch)
                 if (target_accession and work is not None) else ({}, "not_attempted")
             )
-            acc_ours = [
-                c for c in all_ch
-                if target_accession in acc_map.get(c, [])
-                or target_accession in acc_map.get(_assembly_base_chain(c), [])
-            ]
+            # Matched through UniProt's merge/gene history, not literally — the
+            # same rule `_target_chains` uses. Matching on the string here made
+            # IL-13's 3BPO fall back to the sequence heuristic and report
+            # `verified: false`, because 3BPO declares Q4VB50 (an unreviewed
+            # entry for the same IL13 gene) rather than P35225.
+            acc_ours = []
+            for c in all_ch:
+                for a in (
+                    acc_map.get(c) or acc_map.get(_assembly_base_chain(c)) or ()
+                ):
+                    if _accession_matches(a, target_accession)[0]:
+                        acc_ours.append(c)
+                        break
             if acc_ours:
                 ours = acc_ours
                 theirs = [c for c in all_ch if c not in acc_ours]
@@ -4695,11 +4926,11 @@ def pocket_scan(
                 _fetch_header(pid, work), renamed,
                 [c.name for c in st[0]],
             )
-            tgt = _target_chains(
+            tgt_info = _target_chains(
                 chain_acc, target_accession, used_chains, acc_status
             )
-            tgt_chains, tgt_basis = tgt["chains"], tgt["basis"]
-            if tgt["refuse"]:
+            tgt_chains, tgt_basis = tgt_info["chains"], tgt_info["basis"]
+            if tgt_info["refuse"]:
                 # FAIL CLOSED. The entry says which proteins it contains and the
                 # target is not one of them; scoring it measures a different
                 # molecule. See `_target_chains`.
@@ -4708,9 +4939,9 @@ def pocket_scan(
                     "stage": "target_chain_resolution",
                     "tier": "none",
                     "by_clustering": {},
-                    "target_chains": tgt,
+                    "target_chains": tgt_info,
                     "chain_accessions": chain_acc,
-                    "_why": tgt["reason"],
+                    "_why": tgt_info["reason"],
                 }
                 continue
             homo = _homo_oligomer(st, tgt_chains)
@@ -4723,6 +4954,16 @@ def pocket_scan(
                 if any(r.het_flag == "A" and len(r) for r in c)
             )
             homo["n_polymer_chains_scored"] = len(used_chains)
+            # UniProt's own binding/active-site features, and the alignment
+            # needed to compare them against author residue numbers. Fetched
+            # once per structure and cached per accession for the container.
+            unp_sites, unp_sites_ok = (
+                _uniprot_functional_sites(target_accession)
+                if target_accession else ({}, False)
+            )
+            unp_offsets = _chain_unp_offsets(
+                _fetch_header(pid, work), renamed, [c.name for c in st[0]]
+            )
             # A LARGE ASSEMBLY IS FLAGGED WHETHER OR NOT IT HAPPENED TO FIT.
             # The only thing that used to notice one was `_load` running out of
             # single-character chain IDs, which is an implementation limit at 62
@@ -4731,6 +4972,38 @@ def pocket_scan(
             # and a selected pocket 60.28 A from the protein centre. Same shape
             # of file, opposite handling, and the one that did not refuse gave
             # plausible numbers with no error anywhere.
+            # AND IT REFUSES, the way 1OQE, 1OQD and 4V46 already did. Those
+            # three refused only because `_load` ran out of single-character
+            # chain IDs — an implementation limit at 62, not a judgement — so
+            # 1JH5, ALSO a 60-mer, sailed through and produced 378 pockets with
+            # the selected one 60.28 A from the protein centre, plus a
+            # `n_polymer_chains: 10` that was counting a tenth of the file.
+            # Same shape, opposite handling, and the one that did not refuse
+            # returned plausible numbers with no error anywhere.
+            #
+            # `chains` is the escape hatch and it is the right one: a caller who
+            # names the protomers has asserted what is being measured, which is
+            # exactly rule 2b. Refusing without one is refusing to guess.
+            if (
+                homo["n_polymer_chains_in_file"] >= LARGE_ASSEMBLY_CHAINS
+                and not want
+            ):
+                stage = "large_assembly"
+                raise RuntimeError(
+                    f"{pid}: {homo['n_polymer_chains_in_file']} polymer chains "
+                    f"(>= {LARGE_ASSEMBLY_CHAINS}) and no `chains` restriction. "
+                    "Whole-assembly pocket detection on an assembly this size "
+                    "returns hundreds of pockets, nearly all of them shallow "
+                    "surface features and inter-protomer crevices: 1JH5, a "
+                    "60-mer of ONE protein, returned 378 pockets and a selected "
+                    "pocket 60.28 A from the protein centre, with no error "
+                    "anywhere. REFUSING rather than returning that. 1OQE, 1OQD "
+                    "and 4V46 already refused at exactly this shape, but only "
+                    "because they exceeded the 62 single-character chain IDs — "
+                    "an implementation limit, not a boundary that means "
+                    "anything. Pass `chains` naming the protomers that carry "
+                    "the site, e.g. {\"1JH5\": [\"A\",\"B\",\"C\"]}."
+                )
             homo["large_assembly_warning"] = (
                 None if homo["n_polymer_chains_in_file"] < LARGE_ASSEMBLY_CHAINS
                 else (
@@ -4740,10 +5013,10 @@ def pocket_scan(
                     "of pockets, most of them shallow surface features and "
                     "inter-protomer crevices far from anything a dossier is "
                     "asking about — 1JH5, a 60-mer, returned 378 pockets and a "
-                    "selected pocket 60.28 A from the protein centre. Restrict "
-                    "with `chains` or `site_residues`; a number off this "
-                    "structure without that restriction is not a measurement of "
-                    "a binding site."
+                    "selected pocket 60.28 A from the protein centre. This run "
+                    "was allowed through ONLY because `chains` was passed, so "
+                    "the caller has asserted which protomers carry the site; "
+                    "without that restriction the entry is refused."
                 )
             )
         except LigandSourceError:
@@ -4824,9 +5097,9 @@ def pocket_scan(
             "target_accession_basis": accession_basis,
             "target_chains": tgt_chains,
             "target_chains_basis": tgt_basis,
-            "target_chains_verified": tgt["verified"],
-            "target_chains_note": tgt["reason"],
-            "entry_declares_accessions": tgt["declared_accessions"],
+            "target_chains_verified": tgt_info["verified"],
+            "target_chains_note": tgt_info["reason"],
+            "entry_declares_accessions": tgt_info["declared_accessions"],
             "chain_accession_status": acc_status,
             "chain_accessions": chain_acc,
             "non_target_chains_scored": [
@@ -4904,7 +5177,11 @@ def pocket_scan(
             # See `_annotate_on_target` for what that cost. Every pocket is
             # annotated (so the fraction is readable for all of them) and only
             # the on-target ones are eligible to BE the site.
-            _annotate_on_target(pockets, tgt_chains, tgt["verified"])
+            _annotate_on_target(pockets, tgt_chains, tgt_info["verified"])
+            _annotate_pocket_labels(
+                pockets, tgt_chains, chain_acc,
+                homo.get("identical_chains"), unp_sites, unp_offsets,
+            )
             candidates = [p for p in pockets if p.get("on_target") is not False]
             off_target = [p for p in pockets if p.get("on_target") is False]
             if pockets and not candidates:
@@ -5030,8 +5307,61 @@ def pocket_scan(
             for p in returned:
                 p["is_site_pocket"] = bool(best and p["rank"] == best["rank"])
             omitted = [p for p in ranked if p["rank"] not in keep_ranks]
+            anchored = [p for p in returned if p.get("anchor_labels")]
             per_d[str(d)] = {
                 "n_pockets": len(pockets),
+                # ---- THE DISTRIBUTION IS THE PRIMARY OUTPUT ----------------
+                # One compact row per returned pocket. Read this before
+                # `site_pocket`: a single elected number can silently be a
+                # cavity on MAX rather than MYC, on IL-11 receptor alpha rather
+                # than IL-11, or inside tralokinumab rather than on IL-13 — and
+                # all four of those really were calibration anchors. A table of
+                # thirty rows carrying their own chains and accessions cannot
+                # hide it, and reporting a distribution removes the
+                # maximum-over-N selection bias by construction.
+                "pocket_table": _pocket_table(returned),
+                "anchor_summary": {
+                    "labels_available": [
+                        "ligand_site", "interface", "symmetry_axis",
+                        "annotated_functional_site", "buried_core",
+                    ],
+                    "n_pockets_with_any_anchor": len(anchored),
+                    "anchors_seen": sorted({
+                        lab for p in anchored for lab in p["anchor_labels"]
+                    }),
+                    "site_hypothesis_basis": (
+                        "not_established" if not anchored
+                        else "external_anchor_labels_present"
+                    ),
+                    "uniprot_features_resolved": unp_sites_ok,
+                    "n_uniprot_feature_positions": len(unp_sites),
+                    "transferred_homolog_site": (
+                        "NOT AVAILABLE IN THIS MODULE — it needs Foldseek, "
+                        "which lives in structure-select / neighbour_precedent. "
+                        "Its absence from `anchors_seen` is a statement about "
+                        "this module, not about the protein."
+                    ),
+                    "interface_and_buried_core": (
+                        "added by the interface stage, which is where the "
+                        "partner epitope and the enclosure calculation exist. "
+                        "Absent here when no partner_structures were supplied."
+                    ),
+                    "_why": (
+                        "ANCHORING IS AN ANNOTATION AND SEVERAL CAN COEXIST. "
+                        "A pocket may carry ligand_site AND interface AND "
+                        "symmetry_axis, or none of them. `not_established` now "
+                        "means 'no pocket carries an external label', which is "
+                        "a true and useful statement about a protein — it used "
+                        "to mean 'we fell back to whatever scored highest', "
+                        "which is how every bad calibration anchor was born. "
+                        "The open question worth answering next: where a target "
+                        "has BOTH a ligand site and a receptor epitope (TNF and "
+                        "IL-17A both do), do the interface- and symmetry-"
+                        "anchored labels land on the same pocket as the "
+                        "ligand-anchored one? If they agree, this axis works on "
+                        "targets with no chemistry at all."
+                    ),
+                },
                 "pockets": returned,
                 "pockets_returned": len(returned),
                 "pockets_omitted": len(omitted),
@@ -5071,15 +5401,29 @@ def pocket_scan(
                     }
                 ),
                 "max_pockets_returned": MAX_POCKETS_RETURNED,
+                # KEPT AS AN ANNOTATION, NOT A GATE. `site_pocket` is one row
+                # of `pocket_table` singled out, and it is retained so existing
+                # consumers keep reading the field they always did. It is no
+                # longer the answer: read the table, and read
+                # `anchor_summary.site_hypothesis_basis` before treating this
+                # pocket as the site.
                 "site_pocket": best,
                 "site_pocket_selected_by": basis,
+                "_site_pocket_note": (
+                    "ONE ROW OF pocket_table, NOT THE ANSWER. Electing a single "
+                    "pocket is a maximum over N draws and it is where four bad "
+                    "calibration anchors came from (MYC's on MAX, IL-11's on "
+                    "the receptor, IL-13's inside tralokinumab, CD20's on a "
+                    "cholesterol site). Quote the distribution; quote this only "
+                    "with its on_target_fraction and its anchors beside it."
+                ),
                 # ---- IS THE SELECTED POCKET EVEN ON THE TARGET? ------------
                 # The question that had no field. `on_target_selection` is the
                 # answer for the pocket that was chosen; the census beside it is
                 # the answer for the entry.
                 "on_target_selection": {
                     "target_chains": list(tgt_chains),
-                    "target_chains_verified": tgt["verified"],
+                    "target_chains_verified": tgt_info["verified"],
                     "min_on_target_fraction": POCKET_MIN_ON_TARGET_FRACTION,
                     "_threshold_status": "PROPOSED, NOT CALIBRATED",
                     "site_pocket_on_target_fraction": (
@@ -5120,7 +5464,7 @@ def pocket_scan(
                         "the payload."
                     ),
                     "_unverified_note": (
-                        None if tgt["verified"] else
+                        None if tgt_info["verified"] else
                         "THE CHAIN SET IS UNVERIFIED, so no pocket was excluded "
                         "and on_target is null throughout. Either no "
                         "uniprot_accession was supplied or this entry's "
@@ -5183,6 +5527,23 @@ def pocket_scan(
                 ),
                 **prank_info,
             }
+            # ---- DE-DUPLICATE: the annotation lives in `pocket_table` -------
+            # A dry run hit the consumer's 180,000-char cap, dropped 98 pocket
+            # objects, was STILL over and truncated mid-string — producing
+            # invalid JSON and deleting the trailing explanation first. Carrying
+            # the same per-pocket annotation in both the compact table and the
+            # verbose list costs ~160 chars x 30 pockets x every clustering
+            # value x every structure for nothing. The selected pocket keeps its
+            # copy, because `site_pocket` is read on its own.
+            for _p in returned:
+                if best is not None and _p is best:
+                    continue
+                for _k in (
+                    "anchor_labels", "anchor_detail", "lining_chains",
+                    "lining_chain_accessions", "n_on_target_lining_residues",
+                    "off_target_lining_chains",
+                ):
+                    _p.pop(_k, None)
             if not pockets:
                 per_d[str(d)]["fpocket_failed"] = {
                     "returncode": proc.returncode,
@@ -5590,6 +5951,50 @@ def pocket_scan(
                     # iterates per_struct[pid].values() and expects every entry
                     # to be one classification.
                     per_struct_by_rank.setdefault(pid, {})[dkey] = by_rank
+                    # ---- FOLD THE LATE LABELS ONTO THE POCKET TABLE --------
+                    # `interface` and `buried_core` cannot be computed in the
+                    # fpocket loop: one needs the partner epitope and the other
+                    # needs the enclosure ray-cast, and both exist only here.
+                    # They are written back so a reader has ONE per-pocket
+                    # record carrying every external label that applies, rather
+                    # than having to join two blocks by rank to find out
+                    # whether a pocket is anchored on anything at all.
+                    blk = (results[pid].get("by_clustering") or {}).get(dkey) or {}
+                    for row in blk.get("pocket_table") or []:
+                        c = by_rank.get(str(row.get("rank")))
+                        if not c:
+                            continue
+                        labs = list(row.get("anchors") or [])
+                        det = dict(row.get("anchor_detail") or {})
+                        ovl = c.get("overlap_fraction")
+                        # An overlap computed across an illegal seqid match is
+                        # not an anchor. See `_numbering_agreement`.
+                        if ovl and c.get(
+                            "overlap_unreliable_numbering_mismatch"
+                        ) is not True:
+                            if "interface" not in labs:
+                                labs.append("interface")
+                            det["interface_overlap"] = ovl
+                        if c.get("buried_core_suspected"):
+                            if "buried_core" not in labs:
+                                labs.append("buried_core")
+                            det["buried_core"] = True
+                        row["anchors"] = labs
+                        row["anchor_detail"] = det or None
+                    summ = blk.get("anchor_summary")
+                    if summ is not None:
+                        anch = [
+                            r for r in (blk.get("pocket_table") or [])
+                            if r.get("anchors")
+                        ]
+                        summ["n_pockets_with_any_anchor"] = len(anch)
+                        summ["anchors_seen"] = sorted({
+                            lab for r in anch for lab in r["anchors"]
+                        })
+                        summ["site_hypothesis_basis"] = (
+                            "not_established" if not anch
+                            else "external_anchor_labels_present"
+                        )
                     results[pid].setdefault("pocket_vs_interface", {})[dkey] = {
                         "classification": cls.get(
                             "classification", "no_partner_structure"),
