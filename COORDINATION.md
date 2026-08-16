@@ -597,3 +597,5 @@ thesis-emitting hypothesis step (item 6). Both have owners above.
 - **2026-08-16 02:51 UTC** — merged `rafwiewiora/druggability-dossier` (8b2e206, tier-2: rename-location on ppi-hypothesis data files) — typecheck+check green.
 
 - **2026-08-16 02:51 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — mapper: intervention->target edges verified in production, 0 orphans — typecheck+check green.
+
+- **2026-08-16 02:55 UTC** — merged `msoliman6/literature-graph-mcp` (MERGED) — COORDINATION: §4 back to open-only, §3 current at agent v7 — typecheck+check green.
