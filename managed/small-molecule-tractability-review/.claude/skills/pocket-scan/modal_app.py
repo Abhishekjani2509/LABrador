@@ -1414,6 +1414,224 @@ CRYPTIC_MIN_EQUIVALENT_CA = 20
 # are a handful; a tenth of the fit is a different sequence.
 CRYPTIC_MAX_NAME_MISMATCH_FRACTION = 0.1
 
+# `cryptic_analysis.analyze_cryptic_mechanism`'s own default for the
+# displacement that separates loop_or_backbone_motion from sidechain_occlusion.
+# Mirrored here ONLY to report the margin; this file never passes it and never
+# overrides it, so if the default there moves this must move with it.
+CRYPTIC_BACKBONE_MOTION_THRESHOLD_A = 2.0
+
+# A mechanism label decided by less than this much displacement is a threshold
+# crossing, not a measurement of a mechanism. PROPOSED, NOT CALIBRATED: it is
+# set from the one case that produced the complaint (S1PR1 3V2Y -> 7TD4 clears
+# 2.00 A by 0.16 A on one residue and is thereby labelled loop_or_backbone_motion
+# with a nanomolar ceiling). It flags and never filters.
+CRYPTIC_MECHANISM_MARGIN_A = 0.5
+
+# A protein-wide C-alpha displacement at or above this is a rearrangement worth
+# naming even when the site itself is still. PROPOSED, NOT CALIBRATED: set below
+# S1PR1's 14.6 A TM6 swing and above the largest site-local motion in the
+# calibration set (KRAS 8.65 A is a SITE motion and is reported as one).
+CRYPTIC_GLOBAL_MOTION_NOTABLE_A = 5.0
+
+
+def _global_ca_displacement(
+    apo_path: Path, holo_path: Path, sup: dict
+) -> dict:
+    """Protein-wide maximum C-alpha displacement, beside the site-local one.
+
+    THE PAYLOAD HAD NO PROTEIN-WIDE MOTION FIELD AT ALL, and one control proved
+    that is a hole rather than a simplification. S1PR1 inactive 3V2Y against
+    active 7TD4 passes the gate, returns is_cryptic false with a site C-alpha
+    RMSD of 1.04 A — which is right, the site is pre-formed — and TM6's 14.6 A
+    activation swing appears NOWHERE. `result["global"]` is null; the only trace
+    is all_ca_rmsd_after_core_fit 2.035, which reads as "fine". A dossier built
+    from that payload would state the site is pre-formed and never mention that
+    the two conformers differ by an activation-state rearrangement.
+
+    A large global motion beside a still site is a real, reportable state. It is
+    not crypticity and it is not a failure; it is the thing a reader most needs
+    to know about the pair, and it was invisible.
+
+    Recomputed here rather than taken from `cryptic_analysis`, which reports
+    per-residue displacement only over the SITE. The exact fit is reconstructed
+    from the superposition block — same chain mapping, same name-matching
+    setting, same excluded positions — and `reconstructed_core_ca_rmsd_a` is
+    returned beside the reported `core_ca_rmsd` as a self-check: if those two
+    disagree the reconstruction is wrong and the number must not be used.
+    """
+    out: dict = {
+        "max_ca_displacement_a": None,
+        "max_ca_displacement_at": None,
+        "n_ca_compared": None,
+        "reconstructed_core_ca_rmsd_a": None,
+        "reconstruction_agrees": None,
+        "error": None,
+    }
+    try:
+        import numpy as np
+
+        from cryptic_analysis import (
+            _Atoms,
+            _apply,
+            _kabsch,
+            _load_structure,
+            _pair_coords,
+        )
+
+        mapping = list((sup.get("chain_mapping") or {}).items())
+        if not mapping:
+            out["error"] = "no chain_mapping in the superposition block"
+            return out
+        holo = _Atoms(_load_structure(str(holo_path)))
+        apo = _Atoms(_load_structure(str(apo_path)))
+        P, Q, keys, _mm = _pair_coords(
+            holo, apo, mapping, bool(sup.get("match_residue_names", True))
+        )
+        if len(P) < 3:
+            out["error"] = "fewer than 3 equivalent C-alpha to compare"
+            return out
+        excl = {
+            (str(e.get("holo_chain")), int(e.get("resi")))
+            for e in (sup.get("excluded_residues") or [])
+            if e.get("resi") is not None
+        }
+        keep = np.array([(str(k[0]), int(k[2])) not in excl for k in keys])
+        if keep.sum() < 3:
+            keep = np.ones(len(P), dtype=bool)
+            out["error"] = (
+                "the fitted subset could not be reconstructed from "
+                "excluded_residues; fitted on every equivalent position instead"
+            )
+        R, t = _kabsch(P[keep], Q[keep])
+        dev = np.linalg.norm(_apply(R, t, P) - Q, axis=1)
+        i = int(dev.argmax())
+        recon = round(float(np.sqrt((dev[keep] ** 2).mean())), 3)
+        reported = sup.get("core_ca_rmsd")
+        out.update(
+            max_ca_displacement_a=round(float(dev.max()), 2),
+            max_ca_displacement_at=f"{keys[i][0]}:{keys[i][2]}",
+            n_ca_compared=int(len(P)),
+            n_ca_in_fit=int(keep.sum()),
+            reconstructed_core_ca_rmsd_a=recon,
+            reconstruction_agrees=(
+                None if reported is None else abs(recon - float(reported)) <= 0.02
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    return out
+
+
+def _mechanism_margin(r: dict) -> dict:
+    """How close was the mechanism label to being the other label?
+
+    `loop_or_backbone_motion` and `sidechain_occlusion` are separated by ONE
+    comparison — max site C-alpha displacement against 2.0 A — and the two sides
+    of it carry opposite potency priors under rule 5 (nanomolar against
+    micromolar-at-best). A label produced 0.16 A from the boundary is not a
+    measurement of a mechanism, and nothing in the payload said how far from the
+    boundary any label was.
+
+    `subunit_occlusion` is decided earlier and by a different quantity, and
+    `none` by a third, so this block states which mechanisms it applies to
+    rather than pretending to score all four.
+    """
+    site = r.get("site") or {}
+    disp = site.get("max_ca_displacement")
+    mech = r.get("mechanism")
+    applies = mech in ("loop_or_backbone_motion", "sidechain_occlusion")
+    margin = (
+        round(float(disp) - CRYPTIC_BACKBONE_MOTION_THRESHOLD_A, 2)
+        if disp is not None else None
+    )
+    narrow = (
+        margin is not None and applies
+        and abs(margin) < CRYPTIC_MECHANISM_MARGIN_A
+    )
+    return {
+        "mechanism": mech,
+        "applies_to_this_mechanism": applies,
+        "deciding_quantity": "max site C-alpha displacement, one residue",
+        "value_a": disp,
+        "at": site.get("max_ca_displacement_at"),
+        "threshold_a": CRYPTIC_BACKBONE_MOTION_THRESHOLD_A,
+        "margin_a": margin if applies else None,
+        "margin_warn_a": CRYPTIC_MECHANISM_MARGIN_A,
+        "decided_by_a_narrow_margin": narrow if applies else None,
+        "note": (
+            None if not narrow else
+            f"THE LABEL IS {mech} BY {abs(margin)} A ON ONE RESIDUE "
+            f"({site.get('max_ca_displacement_at')}). Rule 5 turns that label "
+            "into a potency prior, so a margin this small is the whole basis of "
+            "the prior. Measured on S1PR1 3V2Y -> 7TD4: 2.16 A against 2.00 A, "
+            "site C-alpha RMSD 1.04 A, is_cryptic false — the right answer "
+            "reached by the wrong reasoning. Quote the displacement, not the "
+            "label, when this is set."
+        ),
+        "_why": (
+            "PROPOSED, NOT CALIBRATED. The warn band is set from the one case "
+            "that produced the complaint and flags rather than filters: no "
+            "label is changed, suppressed or re-derived here."
+        ),
+    }
+
+
+def _motion_scope(r: dict, sup: dict, glob: dict) -> dict:
+    """Site-local motion beside protein-wide motion, in one place.
+
+    The pair (site still, protein moved) is a real and common state — an
+    activation-state rearrangement with a pre-formed site — and until this block
+    existed the payload could not express it. See `_global_ca_displacement`.
+    """
+    site = r.get("site") or {}
+    site_max = site.get("max_ca_displacement")
+    gmax = glob.get("max_ca_displacement_a")
+    still_site = (
+        site_max is not None
+        and float(site_max) <= CRYPTIC_BACKBONE_MOTION_THRESHOLD_A
+    )
+    big_global = (
+        gmax is not None and float(gmax) >= CRYPTIC_GLOBAL_MOTION_NOTABLE_A
+    )
+    return {
+        "site_max_ca_displacement_a": site_max,
+        "site_max_ca_displacement_at": site.get("max_ca_displacement_at"),
+        "site_ca_rmsd_a": site.get("ca_rmsd"),
+        "global_max_ca_displacement_a": gmax,
+        "global_max_ca_displacement_at": glob.get("max_ca_displacement_at"),
+        "global_n_ca_compared": glob.get("n_ca_compared"),
+        "all_ca_rmsd_after_core_fit_a": sup.get("all_ca_rmsd_after_core_fit"),
+        "global_notable_threshold_a": CRYPTIC_GLOBAL_MOTION_NOTABLE_A,
+        "global_motion_with_still_site": (
+            bool(big_global and still_site)
+            if (gmax is not None and site_max is not None) else None
+        ),
+        "note": (
+            None if not (big_global and still_site) else
+            f"THE SITE IS STILL ({site_max} A) AND THE PROTEIN IS NOT "
+            f"({gmax} A at {glob.get('max_ca_displacement_at')}). This is a "
+            "reportable state, not a defect and not crypticity: the two "
+            "conformers differ by a rearrangement that does not pass through "
+            "the site. S1PR1 inactive 3V2Y -> active 7TD4 is the case — site "
+            "C-alpha RMSD 1.04 A, is_cryptic false, and a 14.6 A TM6 swing "
+            "that had no field to appear in. Say BOTH in the dossier; 'the site "
+            "is pre-formed' alone omits the activation-state change."
+        ),
+        "reconstruction": {
+            k: glob.get(k) for k in (
+                "reconstructed_core_ca_rmsd_a", "reconstruction_agrees",
+                "n_ca_in_fit", "error",
+            )
+        },
+        "_why": (
+            "An RMSD is not a maximum. all_ca_rmsd_after_core_fit was the only "
+            "protein-wide number in the payload and on S1PR1 it reads 2.035, "
+            "which looks like agreement; the largest single displacement behind "
+            "it is 14.6 A. Both are reported because they answer different "
+            "questions."
+        ),
+    }
+
 
 def _cryptic_block(
     apo_path: Path, holo_path: Path, comp_id: str,
@@ -1501,25 +1719,79 @@ def _cryptic_block(
     # C-alpha at 1.03 A gives 1.33 A displacement, zero clashes, mechanism none.
     sup = r.get("superposition") or {}
     sup_rmsd = sup.get("core_ca_rmsd")
-    n_equiv = sup.get("n_equivalent_ca")
-    if n_equiv is None:
-        n_equiv = sup.get("n_fitted_ca")
+    # THE FITTED SUBSET IS NOT THE PAIR, AND THE GATE READ ONLY THE SUBSET.
+    # `core_ca_rmsd` is scored over the positions the fit actually stood on;
+    # `all_ca_rmsd_after_core_fit` applies the SAME rotation to every equivalent
+    # C-alpha. Narrowing the fit drives the first down and leaves the second
+    # where it was, so a gate on the first alone is defeated by any exclusion.
+    # Demonstrated on 8SWF vs 9HG4 with fit_residue_range=(130,370):
+    #
+    #     core_ca_rmsd 1.472 over n_fitted_ca 202   ->  the old gate PASSED
+    #     n_excluded_ca 274, n_equivalent_ca 476, 0 name mismatches
+    #     all_ca_rmsd_after_core_fit 25.619        <- in the same block
+    #     emitted: 41.67 A, is_cryptic true, loop_or_backbone_motion, nanomolar
+    #
+    # That is a WORSE confident answer than the 21.6 A this gate was built to
+    # stop, produced from a fit the payload itself scores at 25.6 A. The field
+    # that catches it was already computed and already in the output; the gate
+    # simply did not read it. Both numbers are read now, and the pair-wide one
+    # is the one that cannot be narrowed away.
+    sup_all = sup.get("all_ca_rmsd_after_core_fit")
+    n_fitted = sup.get("n_fitted_ca")
+    n_equivalent = sup.get("n_equivalent_ca")
+    # `n_fitted_ca`, NOT `n_equivalent_ca`: the count that has to clear the floor
+    # is the number of positions the fit stood on, not the number that were
+    # equivalent BEFORE the exclusions. Tested against None rather than written
+    # as `n_fitted_ca or n_equivalent_ca`, because a legitimate zero is falsy and
+    # would fall straight through to the pre-fit count — silently gating the
+    # wrong field in exactly the case (an empty fit) the floor exists for.
+    n_equiv = n_fitted if n_fitted is not None else n_equivalent
     n_mismatch = sup.get("n_residue_name_mismatches") or 0
+    # A FRACTION NEEDS ITS OWN DENOMINATOR. `n_residue_name_mismatches` is
+    # counted over the pre-filter overlap while `n_equivalent_ca` counts the
+    # SURVIVORS of that filter, so mismatches/equivalent is not a fraction at
+    # all — on the S1PR1 CD69 fit it printed "15 of 5 fitted positions", a ratio
+    # of 3.0. The denominator is the overlap the mismatches were counted over,
+    # which is survivors + mismatches while `match_residue_names` is on. With it
+    # off nothing is dropped and the survivors ARE the overlap.
+    n_overlap = (
+        (n_equivalent or 0) + n_mismatch
+        if sup.get("match_residue_names", True)
+        else (n_equivalent or 0)
+    )
     gate_fails: list[str] = []
-    if sup_rmsd is not None and sup_rmsd > CRYPTIC_MAX_CORE_CA_RMSD_A:
+    core_failed = (
+        sup_rmsd is not None and sup_rmsd > CRYPTIC_MAX_CORE_CA_RMSD_A
+    )
+    if core_failed:
         gate_fails.append(
-            f"core C-alpha RMSD {sup_rmsd} A exceeds "
-            f"{CRYPTIC_MAX_CORE_CA_RMSD_A} A"
+            f"core C-alpha RMSD {sup_rmsd} A over the {n_fitted} fitted "
+            f"positions exceeds {CRYPTIC_MAX_CORE_CA_RMSD_A} A"
+        )
+    # Only when the core check did NOT already fire. With nothing excluded the
+    # two numbers are the same number, and printing "the fit describes a
+    # fragment" over an unnarrowed fit would misdiagnose the refusal exactly the
+    # way this patch exists to stop. The value is in the gate block either way.
+    if (
+        not core_failed
+        and sup_all is not None
+        and sup_all > CRYPTIC_MAX_CORE_CA_RMSD_A
+    ):
+        gate_fails.append(
+            f"after the core fit, RMSD over ALL {n_equivalent} equivalent "
+            f"C-alpha is {sup_all} A (the fitted subset was {sup_rmsd} A over "
+            f"{n_fitted}, with {sup.get('n_excluded_ca')} excluded); the fit "
+            "describes a fragment, not the pair"
         )
     if n_equiv is not None and n_equiv < CRYPTIC_MIN_EQUIVALENT_CA:
         gate_fails.append(
-            f"only {n_equiv} equivalent C-alpha were fitted "
+            f"only {n_equiv} C-alpha were fitted "
             f"({CRYPTIC_MIN_EQUIVALENT_CA} needed); this is a fit onto the "
             "wrong chain, not a superposition"
         )
-    if n_equiv and n_mismatch / n_equiv > CRYPTIC_MAX_NAME_MISMATCH_FRACTION:
+    if n_overlap and n_mismatch / n_overlap > CRYPTIC_MAX_NAME_MISMATCH_FRACTION:
         gate_fails.append(
-            f"{n_mismatch} of {n_equiv} fitted positions name a DIFFERENT "
+            f"{n_mismatch} of {n_overlap} equivalent positions name a DIFFERENT "
             "residue in the two entries; they are not the same sequence"
         )
     fit_ok = not gate_fails
@@ -1535,20 +1807,61 @@ def _cryptic_block(
             if not sc.get("passed")
             else (
                 "SUPERPOSITION REFUSED: " + "; ".join(gate_fails)
-                + ". These two entries are not superposed, so the "
-                "displacement, the clash attribution, the free volume and the "
-                "mechanism label are all measured in the wrong frame. "
-                "Refusing. Try a different apo entry, or pass apo_chains: on "
-                "NLRP3 the rejected pair gave 21.6 A / cryptic and a "
-                "superposable pair gave 0.95 A / not cryptic."
+                + ". Every number below the fit — the displacement, the clash "
+                "attribution, the free volume and the mechanism label — was "
+                "measured in this frame, so none of them is interpretable. "
+                "Refusing. WHAT THIS DOES NOT SAY IS WHY, AND THE TWO REASONS "
+                "ARE NOT THE SAME FINDING. A large core RMSD has (a) mismatch "
+                "causes — a mis-mapped chain, a different protein, a peptide "
+                "fragment, a numbering offset — and (b) HINGE causes, where the "
+                "two entries are the same protein in two rigid-body states and "
+                "each domain superposes perfectly on its own. THIS GATE CANNOT "
+                "TELL THEM APART and must not be read as saying (a). Test (b) "
+                "before discarding the pair: fit each domain separately and see "
+                "whether the RMSD collapses. Measured on NLRP3 8SWF, 16.507 A "
+                "over the pair with ZERO positions trimmed and the identical "
+                "16.507 A when restricted to one chain — yet NBD 130-370 "
+                "superposes at 0.57 A over 153 C-alpha and HD2 541-680 at "
+                "0.74 A. That is a genuine NACHT hinge rotation between an open "
+                "octamer and a closed NACHT, not a broken alignment; calling it "
+                "'not superposed' misdiagnoses it exactly the way the TL1A "
+                "numbering-offset message used to. A large core RMSD WITH "
+                "well-superposing subdomains is a hinge and is reportable as "
+                "one. THERE IS NO FLAG FOR THE FIX: the domain-restricted fit "
+                "that would recover a hinged pair is cryptic_analysis's "
+                "fit_residue_range / exclude_residues, and pocket_scan does not "
+                "expose either — see superposition_gate._why for why exposing "
+                "them is not free. So a hinge is currently refused rather than "
+                "measured, and that is a known gap, not a verdict. What IS "
+                "reachable: try a different apo entry, or pass apo_chains. On "
+                "NLRP3 the rejected 8SWF pair gave 21.6 A / cryptic and the "
+                "superposable 7ZGU pair gave 0.95 A / not cryptic."
             )
         ),
         superposition_gate={
             "core_ca_rmsd_a": sup_rmsd,
+            "all_ca_rmsd_after_core_fit_a": sup_all,
             "max_acceptable_a": CRYPTIC_MAX_CORE_CA_RMSD_A,
-            "n_equivalent_ca": n_equiv,
+            "n_fitted_ca": n_fitted,
+            "n_excluded_ca": sup.get("n_excluded_ca"),
+            "n_equivalent_ca": n_equivalent,
+            "n_ca_gated": n_equiv,
             "min_equivalent_ca": CRYPTIC_MIN_EQUIVALENT_CA,
+            "min_equivalent_ca_status": (
+                "PROPOSED, NOT CALIBRATED, AND NEVER EXERCISED AGAINST A SMALL "
+                "TARGET. Every pair in the regression carried 162 to 476 "
+                "equivalent C-alpha, so this floor has only ever been tested "
+                "far away from itself. On a genuine peptide target or a single "
+                "small domain it would refuse a VALID comparison, and nothing "
+                "measured says where it should sit. Treat a refusal that cites "
+                "only this line, on a target that is legitimately small, as an "
+                "untested threshold rather than a finding."
+            ),
             "n_residue_name_mismatches": n_mismatch,
+            "name_mismatch_denominator": n_overlap,
+            "name_mismatch_fraction": (
+                round(n_mismatch / n_overlap, 3) if n_overlap else None
+            ),
             "max_name_mismatch_fraction": CRYPTIC_MAX_NAME_MISMATCH_FRACTION,
             "chain_mapping": sup.get("chain_mapping"),
             "passed": fit_ok,
@@ -1564,6 +1877,28 @@ def _cryptic_block(
                 "the S1PR1 fit had a low RMSD precisely because it was fitted "
                 "on five atoms."
             ),
+            "_why_all_ca": (
+                "FOUR CHECKS, NOT THREE, AND THE FOURTH IS THE ONE THAT CANNOT "
+                "BE GAMED. core_ca_rmsd is scored over the FITTED SUBSET, so "
+                "narrowing the fit lowers it without moving the structures: "
+                "8SWF vs 9HG4 restricted to residues 130-370 gives core 1.472 A "
+                "over 202 fitted C-alpha with 274 excluded and 0 name "
+                "mismatches — three green lights — beside "
+                "all_ca_rmsd_after_core_fit 25.619 A in the same block, and the "
+                "old gate emitted 41.67 A / is_cryptic true / "
+                "loop_or_backbone_motion / nanomolar prior on top of it. "
+                "all_ca_rmsd_after_core_fit is the same rotation scored over "
+                "every equivalent C-alpha, so it cannot be narrowed away and it "
+                "is gated at the same threshold. THE ROUTE IS CURRENTLY LATENT: "
+                "reaching it needs fit_residue_range or exclude_residues and "
+                "pocket_scan exposes neither. It is not hypothetical, though — "
+                "auto_trim writes the same n_excluded_ca by itself, so on a "
+                "hinged protein this is one convergence away from happening "
+                "unasked. The measured core-to-all gap over six real pairs is "
+                "small (0.58->1.42, 0.96->1.10, 0.71->1.02, 1.30->2.72, "
+                "1.27->2.04), which is why it had not fired yet, and is also "
+                "why the check costs the controls nothing."
+            ),
         },
         mechanism=r.get("mechanism"),
         secondary_mechanism=r.get("secondary_mechanism"),
@@ -1573,6 +1908,20 @@ def _cryptic_block(
             "max_ca_displacement"),
         max_ca_displacement_at=(r.get("site") or {}).get("max_ca_displacement_at"),
         site_ca_rmsd_a=(r.get("site") or {}).get("ca_rmsd"),
+        # THE LABEL IS A THRESHOLD CROSSING AND A THRESHOLD CROSSING HAS A
+        # MARGIN. S1PR1 inactive 3V2Y -> active 7TD4 comes back
+        # `loop_or_backbone_motion` because ONE site residue moves 2.16 A
+        # against a 2.00 A threshold — 0.16 A — and rule 5 maps that label to a
+        # nanomolar ceiling. The verdict happens to be defensible and the
+        # REASONING is not: it was generated by a 0.16 A margin on a single
+        # residue, not by the motion anyone would describe. Reported so the
+        # margin can never be read off the label alone.
+        mechanism_margin=_mechanism_margin(r),
+        # A LARGE GLOBAL MOTION WITH A STILL SITE IS A REAL STATE AND IT WAS
+        # INVISIBLE. See `_global_ca_displacement`.
+        motion_scope=_motion_scope(
+            r, sup, _global_ca_displacement(apo_path, holo_path, sup)
+        ),
         # CLASSIFY ON DISPLACEMENT, NOT ON CLASH COMPOSITION. Reported because
         # it is informative; it must not drive the label. KRAS's switch-II loop
         # moves 8.8 A and yet zero of the clashing atoms at 2.0 A are backbone —
@@ -1885,6 +2234,13 @@ def _buried_core_flag(
 # PROPOSED, NOT CALIBRATED.
 NUMBERING_IDENTITY_MIN = 0.9
 
+# A recovered numbering offset is only applied when it produces agreement over
+# at least this many shared positions. Below it, "agreement" is a handful of
+# residues lining up by chance and the shift would buy a legal-looking
+# comparison rather than a correct one. PROPOSED, NOT CALIBRATED; the same
+# number as the superposition floor, for the same reason.
+NUMBERING_MIN_COMPARED_FOR_OFFSET = 20
+
 
 def _numbering_agreement(
     a: dict[int, str], b: dict[int, str], max_examples: int = 8
@@ -1985,8 +2341,80 @@ def _classify_site_pocket(
     lining = IA.residues_within(st, pts, chains=used_chains or None)
     if not lining:
         return {"error": "no residue within 4.5 A of the alpha-sphere centres"}
+
+    # ---- PUT THE EPITOPE ON OUR NUMBERING *BEFORE* THE SEQID MATCH ---------
+    #
+    # THE CHECK FLAGGED AND DID NOT FIX, AND THE FIX WAS SITTING IN THE PAYLOAD.
+    # `_numbering_agreement` correctly fired on exactly the two corrupt TL1A
+    # structures (2O0O at 2/69 = 0.029, 2RE9 at 7/139 = 0.050, against
+    # 0.993-1.000 for the three valid ones) — and the corrupt comparisons then
+    # propagated upward unmarked, so `per_structure_consensus["2RE9"]` came back
+    # `allosteric_candidate` derived ENTIRELY from a 0.227 overlap on
+    # A:THR34/PRO35/THR36, residues that are VAL/VAL/ARG in the partner, and
+    # `per_structure_consensus["2O0O"]` came back `mixed` off the
+    # A:HIS118-vs-THR118 artifact. SKILL.md tells callers to quote exactly that
+    # field.
+    #
+    # The offsets that fix it outright (+67, +71) are recoverable by a single
+    # vote over residue names, which the mdpocket stage of the SAME payload
+    # already runs. Recovering them here too is the better fix than flagging:
+    # `interface_analysis`'s own module docstring says
+    # `detect_numbering_offset` "should be run before any cross-entry
+    # match_by='seqid' comparison", and this call site never ran one.
+    #
+    # The offset is only APPLIED when it turns an illegal comparison into a
+    # legal one on a non-trivial overlap, so an entry that already agrees is
+    # never gratuitously shifted and a spurious shift on a handful of positions
+    # cannot buy agreement. Whatever survives unfixed is still flagged, and is
+    # now also excluded from the consensus rather than merely annotated.
+    ours: dict[int, str] = {}
+    epitope_used = epitope
+    offset_applied = 0
+    numbering_note: str | None = None
+    agree: dict | None = None
+    raw_agree: dict | None = None
+    off = 0
+    if partner_resnames:
+        ours = _pdb_resnames_by_seqid(prepped, used_chains or None)
+        raw_agree = _numbering_agreement(ours, partner_resnames)
+        # `ours[r]` is taken to be the same residue as `partner[r + off]`.
+        off, _matched, _overlap = _best_numbering_offset(ours, partner_resnames)
+        corrected = (
+            _numbering_agreement(
+                {r + off: nm for r, nm in ours.items()}, partner_resnames
+            )
+            if off else raw_agree
+        )
+        apply_it = bool(
+            off
+            and corrected.get("numbering_agrees")
+            and (corrected.get("n_compared") or 0)
+            >= NUMBERING_MIN_COMPARED_FOR_OFFSET
+            and (corrected.get("n_identical") or 0)
+            > (raw_agree.get("n_identical") or 0)
+        )
+        if apply_it:
+            # The epitope is in the PARTNER's numbering; shift it into ours.
+            epitope_used = IA.renumber_residues(epitope, -off)
+            offset_applied = -off
+            agree = corrected
+            numbering_note = (
+                f"NUMBERING OFFSET RECOVERED AND APPLIED: this entry's residue "
+                f"r is the partner entry's r{off:+d}, so the partner epitope "
+                f"was renumbered by {offset_applied:+d} before the seqid match. "
+                f"Raw agreement was "
+                f"{raw_agree.get('n_identical')}/{raw_agree.get('n_compared')} "
+                f"= {raw_agree.get('identity_fraction')}; after the shift it is "
+                f"{corrected.get('n_identical')}/{corrected.get('n_compared')} "
+                f"= {corrected.get('identity_fraction')}. Every seqid-keyed "
+                "field below (overlap_fraction, interface_coverage, "
+                "shared_residues) is computed on the corrected numbering."
+            )
+        else:
+            agree = raw_agree
+
     res = IA.classify_pocket(
-        lining, epitope, st,
+        lining, epitope_used, st,
         target_chains=used_chains or None,
         probe_points=pts,
         match_by="seqid",
@@ -1995,10 +2423,29 @@ def _classify_site_pocket(
     d["summary"] = res.summary()
 
     # ---- is the seqid match even legal between these two entries? ----------
-    if partner_resnames:
-        ours = _pdb_resnames_by_seqid(prepped, used_chains or None)
-        agree = _numbering_agreement(ours, partner_resnames)
+    if partner_resnames and agree is not None:
         d["numbering_check"] = agree
+        d["numbering_offset_to_partner"] = {
+            "offset_ours_to_partner": off,
+            "epitope_renumbered_by": offset_applied,
+            "applied": bool(offset_applied),
+            "before_offset": raw_agree,
+            "min_compared_to_apply": NUMBERING_MIN_COMPARED_FOR_OFFSET,
+            "note": numbering_note,
+            "_why": (
+                "A constant numbering offset between two depositions of one "
+                "protein is the normal case, not an anomaly — TL1A carries "
+                "three at once (0, +67, +71) and IL-17A carries +23. Recovering "
+                "it is a vote over residue names and costs one pass. Applied "
+                "only when it converts an ILLEGAL comparison into a legal one "
+                "over at least "
+                f"{NUMBERING_MIN_COMPARED_FOR_OFFSET} positions and strictly "
+                "increases the number of name-agreeing positions, so an entry "
+                "already on the partner's numbering is never shifted."
+            ),
+        }
+        if numbering_note:
+            d["notes"] = list(d.get("notes") or []) + [numbering_note]
         if agree.get("numbering_agrees") is False:
             d["overlap_unreliable_numbering_mismatch"] = True
             d["notes"] = list(d.get("notes") or []) + [
@@ -2012,19 +2459,24 @@ def _classify_site_pocket(
         # rather than trusting a fraction. `shared_residues` labels come from
         # the pocket side only, which is exactly how "shared A:HIS118" hid the
         # fact that the partner's 118 is a THR.
+        # The shift is carried into this pairing too, or the check would report
+        # the pre-correction mismatch on a comparison that was corrected.
+        pshift = off if offset_applied else 0
         pairs = []
         for lbl in d.get("shared_residues") or []:
             digits = "".join(ch for ch in lbl if ch.isdigit())
             if not digits:
                 continue
             n = int(digits)
+            pn = n + pshift
             pairs.append({
                 "seqid": n,
+                "partner_seqid": pn,
                 "pocket_residue": lbl,
-                "partner_residue_name": partner_resnames.get(n),
+                "partner_residue_name": partner_resnames.get(pn),
                 "name_agrees": (
-                    None if n not in partner_resnames or n not in ours
-                    else ours[n] == partner_resnames[n]
+                    None if pn not in partner_resnames or n not in ours
+                    else ours[n] == partner_resnames[pn]
                 ),
             })
         d["shared_residue_name_check"] = pairs
@@ -2433,6 +2885,125 @@ def _fit_to_reference(
         "permutations_truncated": truncated,
         "_R": R,
         "_t": t,
+    }
+
+
+# The reference search is O(n^2) fits. Above this many structures it stops
+# being worth its cost and the first entry is used with the fallback recorded.
+MDPOCKET_MAX_IDS_FOR_REFERENCE_SEARCH = 12
+
+
+def _select_mdpocket_reference(
+    ids: list[str],
+    cas_raw: dict[str, dict],
+    names_raw: dict[str, dict],
+) -> dict:
+    """Which structure the ensemble is superposed ONTO. It was `ids[0]`.
+
+    THE REFERENCE IS A MEASUREMENT DECISION AND IT WAS BEING MADE BY DICT ORDER.
+    Every other structure is fitted onto the reference and DROPPED if it will
+    not go, so picking an outlier as the reference does not fail the outlier —
+    it fails everything else, and the payload then reports the ensemble as
+    unusable rather than reporting the outlier.
+
+    Measured on NLRP3 (8SWF, 7ZGU, 9HG4). 8SWF came first, so 7ZGU and 9HG4 were
+    dropped at 16.43 and 16.55 A, 1 of 3 survived, and the whole mdpocket stage
+    was refused — while 7ZGU and 9HG4 superpose onto EACH OTHER at 1.301 A, a
+    figure the cryptic stage of the same payload had already measured and
+    printed. One structure cost an entire ensemble by being listed first.
+
+    Lowest MEDIAN RMSD to the rest. Not the first, not the largest, and the
+    median specifically: an outlier's own median is large by construction so it
+    cannot elect itself, and one bad entry cannot unseat a good reference the
+    way a mean would let it. `n_would_superpose` is reported beside it and
+    breaks ties, because the quantity actually being protected is how many
+    structures survive.
+
+    Note what this does NOT fix on NLRP3: the best reference is 7ZGU, 8SWF is
+    then correctly dropped as the outlier, and 2 of 3 survive — still below
+    MDPOCKET_MIN_N_AFTER_DROPS, so that run still refuses. It refuses for the
+    right reason and names the right outlier, which is the whole difference.
+    """
+    import statistics
+
+    report: dict[str, dict] = {}
+    if len(ids) > MDPOCKET_MAX_IDS_FOR_REFERENCE_SEARCH:
+        return {
+            "reference": ids[0],
+            "selected_by": (
+                f"first entry — {len(ids)} structures exceeds the "
+                f"{MDPOCKET_MAX_IDS_FOR_REFERENCE_SEARCH}-structure cap on the "
+                "O(n^2) median-RMSD search"
+            ),
+            "candidates": report,
+        }
+    best: tuple[tuple, str] | None = None
+    for cand in ids:
+        if not cas_raw.get(cand):
+            report[cand] = {"error": "no C-alpha", "median_rmsd_a": None}
+            continue
+        # Same pooling rule as `_pdb_resnames_by_seqid`, off the names we have
+        # already read rather than off the file again.
+        ref_names: dict[int, str] = {}
+        for m in names_raw[cand].values():
+            for num, nm in m.items():
+                ref_names.setdefault(num, nm)
+        cas_c: dict[str, dict] = {}
+        names_c: dict[str, dict] = {}
+        for pid in ids:
+            cas_c[pid], names_c[pid], _rep = _align_numbering(
+                cas_raw[pid], names_raw[pid], ref_names
+            )
+        core_c, _cr = _common_core(names_c)
+        if len(core_c) < 20:
+            report[cand] = {
+                "n_core_ca": len(core_c), "median_rmsd_a": None,
+                "error": (
+                    f"only {len(core_c)} common core positions against this "
+                    "candidate (20 needed)"
+                ),
+            }
+            continue
+        rmsds: dict[str, float | None] = {}
+        for pid in ids:
+            if pid == cand:
+                continue
+            fit = _fit_to_reference(cas_c[pid], cas_c[cand], core_c)
+            rmsds[pid] = fit.get("rmsd_a")
+        vals = [v for v in rmsds.values() if v is not None]
+        med = round(statistics.median(vals), 3) if vals else None
+        n_ok = sum(1 for v in vals if v <= MDPOCKET_MAX_ACCEPTABLE_RMSD_A)
+        report[cand] = {
+            "n_core_ca": len(core_c),
+            "rmsd_to_others_a": rmsds,
+            "median_rmsd_a": med,
+            "n_would_superpose": n_ok,
+            "n_others": len(rmsds),
+        }
+        if med is None:
+            continue
+        key = (med, -n_ok, cand)
+        if best is None or key < best[0]:
+            best = (key, cand)
+    if best is None:
+        return {
+            "reference": ids[0],
+            "selected_by": (
+                "first entry — no candidate produced a usable common core, so "
+                "there was nothing to rank"
+            ),
+            "candidates": report,
+        }
+    return {
+        "reference": best[1],
+        "selected_by": (
+            "lowest MEDIAN core C-alpha RMSD to the other structures "
+            "(ties to the one that keeps the most structures). The reference "
+            "was previously the first entry, and on NLRP3 that was the single "
+            "outlier: it dropped the two structures that superpose onto each "
+            "other at 1.301 A and cost the whole ensemble."
+        ),
+        "candidates": report,
     }
 
 
@@ -2930,12 +3501,26 @@ def _mdpocket_ensemble(
     # `_best_numbering_offset` and `_common_core`.
     cas_raw = {pid: _ca_by_chain(p) for pid, p in prepped.items()}
     names_raw = {pid: _res_names_by_chain(p) for pid, p in prepped.items()}
-    ref_pid = ids[0]
+    # THE REFERENCE IS CHOSEN, NOT INHERITED FROM DICT ORDER. It used to be
+    # `ids[0]`, and on NLRP3 that was the outlier — see
+    # `_select_mdpocket_reference` for the measurement and for what it does and
+    # does not fix.
+    ref_choice = _select_mdpocket_reference(ids, cas_raw, names_raw)
+    ref_pid = ref_choice["reference"]
+    out["reference_selection"] = ref_choice
+    # `_fit_all` fits onto `pids[0]`, so the chosen reference leads the list.
+    ids = [ref_pid] + [p for p in ids if p != ref_pid]
     if not cas_raw[ref_pid]:
         out.update(mdpocket_status="failed",
                    mdpocket_reason=f"no C-alpha in reference {ref_pid}")
         return out
-    ref_names_pooled = _pdb_resnames_by_seqid(prepped[ref_pid])
+    # The NUMBERING reference, fixed for the whole run. It is allowed to diverge
+    # from the FRAME reference below: pass 2 may re-elect the frame reference
+    # among the survivors, but every `cas`/`names` dict has already been
+    # renumbered onto this one entry and renumbering them again would invalidate
+    # the core, the donor alignment and the fits computed against them.
+    numbering_ref_pid = ref_pid
+    ref_names_pooled = _pdb_resnames_by_seqid(prepped[numbering_ref_pid])
 
     cas: dict[str, dict] = {}
     names: dict[str, dict] = {}
@@ -2945,7 +3530,7 @@ def _mdpocket_ensemble(
             cas_raw[pid], names_raw[pid], ref_names_pooled
         )
     out["numbering_alignment"] = {
-        "reference": ref_pid,
+        "reference": numbering_ref_pid,
         "per_structure": numbering,
         "_why": (
             "C-alpha are matched on residue number, so the entries must first "
@@ -3010,20 +3595,35 @@ def _mdpocket_ensemble(
     if dropped:
         survivors = [p for p in ids if p not in {d["pdb_id"] for d in dropped}]
         if len(survivors) >= 2:
+            # AND THE REFERENCE IS RE-ELECTED, NOT INHERITED. A drop changes
+            # which structure is central to what is left, and the pass-1
+            # reference is by definition the one thing every drop was measured
+            # against. Re-running the selection over the survivors is what turns
+            # "the reference dropped everything" into a recoverable ensemble.
+            resel = _select_mdpocket_reference(survivors, cas_raw, names_raw)
+            new_ref = resel.get("reference") or survivors[0]
+            survivors = [new_ref] + [p for p in survivors if p != new_ref]
             fits2, core2, report2, dropped2 = _fit_all(survivors)
             passes.append({
                 "pass": 2, "pids": survivors, "n_core": len(core2),
                 "core_report": report2,
+                "reference": new_ref,
+                "reference_selection": resel,
                 "dropped": [d["pdb_id"] for d in dropped2],
                 "_why": (
                     "pass 1 dropped a structure, and that structure had also "
-                    "been constraining the common core. Pass 2 recomputes the "
-                    "core over the survivors only."
+                    "been constraining the common core AND been the frame every "
+                    "other structure was fitted onto. Pass 2 recomputes the core "
+                    "over the survivors only and re-elects the reference among "
+                    "them. Numbering is NOT realigned — every dict here is "
+                    "already on the pass-1 numbering reference and re-aligning "
+                    "would invalidate the core it is measured against."
                 ),
             })
             if len(core2) >= 20 and fits2:
                 fits, core, core_report = fits2, core2, report2
                 dropped = dropped + dropped2
+                ref_pid = new_ref
 
     kept_ids = [p for p in ids if p in fits]
     n_kept = len(kept_ids)
@@ -3057,7 +3657,13 @@ def _mdpocket_ensemble(
             mdpocket_status="failed",
             mdpocket_reason=(
                 f"{len(dropped)} of {n} structures would not superpose onto "
-                f"{ref_pid} and were dropped, leaving {n_kept}. An ensemble "
+                f"{ref_pid} and were dropped, leaving {n_kept}. THE REFERENCE "
+                "WAS CHOSEN, NOT INHERITED — lowest median RMSD to the rest, "
+                "re-elected after the drop — so this is a statement about the "
+                "dropped structures and not about which entry happened to come "
+                "first; see reference_selection.candidates for every "
+                "candidate's median and for what each one would have kept. An "
+                "ensemble "
                 f"measurement needs at least 2 structures, and at least "
                 f"{MDPOCKET_MIN_N_AFTER_DROPS} once a drop has occurred — a CV "
                 "over the two survivors of a partial ensemble is a statistic, "
@@ -3081,6 +3687,15 @@ def _mdpocket_ensemble(
     out["n_structures_submitted"] = n
     out["superposition"] = {
         "reference": ref_pid,
+        "reference_selection": ref_choice,
+        "numbering_reference": numbering_ref_pid,
+        "_reference_note": (
+            "`reference` is the FRAME every structure was fitted onto and is "
+            "chosen by lowest median RMSD to the rest; `numbering_reference` is "
+            "the entry whose residue numbering the whole ensemble was put on, "
+            "and it is fixed at the pass-1 choice. They differ only when a drop "
+            "caused the frame reference to be re-elected."
+        ),
         "n_core_ca_positions": len(core),
         "core_residue_range": [core[0], core[-1]],
         "core_selection": core_report,
@@ -4106,14 +4721,53 @@ def pocket_scan(
                 )
                 # Per-target as well as per-pair: a reader looking at one apo
                 # structure must not have to find the pairwise block.
+                #
+                # WHICH IS EXACTLY WHY THE QUARANTINE HAS TO REACH HERE TOO.
+                # Being the block a reader lands on first makes this the block
+                # most likely to be QUOTED, and it was handing out a rejected
+                # pair's numbers with a potency prior attached. Measured on
+                # NLRP3: `cryptic_status: "failed"` sitting beside
+                # `mechanism: loop_or_backbone_motion`, `is_cryptic: true`,
+                # `max_backbone_ca_displacement_a: 21.13` and
+                # `cryptic_potency_prior: {expected_ceiling: "nanomolar"}` —
+                # every one of them measured in a 16.5 A misfit frame. The
+                # aggregate below had already been fixed against precisely this;
+                # this is the same bug one nesting level down. Whatever drops a
+                # structure from the call drops it from every number derived
+                # from the fit, at every level that reprints them.
+                _blk = per_apo[apo_pid]
+                _fit_ok = _blk.get("cryptic_status") == "ok"
+                _derived = (
+                    "mechanism", "is_cryptic",
+                    "max_backbone_ca_displacement_a", "clash_attribution",
+                    "cryptic_potency_prior",
+                )
                 results[apo_pid]["cryptic"] = {
-                    k: per_apo[apo_pid].get(k) for k in (
+                    k: (_blk.get(k) if (_fit_ok or k not in _derived) else None)
+                    for k in (
                         "cryptic_status", "cryptic_reason", "mechanism",
                         "is_cryptic", "max_backbone_ca_displacement_a",
                         "clash_attribution", "cryptic_potency_prior",
                         "holo_pdb_id", "ligand_comp_id",
                     )
                 }
+                results[apo_pid]["cryptic"]["core_ca_rmsd_a"] = (
+                    (_blk.get("superposition_gate") or {}).get("core_ca_rmsd_a")
+                )
+                results[apo_pid]["cryptic"]["_quarantined_keys"] = (
+                    [] if _fit_ok else list(_derived)
+                )
+                results[apo_pid]["cryptic"]["_quarantine_note"] = (
+                    None if _fit_ok else
+                    "cryptic_status is not ok, so every key derived from the "
+                    f"fit is null here: {', '.join(_derived)}. They are not "
+                    "MISSING — they were computed and refused, and a null is "
+                    "the only honest form for a number measured in a frame "
+                    "this module has just rejected. The refused values are in "
+                    f"cryptic.per_apo_structure.{apo_pid} for diagnosis; they "
+                    "are not measurements of this structure and must not be "
+                    "quoted as any. Read cryptic_reason for why."
+                )
             ok_items = [
                 (k, v) for k, v in per_apo.items()
                 if v["cryptic_status"] == "ok"
@@ -4368,32 +5022,95 @@ def pocket_scan(
             # different mechanistic claims. So the label a caller may quote is
             # the consensus over every classification made, and a disagreement
             # is reported AS a disagreement rather than resolved.
+            # AND A CLASSIFICATION BUILT ON AN ILLEGAL SEQID MATCH IS NOT PART
+            # OF THE CONSENSUS. `numbering_agrees: false` used to flag the entry
+            # and stop there, so the label derived from the flagged overlap
+            # travelled up here unmarked and became the field SKILL.md tells
+            # callers to quote. Measured on TL1A: `2RE9 -> allosteric_candidate`
+            # came ENTIRELY from a 0.227 overlap on A:THR34/PRO35/THR36 —
+            # VAL/VAL/ARG in the partner — and `2O0O -> mixed` from the
+            # A:HIS118-vs-THR118 artifact. Recoverable offsets are applied
+            # upstream in `_classify_site_pocket`; what reaches here still
+            # flagged is genuinely uninterpretable and is excluded, listed, and
+            # named — never silently dropped and never silently counted.
+            def _usable(byd: dict) -> tuple[dict, dict]:
+                keep = {
+                    k: c for k, c in byd.items()
+                    if c.get("overlap_unreliable_numbering_mismatch") is not True
+                }
+                return keep, {k: c for k, c in byd.items() if k not in keep}
+
             per_structure_label: dict[str, dict] = {}
             for pid_, byd in per_struct.items():
+                keep, skipped = _usable(byd)
                 labs = sorted({
-                    c.get("classification") for c in byd.values()
+                    c.get("classification") for c in keep.values()
+                    if c.get("classification")
+                })
+                skipped_labs = sorted({
+                    c.get("classification") for c in skipped.values()
                     if c.get("classification")
                 })
                 per_structure_label[pid_] = {
                     "classifications_seen": labs,
                     "consensus": (
                         labs[0] if len(labs) == 1
-                        else ("mixed" if labs else "no_pocket_to_classify")
+                        else "mixed" if labs
+                        else "numbering_mismatch_not_interpretable" if skipped
+                        else "no_pocket_to_classify"
                     ),
                     "overlap_by_clustering": {
                         k: c.get("pocket_interface_overlap")
                         for k, c in byd.items()
                     },
+                    # THE FLAG TRAVELS WITH THE LABEL. Both halves of the fix are
+                    # here: the excluded entries are named, and the flag is
+                    # carried onto the field a caller is told to quote.
+                    "numbering_agrees": (
+                        None if not byd else
+                        all(
+                            (c.get("numbering_check") or {}).get(
+                                "numbering_agrees") is not False
+                            for c in byd.values()
+                        )
+                    ),
+                    "numbering_offsets_applied": sorted({
+                        (c.get("numbering_offset_to_partner") or {}).get(
+                            "epitope_renumbered_by")
+                        for c in byd.values()
+                        if (c.get("numbering_offset_to_partner") or {}).get(
+                            "applied")
+                    }),
+                    "excluded_numbering_mismatch": sorted(skipped),
+                    "classifications_excluded_numbering_mismatch": skipped_labs,
+                    "_numbering_note": (
+                        None if not skipped else
+                        f"{len(skipped)} classification(s) here were computed "
+                        "against non-homologous residues — the two entries are "
+                        "not on a common numbering and no constant offset "
+                        "recovered it — and are EXCLUDED from `consensus` and "
+                        f"from `classifications_seen`: {skipped_labs}. The "
+                        "geometric fields (min_distance_to_interface_a, "
+                        "enclosure, subunit_enclosure_gain) are unaffected and "
+                        "are still in per_structure. Do not quote the excluded "
+                        "labels; on TL1A they were allosteric_candidate and "
+                        "mixed, both derived from residue-number collisions."
+                    ),
                 }
                 results[pid_]["pocket_vs_interface_consensus"] = (
                     per_structure_label[pid_]
                 )
             interface_out["per_structure_consensus"] = per_structure_label
             labels = sorted({
-                c.get("classification") for byd in per_struct.values()
-                for c in byd.values() if c.get("classification")
+                c.get("classification")
+                for byd in per_struct.values()
+                for c in _usable(byd)[0].values() if c.get("classification")
+            })
+            excluded_any = sorted({
+                pid_ for pid_, byd in per_struct.items() if _usable(byd)[1]
             })
             interface_out["classifications_seen"] = labels
+            interface_out["structures_excluded_numbering_mismatch"] = excluded_any
             interface_out["_aggregation_rule"] = (
                 "`classification` here is the CONSENSUS over every pocket "
                 "classified in this run, and it is 'mixed' whenever they "
@@ -4404,10 +5121,28 @@ def pocket_scan(
                 "at 0.36, both borderline against the 0.25 boundary. 'mixed' is "
                 "the honest answer there and must not be collapsed to one "
                 "label; report it as mixed and say the pocket sits on the "
-                "boundary."
+                "boundary. "
+                "NUMBERING IS PART OF THIS RULE NOW. A `match_by='seqid'` "
+                "comparison between two entries that do not number the protein "
+                "the same way matches non-homologous positions, so any "
+                "classification whose `numbering_check.numbering_agrees` is "
+                "false is EXCLUDED from the consensus here and from "
+                "classifications_seen, and is listed in "
+                "`excluded_numbering_mismatch` with the label it would have "
+                "contributed. Recoverable constant offsets (TL1A +67/+71, "
+                "IL-17A +23) are applied upstream before the match, so an entry "
+                "reaching this point still flagged is one no constant offset "
+                "fixes. A sixth consensus value exists for the case where "
+                "EVERY classification on a structure was excluded: "
+                "`numbering_mismatch_not_interpretable`. It is not "
+                "'no_pocket_to_classify' — pockets were found and classified, "
+                "and the classification is what could not be trusted."
             )
-            interface_out["classification"] = labels[0] if len(labels) == 1 else (
-                "mixed" if labels else "no_pocket_to_classify"
+            interface_out["classification"] = (
+                labels[0] if len(labels) == 1
+                else "mixed" if labels
+                else "numbering_mismatch_not_interpretable" if excluded_any
+                else "no_pocket_to_classify"
             )
             interface_out["_note"] = (
                 "destabiliser_candidate is tested FIRST and does not need the "

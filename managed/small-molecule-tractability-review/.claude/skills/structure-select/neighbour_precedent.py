@@ -285,8 +285,11 @@ def count_chains(structure_path: str | os.PathLike[str]) -> int:
     """
     from proto_tools.entities import Structure  # noqa: PLC0415
 
+    # ATOM only. HETATM chains are ligands and waters, and counting them would
+    # route a single-chain holo structure to the multimer search on the
+    # strength of its bound ligand sitting in its own chain id.
     text = Structure.from_file(str(structure_path)).structure_pdb
-    return len({ln[21] for ln in text.splitlines() if ln.startswith(("ATOM", "HETATM"))})
+    return len({ln[21] for ln in text.splitlines() if ln.startswith("ATOM")})
 
 
 def _foldseek(
@@ -608,6 +611,11 @@ def _druglike_from(
     the same as "not drug-like" and must never be counted as apo. A Paperclip
     timeout returning `unknown` for two components that classify fine is a
     measured failure, not a hypothetical one.
+
+    This is `ligand_filter.holo_call`'s contract implemented inline — `is_holo`
+    is `bool(druglike)`, `determined` is `not undetermined` — because this call
+    site also needs the per-ligand rejection reason, which `holo_call` returns
+    only inside `verdicts`. If the two ever disagree, `holo_call` is right.
     """
     dl, names, reasons, undet = [], [], [], []
     for c in comp_ids:
@@ -691,7 +699,18 @@ def _entry_facts(
     LEFT JOIN pdb_v.entries en ON en.entry_id = e.entry_id
     """
     rows = _run_sql(sql, env=env, paperclip=paperclip, timeout=300.0)
-    per_entry = {r["entry_id"]: _split(r.get("cands", "-")) for r in rows}
+
+    def _cands(cell: str) -> list[str]:
+        # LEFT(..., 400) is OUR truncation and it leaves no ellipsis, so a
+        # comp_id can be cut in half and become a plausible-looking fake id.
+        # 400 chars is ~66 comp_ids and no PDB entry comes close, but drop the
+        # last token when the cell is exactly at the limit rather than trust it.
+        ids = _split(cell)
+        if len(cell) >= 400 and ids:
+            ids = ids[:-1]
+        return ids
+
+    per_entry = {r["entry_id"]: _cands(r.get("cands", "-")) for r in rows}
     verdicts = _classify([c for ids in per_entry.values() for c in ids])
 
     out: dict[str, dict[str, Any]] = {}
@@ -758,15 +777,19 @@ def _druglike_comp_ids_for_accessions(
             ORDER BY 1 LIMIT {page} OFFSET {offset}
             """
             rows = None
-            for attempt in range(2):
+            # Short first, long second. A retry at the same generous timeout
+            # doubles the cost of a deterministically-slow accession for
+            # nothing: P67861 times out reproducibly, and at 2 x 300 s one bad
+            # accession would cost ten minutes of a run that has seven good
+            # ones left to do.
+            for budget in (90.0, 240.0):
                 try:
                     rows = _run_sql(
-                        sql, env=env, paperclip=paperclip, timeout=300.0
+                        sql, env=env, paperclip=paperclip, timeout=budget
                     )
                     break
                 except (RuntimeError, subprocess.TimeoutExpired):
-                    if attempt:  # both attempts spent
-                        rows = None
+                    rows = None
             if rows is None:
                 failed.append(acc)
                 break
@@ -850,31 +873,38 @@ def _accession_precedent(
         return summary, {}
 
     dl = f"l.comp_id IN ({_sql_list(druglike_ids)})"
-    base = f"""
-    WITH a AS (SELECT unnest(ARRAY[{_sql_list(accessions)}]) AS acc),
-    s AS (
-      SELECT DISTINCT a.acc, st.entry_id
-      FROM a JOIN pdb_v.structures_by_accession st ON st.accession = a.acc),
-    np AS (
-      SELECT pe.entry_id,
-             COUNT(DISTINCT pe.uniprot_accession) AS n_acc,
-             COUNT(*) FILTER (WHERE pe.polymer_type='polypeptide(L)') AS n_poly
-      FROM pdb_v.polymer_entities pe
-      WHERE pe.entry_id IN (SELECT entry_id FROM s)
-      GROUP BY 1),
-    lg AS (
-      SELECT s.acc, s.entry_id,
-             COALESCE(np.n_acc, 1) AS n_acc,
-             COALESCE(np.n_poly, 1) AS n_poly,
-             COUNT(l.comp_id) FILTER (WHERE {dl}) AS n_dl,
-             COALESCE(STRING_AGG(DISTINCT CASE WHEN {dl} THEN l.comp_id END, ','), '') AS dl
-      FROM s
-      LEFT JOIN pdb_v.entry_ligands l ON l.entry_id = s.entry_id
-      LEFT JOIN np ON np.entry_id = s.entry_id
-      GROUP BY 1, 2, 3, 4)
-    """
 
-    summary_sql = base + """
+    def _base(acc: str) -> str:
+        # ONE ACCESSION PER STATEMENT. Unioning the accessions into a single
+        # `unnest` array makes `lg` scan every entry of every accession at
+        # once, and that TIMES OUT on the server (measured: the 8-accession
+        # TNF-superfamily neighbourhood, even at a 300 s client budget). Per
+        # accession the same aggregation is bounded and the union is done here.
+        return f"""
+        WITH s AS (
+          SELECT DISTINCT {_sql_list([acc])} AS acc, st.entry_id
+          FROM pdb_v.structures_by_accession st
+          WHERE st.accession = {_sql_list([acc])}),
+        np AS (
+          SELECT pe.entry_id,
+                 COUNT(DISTINCT pe.uniprot_accession) AS n_acc,
+                 COUNT(*) FILTER (WHERE pe.polymer_type='polypeptide(L)') AS n_poly
+          FROM pdb_v.polymer_entities pe
+          WHERE pe.entry_id IN (SELECT entry_id FROM s)
+          GROUP BY 1),
+        lg AS (
+          SELECT s.acc, s.entry_id,
+                 COALESCE(np.n_acc, 1) AS n_acc,
+                 COALESCE(np.n_poly, 1) AS n_poly,
+                 COUNT(l.comp_id) FILTER (WHERE {dl}) AS n_dl,
+                 COALESCE(STRING_AGG(DISTINCT CASE WHEN {dl} THEN l.comp_id END, ','), '') AS dl
+          FROM s
+          LEFT JOIN pdb_v.entry_ligands l ON l.entry_id = s.entry_id
+          LEFT JOIN np ON np.entry_id = s.entry_id
+          GROUP BY 1, 2, 3, 4)
+        """
+
+    summary_tail = """
     SELECT acc,
            COUNT(*) AS n_struct,
            COUNT(*) FILTER (WHERE n_dl > 0) AS n_holo_entry,
@@ -883,10 +913,10 @@ def _accession_precedent(
                     FILTER (WHERE n_dl > 0 AND n_acc <= 1 AND n_poly <= 1), 110), '-') AS lig_single,
            COALESCE(LEFT(STRING_AGG(DISTINCT dl, ' ')
                     FILTER (WHERE n_dl > 0 AND (n_acc > 1 OR n_poly > 1)), 110), '-') AS lig_complex
-    FROM lg GROUP BY 1 ORDER BY 3 DESC
+    FROM lg GROUP BY 1
     """
 
-    titles_sql = base + """
+    titles_tail = """
     , ranked AS (
       SELECT lg.*, ROW_NUMBER() OVER (
         PARTITION BY acc ORDER BY (n_acc <= 1 AND n_poly <= 1) DESC, entry_id) AS rn
@@ -894,54 +924,59 @@ def _accession_precedent(
     SELECT r.acc, r.entry_id, r.n_acc, r.n_poly, LEFT(r.dl, 24) AS dl,
            COALESCE(LEFT(e.title, 66), '-') AS title
     FROM ranked r LEFT JOIN pdb_v.entries e ON e.entry_id = r.entry_id
-    WHERE r.rn <= 3 ORDER BY r.acc, r.rn
+    WHERE r.rn <= 3 ORDER BY r.rn
     """
 
-    # Both of these aggregate over every entry of every accession and are the
-    # slowest statements in the module; the titles one timed out at Paperclip's
-    # 120 s default on a 10-accession IL-17A neighbourhood. Give them room.
-    slow = 300.0
-    summary: dict[str, dict[str, Any]] = {}
-    for r in _run_sql(summary_sql, env=env, paperclip=paperclip, timeout=slow):
-        n_entry = int(r["n_holo_entry"] or 0)
-        n_single = int(r["n_holo_single"] or 0)
-        summary[r["acc"]] = _mark(
-            {
-                "n_structures": int(r["n_struct"] or 0),
-                "n_holo_entry_level": n_entry,
-                "n_holo_single_protein_entries": n_single,
-                "attribution_ambiguous_holo": n_entry - n_single,
-                "ligands_single_protein_entries": _split(r["lig_single"]),
-                "ligands_complex_entries_UNATTRIBUTED": _split(r["lig_complex"]),
-            },
-            r["acc"],
-        )
+    def _try(sql: str) -> list[dict[str, str]] | None:
+        """Short budget then long. None means the statement never returned."""
+        for budget in (90.0, 240.0):
+            try:
+                return _run_sql(sql, env=env, paperclip=paperclip, timeout=budget)
+            except (RuntimeError, subprocess.TimeoutExpired):
+                continue
+        return None
 
+    summary: dict[str, dict[str, Any]] = {}
     titles: dict[str, list[dict[str, Any]]] = {}
-    # `ranked` filters on n_dl > 0, which is unsatisfiable when nothing in the
-    # neighbourhood classified drug-like — the common case on a PPI target, and
-    # the answer on both calibration targets. Skip the query rather than pay
-    # 120+ s for a guaranteed-empty result.
-    rows_t = (
-        _run_sql(titles_sql, env=env, paperclip=paperclip, timeout=slow)
-        if druglike_ids
-        else []
-    )
-    for r in rows_t:
-        n_acc, n_poly = int(r["n_acc"] or 1), int(r["n_poly"] or 1)
-        titles.setdefault(r["acc"], []).append(
-            {
-                "pdb_id": r["entry_id"],
-                "ligands": _split(r["dl"]),
-                "n_protein_accessions": n_acc,
-                "n_polypeptide_entities": n_poly,
-                "attribution": (
-                    "unambiguous" if (n_acc <= 1 and n_poly <= 1)
-                    else "ambiguous_multiprotein"
-                ),
-                "title": r["title"],
-            }
-        )
+    for acc in accessions:
+        rows_s = _try(_base(acc) + summary_tail)
+        if rows_s is None:
+            failed_accs.append(acc)
+            summary[acc] = _mark({"n_structures": None}, acc)
+            continue
+        for r in rows_s:
+            n_entry = int(r["n_holo_entry"] or 0)
+            n_single = int(r["n_holo_single"] or 0)
+            summary[r["acc"]] = _mark(
+                {
+                    "n_structures": int(r["n_struct"] or 0),
+                    "n_holo_entry_level": n_entry,
+                    "n_holo_single_protein_entries": n_single,
+                    "attribution_ambiguous_holo": n_entry - n_single,
+                    "ligands_single_protein_entries": _split(r["lig_single"]),
+                    "ligands_complex_entries_UNATTRIBUTED": _split(r["lig_complex"]),
+                },
+                r["acc"],
+            )
+        # Titles only exist where something was found; skip the second, slower
+        # statement for the (common) accession with no drug-like holo at all.
+        if not summary.get(acc, {}).get("n_holo_entry_level"):
+            continue
+        for r in _try(_base(acc) + titles_tail) or []:
+            n_acc, n_poly = int(r["n_acc"] or 1), int(r["n_poly"] or 1)
+            titles.setdefault(r["acc"], []).append(
+                {
+                    "pdb_id": r["entry_id"],
+                    "ligands": _split(r["dl"]),
+                    "n_protein_accessions": n_acc,
+                    "n_polypeptide_entities": n_poly,
+                    "attribution": (
+                        "unambiguous" if (n_acc <= 1 and n_poly <= 1)
+                        else "ambiguous_multiprotein"
+                    ),
+                    "title": r["title"],
+                }
+            )
     return summary, titles
 
 
@@ -994,6 +1029,9 @@ def neighbour_precedent(
             failure the single-chain path runs as a fallback and both the
             attempt and the error are recorded — a degraded answer that says so
             beats no answer, but it must never be reported as a multimer one.
+            NOTE: `cache_path` applies to the SINGLE-CHAIN path only. A multimer
+            search is not cached here; re-parse its `result_url` archive
+            instead, which is a static download and costs no queue time.
 
     Returns a dict shaped for the dossier's `structural_neighbour_precedent`
     block, with two holo counts per neighbour accession (see
@@ -1123,9 +1161,15 @@ def neighbour_precedent(
         # block is evidence about an interface. Never omit it.
         "search_path": search_path,
         "n_query_chains_in_file": n_chains,
-        "n_query_chains_searched": (
-            len(meta.get("query_chains", [])) if search_path == "multimer" else 1
+        # NOT "how many chains were searched" — foldseek-search searches all of
+        # them and the wrapper drops the column that would prove it, so on the
+        # single-chain path this is genuinely unknowable and is reported as
+        # None rather than guessed at 1. On the multimer path it is counted
+        # from raw m8 column 1.
+        "n_query_chains_observed_in_result": (
+            len(meta.get("query_chains", [])) if search_path == "multimer" else None
         ),
+        "chains_assembled_into_complexes": search_path == "multimer",
         "query_structure": str(structure_path),
         "query_accession": accession,
         "foldseek": meta,
@@ -1256,10 +1300,17 @@ def neighbour_precedent(
         "holo_pdb_ids": [
             n["pdb_id"] for n in result["neighbours"] if n["has_druglike_holo"]
         ],
-        "n_matching_all_query_chains": sum(
-            1
-            for n in result["neighbours"]
-            if n["n_query_chains_matched"] >= max(1, len(meta.get("query_chains", [1])))
+        # Multimer only. On the single-chain path there are no complex
+        # assignments, so "matched every query chain" has no meaning and the
+        # honest value is None, not 25.
+        "n_matching_all_query_chains": (
+            sum(
+                1
+                for n in result["neighbours"]
+                if n["n_query_chains_matched"] >= len(meta.get("query_chains") or [])
+            )
+            if search_path == "multimer"
+            else None
         ),
         # A zero here is only a finding if n_undetermined is also zero.
         "n_undetermined": sum(

@@ -1389,5 +1389,179 @@ class TestVolumeIsPrimary(unittest.TestCase):
         self.assertIn("VOLUME_NOT_PRIMARY", rules(validate_dossier(d)))
 
 
+# ---------------------------------------------------------------------------
+# R6c — `mixed` is a legal interface classification and must stay resolvable
+#
+# EVERY TEST IN THIS CLASS FAILS AGAINST THE PRE-CHANGE VALIDATOR, in two
+# opposite directions. Before the change, `mixed` was not in the
+# `pocket_vs_interface.classification` enum at all, so `test_mixed_is_a_legal_
+# classification` failed with a WELL_FORMED violation — while `pocket-scan`'s
+# aggregation rule mandates exactly that value. And nothing checked what a
+# `mixed` had to carry, so the four `..._demands_...` tests below failed the
+# other way: an unresolvable `mixed` passed clean.
+#
+# The measured case is 8DYG, ligand U5Q: the two symmetry copies classified
+# `allosteric_candidate` at overlap 0.22 and `orthosteric_candidate` at 0.36,
+# both borderline against the 0.25 boundary. A caller taking the first copy is
+# tossing a coin between two different mechanistic claims.
+# ---------------------------------------------------------------------------
+
+
+def _mixed_interface(base: dict) -> dict:
+    """The 8DYG U5Q shape: a fully resolved `mixed`, which must pass."""
+    d = broken(base)
+    d["tractability"]["pocket_vs_interface"].update(
+        {
+            "classification": "mixed",
+            "classifications_seen": [
+                "allosteric_candidate",
+                "orthosteric_candidate",
+            ],
+            "pocket_interface_overlap": [0.22, 0.36],
+            "partner_pdb_id": "8DYG",
+            "interface_residues": ["A:57", "A:143"],
+            "matches_mechanism_hypothesis": None,
+        }
+    )
+    return d
+
+
+class TestMixedInterfaceClassification(unittest.TestCase):
+    def test_mixed_is_a_legal_classification(self):
+        """pocket-scan mandates it; the validator used to reject it outright."""
+        v = validate_dossier(_mixed_interface(JAK1))
+        self.assertNotIn("WELL_FORMED", rules(v), msg=str(v))
+        self.assertNotIn("INTERFACE_MIXED_UNRESOLVED", rules(v), msg=str(v))
+
+    def test_no_pocket_to_classify_is_legal_too(self):
+        """The tool's other abstention. It emits it; the enum must accept it."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_vs_interface"]["classification"] = (
+            "no_pocket_to_classify"
+        )
+        v = [x for x in validate_dossier(d) if x.rule == "WELL_FORMED"]
+        self.assertFalse(v, msg=str(v))
+
+    def test_mixed_demands_what_it_is_mixed_between(self):
+        """A bare `mixed` names no mechanism at all — it is not actionable."""
+        d = _mixed_interface(JAK1)
+        d["tractability"]["pocket_vs_interface"]["classifications_seen"] = []
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "INTERFACE_MIXED_UNRESOLVED"
+            and x.path.endswith("classifications_seen")
+        ]
+        self.assertTrue(v)
+        self.assertIn("mixed between what", v[0].message)
+
+    def test_mixed_demands_at_least_two_distinct_labels(self):
+        """One label repeated is not a disagreement; it is a consensus."""
+        d = _mixed_interface(JAK1)
+        d["tractability"]["pocket_vs_interface"]["classifications_seen"] = [
+            "allosteric_candidate",
+            "allosteric_candidate",
+        ]
+        self.assertIn(
+            "INTERFACE_MIXED_UNRESOLVED", rules(validate_dossier(d))
+        )
+
+    def test_mixed_demands_both_overlaps_not_one_scalar(self):
+        """0.22 and 0.36 straddle the 0.25 boundary. One number hides that."""
+        d = _mixed_interface(JAK1)
+        d["tractability"]["pocket_vs_interface"]["pocket_interface_overlap"] = 0.22
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "INTERFACE_MIXED_UNRESOLVED"
+            and x.path.endswith("pocket_interface_overlap")
+        ]
+        self.assertTrue(v)
+        self.assertIn("boundary", v[0].message)
+
+    def test_mixed_demands_a_partner_structure(self):
+        """A classification is measured against a complex, mixed or not."""
+        d = _mixed_interface(JAK1)
+        d["tractability"]["pocket_vs_interface"]["partner_pdb_id"] = None
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "INTERFACE_MIXED_UNRESOLVED"
+            and x.path.endswith("partner_pdb_id")
+        ]
+        self.assertTrue(v)
+
+    def test_mixed_may_not_confirm_a_mechanism_hypothesis(self):
+        """`do not pick the one that matches mechanism_hypothesis`, enforced.
+
+        A disagreement cannot confirm a hypothesis. This is the exact temptation
+        pocket-scan's aggregation rule names: the copy that agrees with the
+        caller's prior is the one that gets quoted.
+        """
+        d = _mixed_interface(JAK1)
+        d["tractability"]["pocket_vs_interface"][
+            "matches_mechanism_hypothesis"
+        ] = True
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "INTERFACE_MIXED_UNRESOLVED"
+            and x.path.endswith("matches_mechanism_hypothesis")
+        ]
+        self.assertTrue(v)
+        self.assertIn("cannot confirm", v[0].message)
+
+    def test_a_disagreement_collapsed_to_one_label_is_caught(self):
+        """The first-wins bug itself, which is what produced the coin flip.
+
+        `classifications_seen` says two labels were measured and
+        `classification` reports one of them. That is a caller reaching into
+        `per_structure` and taking whichever copy came first.
+        """
+        d = broken(JAK1)
+        d["tractability"]["pocket_vs_interface"].update(
+            {
+                "classification": "orthosteric_candidate",
+                "classifications_seen": [
+                    "allosteric_candidate",
+                    "orthosteric_candidate",
+                ],
+                "pocket_interface_overlap": 0.36,
+                "partner_pdb_id": "8DYG",
+            }
+        )
+        v = [
+            x
+            for x in validate_dossier(d)
+            if x.rule == "INTERFACE_MIXED_UNRESOLVED"
+            and x.path.endswith("classification")
+        ]
+        self.assertTrue(v)
+        self.assertIn("collapsed", v[0].message)
+
+    def test_a_single_label_seen_is_not_mixed(self):
+        """One classification measured, one reported. Nothing to object to."""
+        d = broken(JAK1)
+        d["tractability"]["pocket_vs_interface"].update(
+            {
+                "classification": "allosteric_candidate",
+                "classifications_seen": ["allosteric_candidate"],
+                "pocket_interface_overlap": 0.22,
+                "partner_pdb_id": "8DYG",
+            }
+        )
+        self.assertNotIn(
+            "INTERFACE_MIXED_UNRESOLVED", rules(validate_dossier(d))
+        )
+
+    def test_the_worked_examples_are_untouched(self):
+        """Both report `no_partner_structure` and carry no seen-list at all."""
+        for name, d in (("JAK1", JAK1), ("TNF", TNF)):
+            with self.subTest(dossier=name):
+                self.assertNotIn(
+                    "INTERFACE_MIXED_UNRESOLVED", rules(validate_dossier(d))
+                )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
