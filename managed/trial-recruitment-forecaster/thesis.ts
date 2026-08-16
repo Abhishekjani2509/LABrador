@@ -16,10 +16,10 @@ import { z } from "zod";
 
 /**
  * §6 item 4 — DECLARED BOUNDARY, not alignment: the economics node
- * (managed/therapeutic-program-economics) prices only SMALL_MOLECULE |
- * PEPTIDE today. Theses with any other modality flow through the pipeline
- * but cannot be priced by that node until its owner extends his enum (his
- * §4 item in COORDINATION.md). This vocabulary stays wide on purpose —
+ * (managed/therapeutic-program-economics) prices SMALL_MOLECULE, PEPTIDE
+ * and (since 2026-08-15 late) ANTIBODY. Theses with other modalities flow
+ * through the pipeline but cannot be priced by that node until its enum
+ * grows again. This vocabulary stays wide on purpose —
  * upstream nodes must not be forced to misdescribe an antibody as a
  * small molecule to get a valuation.
  */

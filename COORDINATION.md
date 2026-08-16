@@ -37,7 +37,7 @@ adapter B is built (§5), adapter A still has no owner.
 | Abhishek | `abhishek-jani` | `trial-recruitment-forecaster` | ✅ |
 | Rafal | `rafwiewiora/druggability-dossier` | `small-molecule-tractability-review` | ✅ (incl. `f84bfff`: 651x figure withdrawn, cryptic/disorder/interface modules added) |
 | Soliman | `msoliman6/literature-graph-mcp` | `research-evidence-mapper` | ✅ |
-| Moamen | `moamen` | `sandbox-capability-probe` | ✅ |
+| Moamen | `moamen` | ~~`sandbox-capability-probe`~~ — **deleted from repo** ("delete useless spike", 2026-08-15 late): throwaway that served its purpose; findings preserved in research-evidence-mapper's CONTRACT.md | ✅ (then removed) |
 | Vince | `vaalessi/program-strategy-valuation` | `therapeutic-program-economics` | ✅ |
 | Vince | `vaalessi/hypothesis-highlander` | `hypothesis-highlander` (meta-search ABOVE the pipeline) | ✅ |
 | Abraham (+ Sean, Weichi) | `AbrehamT/Hypothesis_Generator` | hypothesis node — **no code pushed yet**; note Vince's highlander now covers hypothesis *enumeration* — coordinate to avoid building the same thing twice | (nothing to merge) |
@@ -77,7 +77,7 @@ are dead — do not create files under them.
   shared-runtime MCP fail-fast watchdog (surfaces never-reached-tools in
   minutes instead of after the timeout budget).
 
-**Moamen — sandbox-capability-probe** *(done — throwaway, served its purpose)*
+**Moamen — sandbox-capability-probe** *(done; node since deleted from the repo — findings live on in Soliman's CONTRACT.md)*
 - The only deployed Managed Agent. Proved: bundled scripts execute in the
   sandbox, python 3.11 + uv present, memory mounts writable, sqlite3 absent,
   egress open to the 3 tested hosts. Results recorded in Soliman's CONTRACT.md.
@@ -89,6 +89,10 @@ are dead — do not create files under them.
 - v0.2.0 hardening drop (2026-08-15 late): evaluation module with reality
   anchors, run replay, red-team hardening + interpretability-contract docs,
   five new test suites — 87/87 tests pass on merged main.
+- PoA + antibody hardening (2026-08-15 late): Modality enum extended with
+  ANTIBODY (his §4 item — antibody programs like dupilumab are now
+  priceable, so the forecaster fixture set composes with economics), and
+  the demo fixture's PoA inconsistency fixed (gate ERROR gone).
 - **NEW node: `hypothesis-highlander`** (2026-08-15 late) — quality-diversity
   meta-search that sits ABOVE the four nodes: fixes one indication (RA
   example), enumerates biomarkers × hypotheses, runs each through the
@@ -143,13 +147,9 @@ are dead — do not create files under them.
       sandbox egress is known before anyone's Managed-Agent wrap assumes it.
 
 **Vince**
-- [ ] `fixtures/demo_program.json` trips the engine's own consistency gate on
-      every run (PoA 0.073 vs stage product ≈0.1066 →
-      INCONSISTENT_PROGRAM_APPROVAL_PROBABILITY ERROR). Fix or document as an
-      intentional warning-path demo.
-- [ ] Modality enum accepts only SMALL_MOLECULE | PEPTIDE — an antibody
-      program (e.g. dupilumab, the forecaster's whole fixture set) is
-      unrepresentable. Decide: extend, or state the boundary.
+- [x] demo fixture PoA inconsistency fixed (2026-08-15 late) — gate ERROR gone.
+- [x] Modality enum extended with ANTIBODY (2026-08-15 late) — dupilumab-class
+      programs now representable; thesis.ts boundary comment updated to match.
 - [ ] Component README says "no license selected"; root repo says MIT — align.
 
 **Abraham / Sean / Weichi**
@@ -212,7 +212,7 @@ Sign-off checklist (a "yes" or a concrete objection each; silence ≠ consent):
 - [ ] **Rafal** — items 1–2: enum values + accession placement under `target`.
 - [ ] **Soliman** — item 3: `no_effect` as a third `direction` value; and
       item 6: the `how` enum in SCHEMA.md.
-- [ ] **Vince** — item 4: boundary declared vs extend his modality enum;
+- [ ] **Vince** — item 4: RESOLVED BY ACTION (he extended his enum with ANTIBODY) — formal yes still welcome;
       plus the Adapter B `launch_year` application convention (§5).
 - [ ] **Abraham / Sean / Weichi** — as emitters: can the hypothesis node
       populate the required fields (all new fields are optional)?
