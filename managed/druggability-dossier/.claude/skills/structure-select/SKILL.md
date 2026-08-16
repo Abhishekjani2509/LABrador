@@ -562,48 +562,74 @@ decision — both thresholds, both counts, the query span — in
 `filter.auto_relaxed`. **Never report a relaxed run without that block**, and
 pass `--min-alignment-length` explicitly if you want the behaviour pinned.
 
-### A multi-chain input is NOT searched as a multimer by `foldseek-search`
+### CORRECTED: `foldseek-search` DOES search every chain — it just never assembles them
 
-`foldseek-search` takes the file, but only one chain reaches the query.
-Measured: `8DYG` assembly 1 was handed in as two chains, 188 residues, 1,532
-ATOM records. Across all 283 hits the maximum `query_end` is **95** — one
-protomer. The self-hit comes back as `8DYG_A` only; chain B never appears.
+**The earlier version of this section was wrong about the mechanism and it is
+worth knowing why, because the wrong evidence was very convincing.**
 
-This matters exactly where it hurts most. IL-17A's site is a groove at the
-**homodimer interface** and TNF-alpha's is a cavity on the **trimer 3-fold
-axis**; neither is a property of one chain. A single-chain fold search cannot
-be evidence about an oligomeric site.
+The claim was: "`foldseek-search` takes the file, but only one chain reaches the
+query", on the evidence that `8DYG` assembly 1 went in as two chains and 188
+residues, and no `query_end` across all 283 hits exceeded **95** — one protomer.
 
-**`foldseek-multimer-search` fixes it, has now been run, and the module routes
-to it automatically when the file has more than one chain.** Same input, 8DYG
-assembly 1:
+That inference does not hold. The raw m8 has a query-chain column the wrapper
+discards, and it shows **both chains present**: `job_A` 144 rows, `job_B` 139.
+Query residues are simply numbered **per protomer** in both searches, so 95 is
+what a fully-searched dimer looks like too — the multimer search on the same
+file also maxes out at 95.
+
+What is true, and what the original observation actually caught, is the
+**target** side: the self-hit comes back as `8dyg_A` from both query chains and
+`8dyg_B` never appears. `foldseek-search` aligns each chain independently
+against each target chain independently and concatenates; it never pairs them.
+There is no complex assignment and no complex TM-score, so nothing in the result
+asserts that a target's chains form the same assembly as the query's.
+
+**So the practical conclusion survives intact and the reasoning changes.** A
+single-chain search on an oligomer yields a *union of per-protomer
+neighbourhoods*. IL-17A's site is a groove at the **homodimer interface** and
+TNF-alpha's is a cavity on the **trimer 3-fold axis**; a union of protomer
+neighbourhoods is not evidence about either.
+
+`foldseek-multimer-search` supplies the missing part, has now been run on both,
+and the module routes to it automatically when the file has more than one chain.
+Same input, 8DYG assembly 1:
 
 | | `foldseek-search` | `foldseek-multimer-search` |
 | --- | --- | --- |
 | wire mode | `3diaa` | `complex-3diaa` |
+| m8 columns | 21 | **26** |
 | rows returned | 283 | **863** |
-| query chains reaching the search | `job_A` only | **`job_A` 433 + `job_B` 430** |
+| query chains present | `job_A` 144 + `job_B` 139 | `job_A` 433 + `job_B` 430 |
+| target chains of the self-hit | `8dyg_A` only | `8dyg_A` **and** `8dyg_B` |
+| complex assignment | **none** | 570 groups, 293 of size 2 |
+| complex TM-score | **none** | column 21 |
 | max `query_end` | 95 | **95 — identical, see below** |
-| entries after the relaxed filter | 81 hits | 137 entries |
+| distinct entries | 125 | 174 |
+| entries after the relaxed filter | 81 | 137 |
 | entries matching BOTH query chains | n/a | **135 of 137** |
-| TM-score | second `mode='tmalign'` search | complex TM, already in the result |
+| TM-score route | second `mode='tmalign'` search | already in the result |
 | wall clock | 2.6 s – 323 s | **405 s** |
 
-### The measurement that exposed the single-chain limit does NOT detect it
+On TNF-alpha (3 chains) the difference is starker still: 1,010 rows against
+**6,891**, and **1,206 complex assignments of size 3** — trimer-to-trimer
+matches, which is exactly the object TNF-alpha's site belongs to.
 
-`query_end` in a multimer result is numbered **within a protomer**, not across
-the assembly. IL-17A's max `query_end` is **95 on both paths**. So the exact
-diagnostic that found this bug — "188 residues went in, nothing above 95 came
-back" — reads identically on a search that did use both chains.
+### `query_end` is NOT a test of which search ran
 
-Test `meta['query_chains']` (raw m8 column 1: `job_A`, `job_B`, …) instead.
-That is the only field that distinguishes the two searches, and the shared
-parser throws it away — see the next failure mode.
+`query_end` is numbered **within a protomer** on both paths. IL-17A maxes out at
+95 either way; TNF-alpha at 152 either way. The diagnostic that found the
+original bug reads identically on a search that used every chain, which is how
+the wrong mechanism above survived.
+
+Test `meta['query_chains']` (raw m8 column 1: `job_A`, `job_B`, …) instead — the
+distinct query chains, and for the multimer path `n_complex_assignments`. The
+shared parser throws column 1 away, so this needs the raw m8; see the next
+failure mode.
 
 The upside is that the auto-relaxed length floor is unaffected: `query_span`
-stays ~95, so the relaxed floor comes out at the same `max(60, 0.7*95) = 67` on
-both paths, and the multimer query does *not* inflate it into a starved result.
-That was the worry; it is measured and it does not happen.
+stays ~95, so the relaxed floor comes out the same on both paths, and a multimer
+query does *not* inflate it into a starved result. That was the worry; it is
+measured and it does not happen.
 
 ### `foldseek-multimer-search` returns 26 columns and the wrapper parses 12
 
@@ -823,11 +849,17 @@ drug-like, total and holo counts, and the ensemble actually used. Fill
 `structural_neighbour_precedent` from step 5. Record the as-of cutoff if one was
 applied and how many entries it removed.
 
-For `structural_neighbour_precedent` specifically, carry through: the TM-score
-(never the raw `evalue`/`bit_score`), **both** holo counts per neighbour with
-the entry-level one named as an upper bound, the ligand *names* not just
-comp_ids, and `filter.auto_relaxed` whenever it fired. If the query was an
-oligomer, state that only one chain was searched.
+For `structural_neighbour_precedent` specifically, carry through: **the
+`search_path`** (`multimer` or `single_chain`) and the chain counts, the
+TM-score with its `tm_score_kind` (a complex TM-score and a chain TM-score are
+not the same number — never the raw `evalue`/`bit_score`), **both** holo counts
+per neighbour with the entry-level one named as an upper bound, the ligand
+*names* and `rejected_ligands` not just comp_ids, `n_undetermined` alongside any
+zero holo count, and `filter.auto_relaxed` whenever it fired.
+
+If the query was an oligomer and `search_path` is `single_chain`, say so: the
+neighbourhood is then a union of per-protomer matches with no complex
+assignment, and it is not evidence about an interface site.
 
 A neighbourhood with no small-molecule precedent is a real and reportable
 finding — it was the answer on both calibration targets — not a retrieval
