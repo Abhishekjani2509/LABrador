@@ -11,6 +11,7 @@ corrupts every score in the graph.
 """
 
 import json
+import math
 import os
 import re
 import unicodedata
@@ -335,20 +336,61 @@ def explain_disagreement(yes_f, no_f):
 # gaps
 # --------------------------------------------------------------------------
 
-def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None, round_n=None):
+def _basis_weight(basis):
+    """How much a supporting link's evidence type is worth to a gap.
+
+    A gap implied by two papers' own results is a real hole in the literature.
+    One implied by two background citations is an artifact of how introductions
+    are written, and should not outrank it.
+    """
+    return {
+        "primary": 1.0,
+        "mixed": 0.85,
+        "hedged_only": 0.6,
+        "background_only": 0.35,
+    }.get(basis, 0.6)
+
+
+def _link_papers(link, findings_by_id):
+    """Papers behind a link, for the independence check."""
+    out = set()
+    for key in ("yes", "no", "no_effect"):
+        for fid in link.get(key) or []:
+            f = findings_by_id.get(fid)
+            if f and f.get("paper"):
+                out.add(f["paper"])
+    return out
+
+
+def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None,
+              round_n=None, findings=None):
     """Open triangles: A-B and B-C exist, A-C does not.
 
-    Ranked by the weaker of the two supporting links -- a gap between two shaky
-    links is not interesting. Degree-capped to keep this near-linear; growth is
-    quadratic otherwise.
+    Ranking is the whole problem here. Scoring a gap by the weaker supporting
+    link alone produces mass ties -- every single_source link scores agreement
+    0.5, so min() of two of them lands on the same handful of values, and a
+    22-link graph yielded 38 gaps sharing 6 distinct scores. Ties make
+    best-first expansion arbitrary, so the score has to carry signal that link
+    confidence does not:
+
+      base   weakest supporting link, as before
+      qual   basis of BOTH links -- two background citations are not a hole
+      indep  do the two links rest on different papers, or is this one paper's
+             own framing showing up twice
+      hub    a node of degree d spawns C(d,2) candidate gaps, all structurally
+             alike; without a penalty one hub floods the ranking
+      routes the same missing pair implied through several different
+             intermediates is stronger evidence the edge should exist
     """
+    findings_by_id = {f.get("id"): f for f in (findings or [])}
+    by_id = {l.get("id"): l for l in links}
+
     present = set()
     for l in links:
         present.add((l.get("from"), l.get("to")))
         present.add((l.get("to"), l.get("from")))
-    neighbours = {}
-    conf = {}
-    via_link = {}
+
+    neighbours, conf, via_link = {}, {}, {}
     for l in links:
         a, b = l.get("from"), l.get("to")
         c = (l.get("confidence") or {}).get("overall", 0.0)
@@ -359,41 +401,56 @@ def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None, round_
             via_link[(b, a)] = l.get("id")
         conf[(a, b)] = max(conf.get((a, b), 0.0), c)
         conf[(b, a)] = conf[(a, b)]
-    out = []
+
+    # Enumerate routes first so the hub penalty can see how many each hub spawns.
+    routes = []
     for b in sorted(neighbours):
         nbrs = sorted(neighbours[b])
-        if len(nbrs) > 24:          # degree cap
+        if len(nbrs) > 24:                       # degree cap keeps this near-linear
             nbrs = nbrs[:24]
+        spawned = []
         for i in range(len(nbrs)):
             for j in range(i + 1, len(nbrs)):
                 a, c = nbrs[i], nbrs[j]
                 if (a, c) in present:
                     continue
-                pair = tuple(sorted((a, c)))
-                strength = min(conf.get((a, b), 0.0), conf.get((b, c), 0.0))
-                out.append({
-                    "pair": pair,
-                    "via": b,
-                    "implied_by": sorted({via_link.get((a, b)), via_link.get((b, c))} - {None}),
-                    "strength": round(strength, 4),
-                })
-    best = {}
-    for g in out:
-        k = g["pair"]
-        if k not in best or g["strength"] > best[k]["strength"]:
-            best[k] = g
-    ranked = sorted(best.values(), key=lambda g: (-g["strength"], g["pair"][0], g["pair"][1]))
-    ranked = ranked[:cap]
+                spawned.append((a, c))
+        penalty = 1.0 / math.sqrt(len(spawned)) if spawned else 1.0
+        for a, c in spawned:
+            ab, bc = via_link.get((a, b)), via_link.get((b, c))
+            base = min(conf.get((a, b), 0.0), conf.get((b, c), 0.0))
+            qual = _basis_weight((by_id.get(ab) or {}).get("basis")) * _basis_weight(
+                (by_id.get(bc) or {}).get("basis")
+            )
+            pa = _link_papers(by_id.get(ab) or {}, findings_by_id)
+            pc = _link_papers(by_id.get(bc) or {}, findings_by_id)
+            indep = 1.0 if (pa and pc and not (pa & pc)) else 0.65
+            routes.append({
+                "pair": tuple(sorted((a, c))),
+                "via": b,
+                "implied_by": sorted({ab, bc} - {None}),
+                "score": base * qual * indep * penalty,
+            })
+
+    best, route_count = {}, {}
+    for r in routes:
+        k = r["pair"]
+        route_count[k] = route_count.get(k, 0) + 1
+        if k not in best or r["score"] > best[k]["score"]:
+            best[k] = r
+    for k, r in best.items():
+        # Several independent intermediates implying the same missing edge is a
+        # stronger signal than one; log-scaled so it nudges rather than dominates.
+        r["score"] *= 1.0 + 0.12 * math.log2(route_count[k])
+        r["routes"] = route_count[k]
+
+    ranked = sorted(best.values(),
+                    key=lambda g: (-g["score"], g["pair"][0], g["pair"][1]))[:cap]
 
     # Gap ids must be stable across rounds, because test_gap targets one BY ID.
-    # Regenerating them positionally would silently retarget g3 at a different
-    # pair the moment ranking shifts. Key on the missing pair instead, carry the
-    # prior id forward, and carry searched_in_round with it -- "we looked and
-    # found nothing" is the whole value of the ask and must not be lost.
     prior_by_pair, used = {}, set()
     for g in (prior_gaps or []):
-        pair = tuple(sorted(g.get("missing") or []))
-        prior_by_pair[pair] = g
+        prior_by_pair[tuple(sorted(g.get("missing") or []))] = g
         used.add(g.get("id"))
 
     gaps, counter = [], 0
@@ -401,8 +458,7 @@ def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None, round_
         pair = tuple(sorted(g["pair"]))
         old = prior_by_pair.get(pair)
         if old is not None:
-            gid = old.get("id")
-            searched = old.get("searched_in_round")
+            gid, searched = old.get("id"), old.get("searched_in_round")
         else:
             counter += 1
             gid = "g%d" % counter
@@ -413,12 +469,15 @@ def find_gaps(links, things, cap=50, prior_gaps=None, searched_pair=None, round_
         used.add(gid)
         if searched_pair and pair == tuple(sorted(searched_pair)):
             searched = round_n
+        note = "both connect to %s; no direct link reported" % g["via"]
+        if g["routes"] > 1:
+            note += " (implied via %d intermediates)" % g["routes"]
         gaps.append({
             "id": gid,
             "missing": [pair[0], pair[1]],
             "implied_by": g["implied_by"],
-            "note": "both connect to %s; no direct link reported" % g["via"],
-            "confidence": round(min(g["strength"], 0.6), 4),   # a gap is a proposal
+            "note": note,
+            "confidence": round(min(g["score"], 0.6), 4),   # a gap is a proposal
             "searched_in_round": searched,
         })
     gaps.sort(key=lambda x: (int(x["id"][1:]) if x["id"][1:].isdigit() else 0, x["id"]))
@@ -602,7 +661,8 @@ def main(prior_dir, new_findings, new_papers, round_n, ask, question=None,
                 searched_pair = tuple(sorted(g.get("missing") or []))
                 break
     gaps = find_gaps(links, things, prior_gaps=prior.get("gaps") or [],
-                     searched_pair=searched_pair, round_n=round_n)
+                     searched_pair=searched_pair, round_n=round_n,
+                     findings=kept)
     outcome = round_outcome(prior.get("links") or [], links)
 
     cov = dict(coverage or {})

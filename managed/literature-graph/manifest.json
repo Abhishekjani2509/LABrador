@@ -8,6 +8,30 @@
     "managed/literature-graph/.claude/skills/graph-assembly/assemble.py": "fbb84176ddc8bfc565c3dcfe16279639d30c512491c745233ab39146ed8d57b2",
     "agent/tools/literature-graph.ts": "7014cecb96f1b09d37b4585950d897ddfb1991f6459e04ddad74163f67ebd83e"
   },
+  "deployment": {
+    "agent_id": "agent_015feTqKz3Bmtec2RaWaE2sW",
+    "agent_version": 2,
+    "memory_store_id": "memstore_018xqMb7h2CYpj6nWcS2oCvC",
+    "skills": {
+      "graph-assembly": {
+        "hash": "065bd9a0462683137d2becf46de8223a514af2462d860110dbcf1f02bfe7bd58",
+        "skill_id": "skill_01BnhBZtKmt8G1Wj7f5ZFGaW",
+        "version": "1786838400565091"
+      },
+      "literature-search": {
+        "hash": "ef7187e6e2af34b77bee905b01c806032c1a11bd51ece6dbc9b60cad8eba3cb4",
+        "skill_id": "skill_01Uc6pZcHXXpp3p8iFZ3krCH",
+        "version": "1786838400565238"
+      },
+      "claim-extraction": {
+        "hash": "b8f8e024729647f2c7ae6af8fb05301389cb24e9ddf68b9d1dd507a9f7812f7d",
+        "skill_id": "skill_01CNo7tvxKqrnT2wCFWWvSSF",
+        "version": "1786838400580744"
+      }
+    },
+    "system_hash": "6381fede0993a650dd5013156799d8045536b423488c1694051a0fb2b8f231aa",
+    "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d"
+  },
   "description": "Turns one question about the scientific literature into a machine-readable knowledge graph of things, quoted findings, scored links and gaps, and grows it across rounds.",
   "invocation": "message",
   "mcp_servers": [
@@ -34,29 +58,5 @@
   "session_policy": "fresh",
   "vault_ids": [
     "vlt_011Ce5SbT8uAxY9LgM3eTZpS"
-  ],
-  "deployment": {
-    "agent_id": "agent_015feTqKz3Bmtec2RaWaE2sW",
-    "agent_version": 1,
-    "skills": {
-      "graph-assembly": {
-        "hash": "065bd9a0462683137d2becf46de8223a514af2462d860110dbcf1f02bfe7bd58",
-        "skill_id": "skill_01BnhBZtKmt8G1Wj7f5ZFGaW",
-        "version": "1786838400565091"
-      },
-      "literature-search": {
-        "hash": "ef7187e6e2af34b77bee905b01c806032c1a11bd51ece6dbc9b60cad8eba3cb4",
-        "skill_id": "skill_01Uc6pZcHXXpp3p8iFZ3krCH",
-        "version": "1786838400565238"
-      },
-      "claim-extraction": {
-        "hash": "b8f8e024729647f2c7ae6af8fb05301389cb24e9ddf68b9d1dd507a9f7812f7d",
-        "skill_id": "skill_01CNo7tvxKqrnT2wCFWWvSSF",
-        "version": "1786838400580744"
-      }
-    },
-    "system_hash": "73dab9a3dd2c53df2cb0a6f33bdb95bc294d3e21bfcd2fe071b96ec22b10c94f",
-    "tools_hash": "a0782acfe51b4e519e3410ac98f68d64f539be614718c84d89b5b6a814fc848d",
-    "memory_store_id": "memstore_018xqMb7h2CYpj6nWcS2oCvC"
-  }
+  ]
 }

@@ -426,3 +426,50 @@ Field vocabularies, exact spellings, no substitutes:
 
 Id prefixes: `t` things, `p` papers, `f` findings, `L` links, `g` gaps,
 `g_` + 4 hex for `graph_id`.
+
+---
+
+## The last rule, because it is the one most often broken
+
+Your reply is parsed by a machine, not read by a person. Another agent in this
+pipeline calls `JSON.parse` on it directly. A preamble or a code fence does not
+make the output friendlier — it makes it **unparseable**, and every downstream
+consumer fails on every run.
+
+**The first character of your reply must be `{`. The last must be `}`.**
+Nothing before. Nothing after.
+
+Wrong — all three of these break the pipeline:
+
+```
+This is the complete graph. Returning it as the final reply.
+{...}
+```
+````
+```json
+{...}
+```
+````
+```
+Here is the graph:
+
+{...}
+
+Let me know if you'd like me to expand any node.
+```
+
+Right — this, and only this:
+
+```
+{"schema_version":"1.1","graph_id":"g_7f2a", ... }
+```
+
+Do not announce what you are about to return. Do not describe what you
+returned. Do not offer a next step. Do not wrap it in a fence, tagged or
+untagged. If you want to say something about the run, put it in the graph:
+that is what `coverage`, `rounds[].outcome` and `error` are for.
+
+This is checked mechanically on every run — the first non-whitespace character
+of your reply is asserted to be `{`. Prose there fails the check no matter how
+correct the graph inside it is.
+
